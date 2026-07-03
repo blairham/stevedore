@@ -1,0 +1,116 @@
+name: "Stevedore"
+description: "Build, scan, sign, and release Docker/OCI images with stevedore — installs every tool it needs."
+author: "blairham"
+branding:
+  icon: "anchor"
+  color: "blue"
+
+inputs:
+  command:
+    description: "stevedore subcommand to run (release, build, check, verify, doctor)."
+    required: false
+    default: "release"
+  args:
+    description: "Additional arguments appended to the command, e.g. '--snapshot --only-changed'."
+    required: false
+    default: ""
+  config:
+    description: "Path to the stevedore config file (passed as -f). Autodiscovered when empty."
+    required: false
+    default: ""
+  version:
+    description: "stevedore version to install (a release tag like v1.2.3, or 'latest')."
+    required: false
+    default: "latest"
+  install-stevedore:
+    description: "Install stevedore via 'go install'. Set false if it's already on PATH."
+    required: false
+    default: "true"
+  working-directory:
+    description: "Directory to run stevedore in."
+    required: false
+    default: "."
+  setup-buildx:
+    description: "Set up docker buildx. Disable if a previous step already did."
+    required: false
+    default: "true"
+  install-cosign:
+    description: "Install cosign (needed when sign.cosign.enabled)."
+    required: false
+    default: "true"
+  install-syft:
+    description: "Install syft (needed when sbom.enabled)."
+    required: false
+    default: "true"
+  install-grype:
+    description: "Install grype (needed when scan.enabled with scanner: grype)."
+    required: false
+    default: "true"
+  install-crane:
+    description: "Install crane (needed when versioning.strategy: registry)."
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "stable"
+
+    - name: Add GOPATH bin to PATH
+      shell: bash
+      run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+    - name: Install stevedore
+      if: ${{ inputs.install-stevedore == 'true' }}
+      shell: bash
+      env:
+        SD_VERSION: ${{ inputs.version }}
+      run: go install "github.com/blairham/stevedore@${SD_VERSION}"
+
+    - name: Set up buildx
+      if: ${{ inputs.setup-buildx == 'true' }}
+      uses: docker/setup-buildx-action@v3
+
+    - name: Install cosign
+      if: ${{ inputs.install-cosign == 'true' }}
+      uses: sigstore/cosign-installer@v3
+
+    - name: Install syft
+      if: ${{ inputs.install-syft == 'true' }}
+      uses: anchore/sbom-action/download-syft@v0
+
+    - name: Install grype
+      if: ${{ inputs.install-grype == 'true' }}
+      shell: bash
+      run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+    - name: Install crane
+      if: ${{ inputs.install-crane == 'true' }}
+      shell: bash
+      run: go install github.com/google/go-containerregistry/cmd/crane@latest
+
+    - name: Preflight
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      continue-on-error: true
+      run: stevedore doctor || true
+
+    - name: Run stevedore
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SD_COMMAND: ${{ inputs.command }}
+        SD_ARGS: ${{ inputs.args }}
+        SD_CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        cmd=(stevedore "$SD_COMMAND")
+        if [ -n "$SD_CONFIG" ]; then cmd+=(-f "$SD_CONFIG"); fi
+        # Word-split SD_ARGS intentionally so callers can pass multiple flags.
+        # shellcheck disable=SC2206
+        if [ -n "$SD_ARGS" ]; then cmd+=($SD_ARGS); fi
+        echo "+ ${cmd[*]}"
+        "${cmd[@]}"

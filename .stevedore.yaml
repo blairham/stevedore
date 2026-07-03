@@ -1,0 +1,61 @@
+# stevedore releasing itself — the canonical dogfood config.
+version: 1
+
+project_name: stevedore
+
+default_branch: main
+
+images:
+  - id: stevedore
+    dockerfile: Dockerfile
+    context: .
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    repositories:
+      - ghcr.io/blairham/stevedore
+    tags:
+      - "{{ .Version }}"
+      - "{{ .ShortCommit }}"
+      - "latest"
+    build_args:
+      - "VERSION={{ .Version }}"
+    labels:
+      org.opencontainers.image.source: "https://github.com/blairham/stevedore"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .Commit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+
+sign:
+  cosign:
+    enabled: true
+
+sbom:
+  enabled: true
+  generator: syft
+  format: spdx-json
+  attest: true
+
+scan:
+  enabled: true
+  scanner: grype
+  fail_on: high      # block the release on High or Critical findings
+
+provenance:
+  enabled: true
+  mode: max          # full SLSA build provenance attestation
+
+changelog:
+  enabled: true
+  sort: asc
+  dependency_diff: true
+  exclude:
+    - "^chore:"
+    - "^docs:"
+    - "^test:"
+
+# The GitHub release (binaries, checksums, Homebrew cask) is owned by GoReleaser
+# — see .goreleaser.yaml — so stevedore only builds and publishes the image here.
+release:
+  github:
+    enabled: false

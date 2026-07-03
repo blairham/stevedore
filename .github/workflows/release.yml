@@ -1,0 +1,64 @@
+name: release
+
+# On a version tag: stevedore releases its own multi-arch image (signed + SBOM +
+# provenance) by dogfooding itself, while GoReleaser publishes the CLI binary,
+# the GitHub release, and the Homebrew cask. Two tools, two artifact kinds.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub release / upload assets
+  packages: write # push to ghcr.io
+  id-token: write # keyless cosign signing via OIDC
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags + history for versioning and changelog
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - uses: docker/setup-buildx-action@v3
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
+      - name: Install grype
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build stevedore
+        run: go build -o /usr/local/bin/stevedore .
+
+      - name: Release image (dogfood)
+        run: stevedore release
+
+  # GoReleaser publishes the CLI binary, checksums, the GitHub release, and the
+  # Homebrew cask (to blairham/homebrew-tap).
+  binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A PAT with contents:write on blairham/homebrew-tap, so the cask can
+          # be committed to that separate repo.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

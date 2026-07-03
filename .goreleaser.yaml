@@ -1,0 +1,65 @@
+# GoReleaser builds and publishes the stevedore CLI binary and its Homebrew
+# cask. (stevedore itself releases the container image — see .stevedore.yaml.)
+version: 2
+
+project_name: stevedore
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: stevedore
+    main: .
+    binary: stevedore
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: stevedore
+    # uname-style naming (Darwin_x86_64, Linux_arm64) to match the other tools
+    # already in the tap.
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: "checksums.txt"
+
+homebrew_casks:
+  - repository:
+      owner: blairham
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/blairham/stevedore"
+    description: "Release Docker/OCI images the way goreleaser releases binaries"
+    license: "MIT"
+
+release:
+  github:
+    owner: blairham
+    name: stevedore
+  # GoReleaser owns the GitHub release (binaries, checksums, notes). stevedore's
+  # own release.github is disabled so the two don't collide.
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^docs:"
+      - "^test:"

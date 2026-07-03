@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: Format check
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Build
+        run: go build ./...
+
+  action-smoke:
+    # Exercises the composite action end to end against the CURRENT checkout:
+    # build stevedore, put it on PATH, then let the action install the tooling
+    # and run `check` (install-stevedore: false so it uses our fresh binary).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: Build stevedore from checkout
+        run: |
+          go build -o /usr/local/bin/stevedore .
+      - name: Run stevedore via the action
+        uses: ./
+        with:
+          install-stevedore: "false"
+          command: check
+          install-crane: "false"
