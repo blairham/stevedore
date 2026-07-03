@@ -19,11 +19,11 @@ inputs:
     required: false
     default: ""
   version:
-    description: "stevedore version to install (a release tag like v1.2.3, or 'latest')."
+    description: "stevedore release to download (a tag like v0.0.0, or 'latest')."
     required: false
     default: "latest"
   install-stevedore:
-    description: "Install stevedore via 'go install'. Set false if it's already on PATH."
+    description: "Download the stevedore release binary. Set false if it's already on PATH."
     required: false
     default: "true"
   working-directory:
@@ -54,21 +54,28 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: "stable"
-
-    - name: Add GOPATH bin to PATH
-      shell: bash
-      run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
     - name: Install stevedore
       if: ${{ inputs.install-stevedore == 'true' }}
       shell: bash
       env:
+        GH_TOKEN: ${{ github.token }}
         SD_VERSION: ${{ inputs.version }}
-      run: go install "github.com/blairham/stevedore@${SD_VERSION}"
+      run: |
+        set -euo pipefail
+        os=$(uname -s)          # Linux | Darwin (matches the release asset naming)
+        arch=$(uname -m)        # x86_64 | aarch64 | arm64
+        case "$arch" in aarch64) arch=arm64 ;; esac
+        tag=""
+        [ "$SD_VERSION" != "latest" ] && tag="$SD_VERSION"
+        dest="${RUNNER_TEMP:-/tmp}/stevedore-bin"
+        mkdir -p "$dest"
+        gh release download $tag --repo blairham/stevedore \
+          --pattern "stevedore_*_${os}_${arch}.tar.gz" \
+          --output "$dest/stevedore.tar.gz" --clobber
+        tar -xzf "$dest/stevedore.tar.gz" -C "$dest" stevedore
+        chmod +x "$dest/stevedore"
+        echo "$dest" >> "$GITHUB_PATH"
+        "$dest/stevedore" --version
 
     - name: Set up buildx
       if: ${{ inputs.setup-buildx == 'true' }}
@@ -87,10 +94,18 @@ runs:
       shell: bash
       run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
 
+    - name: Set up Go (for crane)
+      if: ${{ inputs.install-crane == 'true' }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: "stable"
+
     - name: Install crane
       if: ${{ inputs.install-crane == 'true' }}
       shell: bash
-      run: go install github.com/google/go-containerregistry/cmd/crane@latest
+      run: |
+        go install github.com/google/go-containerregistry/cmd/crane@latest
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
     - name: Preflight
       shell: bash
