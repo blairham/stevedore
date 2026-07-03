@@ -1,0 +1,5 @@
+/dist/
+/stevedore
+*.out
+cosign.key
+cosign.pub
