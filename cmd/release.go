@@ -13,6 +13,7 @@ func newReleaseCmd() *cobra.Command {
 		skipScan      bool
 		skipTest      bool
 		noPush        bool
+		parallel      int
 		skipChangelog bool
 		skipPublish   bool
 		onlyChanged   bool
@@ -36,6 +37,7 @@ func newReleaseCmd() *cobra.Command {
 			o.SkipScan = skipScan
 			o.SkipTest = skipTest
 			o.NoPush = noPush
+			o.Parallel = parallel
 			o.SkipChangelog = skipChangelog
 			o.SkipPublish = skipPublish
 			o.OnlyChanged = onlyChanged
@@ -50,6 +52,7 @@ func newReleaseCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipScan, "skip-scan", false, "skip vulnerability scanning")
 	cmd.Flags().BoolVar(&skipTest, "skip-test", false, "skip the post-build smoke test")
 	cmd.Flags().BoolVar(&noPush, "no-push", false, "build (and change-detect) without pushing; skips sign/sbom/scan/publish")
+	cmd.Flags().IntVar(&parallel, "parallel", 1, "build up to N images concurrently")
 	cmd.Flags().BoolVar(&skipChangelog, "skip-changelog", false, "skip changelog generation")
 	cmd.Flags().BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
 	cmd.Flags().StringVar(&changedSince, "changed-since", "", "git ref: only build images whose paths changed since this ref (stateless, CI-native)")

@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blairham/stevedore/internal/builder"
@@ -46,6 +48,7 @@ type Options struct {
 	SkipScan      bool
 	SkipTest      bool
 	NoPush        bool // build (and change-detect) but don't push; skips push-dependent stages
+	Parallel      int  // build up to N images concurrently (default 1)
 	SkipChangelog bool
 	SkipPublish   bool   // skip GitHub release + announce
 	OnlyChanged   bool   // skip images whose build inputs are unchanged (fingerprint state)
@@ -351,8 +354,14 @@ func Release(o Options) error {
 		}
 	}
 
+	// Pre-pass (sequential): apply change detection and collect the images that
+	// actually need building, with each one's fingerprint.
+	type buildItem struct {
+		plan ImagePlan
+		fp   string
+	}
+	var toBuild []buildItem
 	for _, plan := range p.Plans {
-		// --changed-since: skip images the diff doesn't touch.
 		if o.ChangedSince != "" {
 			if d := changed.Evaluate(plan.Paths, shared, changedFiles); !d.Changed {
 				fmt.Fprintf(progress, "==> skipping %s (%s since %s)\n", plan.Image.ID, d.Reason, o.ChangedSince)
@@ -360,8 +369,6 @@ func Release(o Options) error {
 				continue
 			}
 		}
-
-		// --only-changed: skip images whose fingerprint matches the last release.
 		fpScoped := scopedFingerprintPaths(plan.Paths, shared)
 		fp, err := fingerprint.Compute(o.Dir, plan.Image, p.Config.Dist, fpScoped)
 		if err != nil {
@@ -372,94 +379,56 @@ func Release(o Options) error {
 			result.Images = append(result.Images, summary.Image{ID: plan.Image.ID, Skipped: true})
 			continue
 		}
-
-		ir := summary.Image{
-			ID:         plan.Image.ID,
-			Version:    plan.Version,
-			Refs:       plan.Refs,
-			Signed:     !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
-			SBOM:       !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
-			Provenance: !o.NoPush && p.Config.Provenance.Enabled,
-			Tested:     !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
-		}
-
-		fmt.Fprintf(progress, "==> building %s\n", plan.Image.ID)
-		for _, ref := range plan.Refs {
-			fmt.Fprintf(progress, "    - %s\n", ref)
-		}
-		digest, err := builder.Build(r, toSpec(plan, o.Dir, !o.NoPush, false, p.Config.Provenance))
-		if err != nil {
-			return err
-		}
-		if digest == "" && o.DryRun {
-			digest = "sha256:<digest-resolved-at-build-time>"
-		}
-		ir.Digest = digest
-
-		// With --no-push there is no published artifact, so every stage that
-		// operates on the pushed digest is skipped.
-		if o.NoPush {
-			result.Images = append(result.Images, ir)
-			continue
-		}
-
-		// Scan before signing: never sign or ship an image that fails the gate.
-		if !o.SkipScan && p.Config.Scan.Enabled {
-			scanRef := digestRef(plan.Repos[0], digest)
-			rep, err := scanner.Scan(r, p.Config.Scan, filepath.Join(o.Dir, p.Config.Dist), plan.Image.ID, scanRef)
-			if err != nil {
-				return err
-			}
-			if rep != nil && !o.DryRun {
-				ir.Vulns = rep.Counts
-				fmt.Fprintf(progress, "    scan (%s): %s\n", rep.Scanner, rep.Summary())
-				if err := rep.GateError(p.Config.Scan.FailOn); err != nil {
-					return fmt.Errorf("vulnerability gate failed: %w", err)
-				}
-			}
-		}
-
-		// Smoke test the image before signing: don't sign or ship one that
-		// doesn't even start.
-		if !o.SkipTest && p.Config.Test.Enabled {
-			testRef := digestRef(plan.Repos[0], digest)
-			fmt.Fprintf(progress, "    smoke test: docker run %s %s\n", testRef, strings.Join(p.Config.Test.Cmd, " "))
-			if err := tester.Run(r, p.Config.Test, testRef); err != nil {
-				return fmt.Errorf("smoke test gate failed: %w", err)
-			}
-		}
-
-		if !o.SkipSign {
-			if err := signer.Sign(r, p.Config.Sign.Cosign, plan.Repos, digest); err != nil {
-				return err
-			}
-		}
-
-		if !o.SkipSBOM && p.Config.SBOM.Enabled {
-			ref := digestRef(plan.Repos[0], digest)
-			sbomPath, err := sbom.Generate(r, p.Config.SBOM, filepath.Join(o.Dir, p.Config.Dist), plan.Image.ID, ref)
-			if err != nil {
-				return err
-			}
-			if p.Config.SBOM.Attest && !o.SkipSign && p.Config.Sign.Cosign.Enabled && sbomPath != "" {
-				pt := sbom.PredicateType(p.Config.SBOM.Format)
-				if err := signer.Attest(r, p.Config.Sign.Cosign, plan.Repos, digest, sbomPath, pt); err != nil {
-					return err
-				}
-			}
-
-			// Diff this SBOM against the previous release's to surface
-			// dependency changes in the changelog.
-			if p.Config.Changelog.DependencyDiff && !o.DryRun && sbomPath != "" && p.Git.PreviousTag != "" {
-				if section := dependencyDiff(r, p, plan, sbomPath); section != "" {
-					depDiffSections = append(depDiffSections, section)
-				}
-			}
-		}
-
-		state[plan.Image.ID] = fp
-		result.Images = append(result.Images, ir)
+		toBuild = append(toBuild, buildItem{plan: plan, fp: fp})
 	}
+
+	// Build the selected images, up to o.Parallel at a time.
+	workers := max(o.Parallel, 1)
+	if len(toBuild) > 0 {
+		workers = min(workers, len(toBuild))
+	}
+	if workers > 1 {
+		fmt.Fprintf(progress, "==> building %d image(s), up to %d in parallel\n", len(toBuild), workers)
+	}
+	var (
+		mu       sync.Mutex
+		firstErr error
+		wg       sync.WaitGroup
+		sem      = make(chan struct{}, workers)
+	)
+	for _, item := range toBuild {
+		mu.Lock()
+		stop := firstErr != nil
+		mu.Unlock()
+		if stop {
+			break // an image already failed; stop dispatching more
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(item buildItem) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ir, dep, err := buildImage(o, p, r, item.plan)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("%s: %w", item.plan.Image.ID, err)
+				}
+				return
+			}
+			result.Images = append(result.Images, ir)
+			state[item.plan.Image.ID] = item.fp
+			if dep != "" {
+				depDiffSections = append(depDiffSections, dep)
+			}
+		}(item)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	sort.Slice(result.Images, func(i, j int) bool { return result.Images[i].ID < result.Images[j].ID })
 
 	if !o.DryRun {
 		if err := state.Save(fpPath); err != nil {
@@ -612,6 +581,91 @@ func announceBody(p *Prepared) (string, error) {
 		tpl = t
 	}
 	return tmpl.Render(tpl, p.Ctx)
+}
+
+// buildImage builds one image and runs its post-build stages (scan gate, smoke
+// test, sign, SBOM + attest, dependency diff). It returns the image's summary
+// entry and any changelog dependency-diff section. Safe to call concurrently:
+// each image writes distinct dist/ files and its own temp build metadata.
+func buildImage(o Options, p *Prepared, r *run.Runner, plan ImagePlan) (summary.Image, string, error) {
+	ir := summary.Image{
+		ID:         plan.Image.ID,
+		Version:    plan.Version,
+		Refs:       plan.Refs,
+		Signed:     !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
+		SBOM:       !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
+		Provenance: !o.NoPush && p.Config.Provenance.Enabled,
+		Tested:     !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
+	}
+	fmt.Fprintf(progress, "==> building %s\n", plan.Image.ID)
+	for _, ref := range plan.Refs {
+		fmt.Fprintf(progress, "    - %s\n", ref)
+	}
+	digest, err := builder.Build(r, toSpec(plan, o.Dir, !o.NoPush, false, p.Config.Provenance))
+	if err != nil {
+		return ir, "", err
+	}
+	if digest == "" && o.DryRun {
+		digest = "sha256:<digest-resolved-at-build-time>"
+	}
+	ir.Digest = digest
+
+	// With --no-push there is no published artifact, so every stage that
+	// operates on the pushed digest is skipped.
+	if o.NoPush {
+		return ir, "", nil
+	}
+
+	// Scan before signing: never sign or ship an image that fails the gate.
+	if !o.SkipScan && p.Config.Scan.Enabled {
+		scanRef := digestRef(plan.Repos[0], digest)
+		rep, err := scanner.Scan(r, p.Config.Scan, filepath.Join(o.Dir, p.Config.Dist), plan.Image.ID, scanRef)
+		if err != nil {
+			return ir, "", err
+		}
+		if rep != nil && !o.DryRun {
+			ir.Vulns = rep.Counts
+			fmt.Fprintf(progress, "    scan %s (%s): %s\n", plan.Image.ID, rep.Scanner, rep.Summary())
+			if err := rep.GateError(p.Config.Scan.FailOn); err != nil {
+				return ir, "", fmt.Errorf("vulnerability gate failed: %w", err)
+			}
+		}
+	}
+
+	// Smoke test the image before signing: don't sign or ship one that doesn't
+	// even start.
+	if !o.SkipTest && p.Config.Test.Enabled {
+		testRef := digestRef(plan.Repos[0], digest)
+		fmt.Fprintf(progress, "    smoke test %s: docker run %s\n", plan.Image.ID, strings.Join(p.Config.Test.Cmd, " "))
+		if err := tester.Run(r, p.Config.Test, testRef); err != nil {
+			return ir, "", fmt.Errorf("smoke test gate failed: %w", err)
+		}
+	}
+
+	if !o.SkipSign {
+		if err := signer.Sign(r, p.Config.Sign.Cosign, plan.Repos, digest); err != nil {
+			return ir, "", err
+		}
+	}
+
+	depSection := ""
+	if !o.SkipSBOM && p.Config.SBOM.Enabled {
+		ref := digestRef(plan.Repos[0], digest)
+		sbomPath, err := sbom.Generate(r, p.Config.SBOM, filepath.Join(o.Dir, p.Config.Dist), plan.Image.ID, ref)
+		if err != nil {
+			return ir, "", err
+		}
+		if p.Config.SBOM.Attest && !o.SkipSign && p.Config.Sign.Cosign.Enabled && sbomPath != "" {
+			pt := sbom.PredicateType(p.Config.SBOM.Format)
+			if err := signer.Attest(r, p.Config.Sign.Cosign, plan.Repos, digest, sbomPath, pt); err != nil {
+				return ir, "", err
+			}
+		}
+		if p.Config.Changelog.DependencyDiff && !o.DryRun && sbomPath != "" && p.Git.PreviousTag != "" {
+			depSection = dependencyDiff(r, p, plan, sbomPath)
+		}
+	}
+	return ir, depSection, nil
 }
 
 // allRefs flattens the published references across all image plans.
