@@ -297,6 +297,11 @@ func isFloating(tag string) bool {
 // GitHub release, announce).
 func Release(o Options) error {
 	o.Push = !o.NoPush
+	if o.NoPush {
+		// A validate-only build discards the tag, so a version that can't be
+		// resolved (e.g. registry/ECR unreachable in CI) shouldn't fail the run.
+		o.SoftVersion = true
+	}
 	if o.OutputJSON {
 		// Keep stdout clean for the JSON document.
 		progress = os.Stderr
