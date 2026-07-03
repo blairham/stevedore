@@ -45,6 +45,7 @@ type Options struct {
 	SkipSBOM      bool
 	SkipScan      bool
 	SkipTest      bool
+	NoPush        bool // build (and change-detect) but don't push; skips push-dependent stages
 	SkipChangelog bool
 	SkipPublish   bool   // skip GitHub release + announce
 	OnlyChanged   bool   // skip images whose build inputs are unchanged (fingerprint state)
@@ -290,9 +291,12 @@ func isFloating(tag string) bool {
 	return t == "latest" || strings.HasSuffix(t, "-latest")
 }
 
-// Release runs the full pipeline: build+push, sign, SBOM, changelog.
+// Release runs the full pipeline: build+push, sign, SBOM, changelog. With
+// NoPush it builds (honoring change detection) but publishes nothing and skips
+// every stage that needs a pushed artifact (sign, SBOM, scan, provenance,
+// GitHub release, announce).
 func Release(o Options) error {
-	o.Push = true
+	o.Push = !o.NoPush
 	if o.OutputJSON {
 		// Keep stdout clean for the JSON document.
 		progress = os.Stderr
@@ -309,8 +313,10 @@ func Release(o Options) error {
 		}
 	}
 	if !o.DryRun {
-		ghRelease := !o.Snapshot && !o.SkipPublish && p.Config.Release.GitHub.Enabled
-		if err := checkTools(p.Config, preflight.Opts{Sign: !o.SkipSign, SBOM: !o.SkipSBOM, Scan: !o.SkipScan, GitHubRelease: ghRelease}); err != nil {
+		ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && p.Config.Release.GitHub.Enabled
+		// --no-push builds only; none of the push-dependent tools are required.
+		opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease}
+		if err := checkTools(p.Config, opts); err != nil {
 			return err
 		}
 	}
@@ -366,17 +372,17 @@ func Release(o Options) error {
 			ID:         plan.Image.ID,
 			Version:    plan.Version,
 			Refs:       plan.Refs,
-			Signed:     !o.SkipSign && p.Config.Sign.Cosign.Enabled,
-			SBOM:       !o.SkipSBOM && p.Config.SBOM.Enabled,
-			Provenance: p.Config.Provenance.Enabled,
-			Tested:     !o.SkipTest && p.Config.Test.Enabled,
+			Signed:     !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
+			SBOM:       !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
+			Provenance: !o.NoPush && p.Config.Provenance.Enabled,
+			Tested:     !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
 		}
 
 		fmt.Fprintf(progress, "==> building %s\n", plan.Image.ID)
 		for _, ref := range plan.Refs {
 			fmt.Fprintf(progress, "    - %s\n", ref)
 		}
-		digest, err := builder.Build(r, toSpec(plan, o.Dir, true, p.Config.Provenance))
+		digest, err := builder.Build(r, toSpec(plan, o.Dir, !o.NoPush, false, p.Config.Provenance))
 		if err != nil {
 			return err
 		}
@@ -384,6 +390,13 @@ func Release(o Options) error {
 			digest = "sha256:<digest-resolved-at-build-time>"
 		}
 		ir.Digest = digest
+
+		// With --no-push there is no published artifact, so every stage that
+		// operates on the pushed digest is skipped.
+		if o.NoPush {
+			result.Images = append(result.Images, ir)
+			continue
+		}
 
 		// Scan before signing: never sign or ship an image that fails the gate.
 		if !o.SkipScan && p.Config.Scan.Enabled {
@@ -466,7 +479,7 @@ func Release(o Options) error {
 	}
 
 	// Publishing (GitHub release + announce) runs only for real releases.
-	if !o.Snapshot && !o.SkipPublish {
+	if !o.NoPush && !o.Snapshot && !o.SkipPublish {
 		if err := publishRelease(r, p, changelogPath); err != nil {
 			return err
 		}
@@ -620,7 +633,7 @@ func Build(o Options) error {
 	r := run.New(o.DryRun, o.Verbose)
 	for _, plan := range p.Plans {
 		// A local --load build cannot handle a manifest list, so pick one platform.
-		spec := toSpec(plan, o.Dir, false, config.Provenance{})
+		spec := toSpec(plan, o.Dir, false, true, config.Provenance{})
 		if len(spec.Platforms) > 1 {
 			spec.Platforms = spec.Platforms[:1]
 		}
@@ -635,7 +648,7 @@ func Build(o Options) error {
 	return nil
 }
 
-func toSpec(plan ImagePlan, dir string, push bool, prov config.Provenance) builder.Spec {
+func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance) builder.Spec {
 	return builder.Spec{
 		ID:             plan.Image.ID,
 		Dockerfile:     abs(dir, plan.Image.Dockerfile),
@@ -647,6 +660,7 @@ func toSpec(plan ImagePlan, dir string, push bool, prov config.Provenance) build
 		Secrets:        plan.Image.Secrets,
 		Refs:           plan.Refs,
 		Push:           push,
+		Load:           load,
 		Provenance:     prov.Enabled,
 		ProvenanceMode: prov.Mode,
 		CacheFrom:      plan.CacheFrom,

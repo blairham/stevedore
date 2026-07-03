@@ -24,9 +24,13 @@ type Spec struct {
 	Secrets    []config.Secret
 	// Refs are the full repo:tag references to tag the build with.
 	Refs []string
-	// Push publishes to the registries; when false the build is loaded locally
-	// (single platform only).
+	// Push publishes to the registries.
 	Push bool
+	// Load loads the built image into the local docker daemon (single platform
+	// only). Used for local builds; ignored when Push is set. When neither Push
+	// nor Load is set, the build runs to validate only (no output) — the
+	// --no-push case.
+	Load bool
 	// Provenance requests a SLSA provenance attestation (push only).
 	Provenance bool
 	// ProvenanceMode is "min" or "max" when Provenance is set.
@@ -73,13 +77,14 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	for _, c := range s.CacheTo {
 		args = append(args, "--cache-to", c)
 	}
-	if s.Push {
+	switch {
+	case s.Push:
 		args = append(args, "--push")
 		if metaFile != "" {
 			args = append(args, "--metadata-file", metaFile)
 		}
 		// Attestations are only carried by the registry (OCI) exporter, so they
-		// apply to pushes, not local --load builds.
+		// apply to pushes, not local --load or validate-only builds.
 		if s.Provenance {
 			mode := s.ProvenanceMode
 			if mode == "" {
@@ -87,8 +92,11 @@ func Build(r *run.Runner, s Spec) (string, error) {
 			}
 			args = append(args, "--provenance=mode="+mode)
 		}
-	} else {
+	case s.Load:
 		args = append(args, "--load")
+	default:
+		// Neither push nor load: build to validate only (no output). This is the
+		// --no-push case — it proves every platform builds without publishing.
 	}
 	args = append(args, s.ExtraFlags...)
 	args = append(args, s.Context)
