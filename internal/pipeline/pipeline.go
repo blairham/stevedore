@@ -2,6 +2,8 @@
 package pipeline
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -363,20 +365,19 @@ func Release(o Options) error {
 		changed.FetchMarkers(o.Dir, cd.MarkerPrefix)
 	}
 
-	// Pre-pass (sequential): apply change detection and collect the images that
-	// actually need building, with each one's fingerprint.
-	type buildItem struct {
-		plan ImagePlan
-		fp   string
+	// Pre-pass (sequential): evaluate change detection and fingerprint per image.
+	type member struct {
+		plan    ImagePlan
+		fp      string
+		changed bool
+		reason  string
 	}
-	var toBuild []buildItem
+	var evals []member
 	for _, plan := range p.Plans {
+		ch, reason := true, ""
 		if o.ChangedSince != "" {
-			if d := changed.Evaluate(plan.Paths, shared, changedFiles); !d.Changed {
-				fmt.Fprintf(progress, "==> skipping %s (%s since %s)\n", plan.Image.ID, d.Reason, o.ChangedSince)
-				result.Images = append(result.Images, summary.Image{ID: plan.Image.ID, Skipped: true})
-				continue
-			}
+			d := changed.Evaluate(plan.Paths, shared, changedFiles)
+			ch, reason = d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince)
 		} else if markerMode {
 			ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
 			if changed.RefExists(o.Dir, ref) {
@@ -384,34 +385,64 @@ func Release(o Options) error {
 				if err != nil {
 					return err
 				}
-				if d := changed.Evaluate(plan.Paths, shared, files); !d.Changed {
-					fmt.Fprintf(progress, "==> skipping %s (%s since its release marker)\n", plan.Image.ID, d.Reason)
-					result.Images = append(result.Images, summary.Image{ID: plan.Image.ID, Skipped: true})
-					continue
-				}
-			}
-			// No marker yet → never released → build it.
+				d := changed.Evaluate(plan.Paths, shared, files)
+				ch, reason = d.Changed, fmt.Sprintf("%s since its release marker", d.Reason)
+			} // no marker yet → never released → build it
 		}
 		fpScoped := scopedFingerprintPaths(plan.Paths, shared)
 		fp, err := fingerprint.Compute(o.Dir, plan.Image, p.Config.Dist, fpScoped)
 		if err != nil {
 			return fmt.Errorf("fingerprint %s: %w", plan.Image.ID, err)
 		}
-		if o.OnlyChanged && state[plan.Image.ID] == fp {
-			fmt.Fprintf(progress, "==> skipping %s (inputs unchanged)\n", plan.Image.ID)
-			result.Images = append(result.Images, summary.Image{ID: plan.Image.ID, Skipped: true})
-			continue
+		if ch && o.OnlyChanged && state[plan.Image.ID] == fp {
+			ch, reason = false, "inputs unchanged"
 		}
-		toBuild = append(toBuild, buildItem{plan: plan, fp: fp})
+		evals = append(evals, member{plan: plan, fp: fp, changed: ch, reason: reason})
 	}
 
-	// Build the selected images, up to o.Parallel at a time.
+	// Group images with an identical build spec — they build once and push to
+	// every group member's repositories/tags. A group builds if ANY member
+	// changed (they share one artifact).
+	var order []string
+	groups := map[string][]member{}
+	for _, e := range evals {
+		k := buildKey(o.Dir, e.plan)
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], e)
+	}
+	var toBuild [][]member
+	for _, k := range order {
+		members := groups[k]
+		anyChanged := false
+		for _, m := range members {
+			anyChanged = anyChanged || m.changed
+		}
+		if !anyChanged {
+			for _, m := range members {
+				fmt.Fprintf(progress, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
+				result.Images = append(result.Images, summary.Image{ID: m.plan.Image.ID, Skipped: true})
+			}
+			continue
+		}
+		if len(members) > 1 {
+			var ids []string
+			for _, m := range members {
+				ids = append(ids, m.plan.Image.ID)
+			}
+			fmt.Fprintf(progress, "==> %d images share one build: %s\n", len(members), strings.Join(ids, ", "))
+		}
+		toBuild = append(toBuild, members)
+	}
+
+	// Build each group, up to o.Parallel groups at a time.
 	workers := max(o.Parallel, 1)
 	if len(toBuild) > 0 {
 		workers = min(workers, len(toBuild))
 	}
 	if workers > 1 {
-		fmt.Fprintf(progress, "==> building %d image(s), up to %d in parallel\n", len(toBuild), workers)
+		fmt.Fprintf(progress, "==> building %d group(s), up to %d in parallel\n", len(toBuild), workers)
 	}
 	var (
 		mu       sync.Mutex
@@ -419,33 +450,39 @@ func Release(o Options) error {
 		wg       sync.WaitGroup
 		sem      = make(chan struct{}, workers)
 	)
-	for _, item := range toBuild {
+	for _, grp := range toBuild {
 		mu.Lock()
 		stop := firstErr != nil
 		mu.Unlock()
 		if stop {
-			break // an image already failed; stop dispatching more
+			break // a build already failed; stop dispatching more
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(item buildItem) {
+		go func(grp []member) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			ir, dep, err := buildImage(o, p, r, item.plan)
+			plans := make([]ImagePlan, len(grp))
+			for i, m := range grp {
+				plans[i] = m.plan
+			}
+			irs, dep, err := buildGroup(o, p, r, plans)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				if firstErr == nil {
-					firstErr = fmt.Errorf("%s: %w", item.plan.Image.ID, err)
+					firstErr = fmt.Errorf("%s: %w", grp[0].plan.Image.ID, err)
 				}
 				return
 			}
-			result.Images = append(result.Images, ir)
-			state[item.plan.Image.ID] = item.fp
+			result.Images = append(result.Images, irs...)
+			for _, m := range grp {
+				state[m.plan.Image.ID] = m.fp
+			}
 			if dep != "" {
 				depDiffSections = append(depDiffSections, dep)
 			}
-		}(item)
+		}(grp)
 	}
 	wg.Wait()
 	if firstErr != nil {
@@ -623,89 +660,159 @@ func announceBody(p *Prepared) (string, error) {
 	return tmpl.Render(tpl, p.Ctx)
 }
 
-// buildImage builds one image and runs its post-build stages (scan gate, smoke
-// test, sign, SBOM + attest, dependency diff). It returns the image's summary
-// entry and any changelog dependency-diff section. Safe to call concurrently:
-// each image writes distinct dist/ files and its own temp build metadata.
-func buildImage(o Options, p *Prepared, r *run.Runner, plan ImagePlan) (summary.Image, string, error) {
-	ir := summary.Image{
-		ID:         plan.Image.ID,
-		Version:    plan.Version,
-		Refs:       plan.Refs,
-		Signed:     !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
-		SBOM:       !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
-		Provenance: !o.NoPush && p.Config.Provenance.Enabled,
-		Tested:     !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
-	}
-	fmt.Fprintf(progress, "==> building %s\n", plan.Image.ID)
-	for _, ref := range plan.Refs {
-		fmt.Fprintf(progress, "    - %s\n", ref)
-	}
-	digest, err := builder.Build(r, toSpec(plan, o.Dir, !o.NoPush, false, p.Config.Provenance))
-	if err != nil {
-		return ir, "", err
-	}
-	if digest == "" && o.DryRun {
-		digest = "sha256:<digest-resolved-at-build-time>"
-	}
-	ir.Digest = digest
+// buildGroup builds one artifact for a group of images that share an identical
+// build spec, pushing it to every member's repositories/tags in a single buildx
+// invocation, then runs the post-build stages once (the artifact is shared) and
+// signs every member repository by digest. It returns one summary entry per
+// member. Safe to call concurrently.
+func buildGroup(o Options, p *Prepared, r *run.Runner, plans []ImagePlan) ([]summary.Image, string, error) {
+	rep := plans[0]
 
-	// With --no-push there is no published artifact, so every stage that
-	// operates on the pushed digest is skipped.
-	if o.NoPush {
-		return ir, "", nil
-	}
-
-	// Scan before signing: never sign or ship an image that fails the gate.
-	if !o.SkipScan && p.Config.Scan.Enabled {
-		scanRef := digestRef(plan.Repos[0], digest)
-		rep, err := scanner.Scan(r, p.Config.Scan, filepath.Join(o.Dir, p.Config.Dist), plan.Image.ID, scanRef)
-		if err != nil {
-			return ir, "", err
+	// Union of every member's refs and repos (deduped, order-stable).
+	var refs, repos []string
+	seenRef, seenRepo := map[string]bool{}, map[string]bool{}
+	for _, plan := range plans {
+		for _, ref := range plan.Refs {
+			if !seenRef[ref] {
+				seenRef[ref] = true
+				refs = append(refs, ref)
+			}
 		}
-		if rep != nil && !o.DryRun {
-			ir.Vulns = rep.Counts
-			fmt.Fprintf(progress, "    scan %s (%s): %s\n", plan.Image.ID, rep.Scanner, rep.Summary())
-			if err := rep.GateError(p.Config.Scan.FailOn); err != nil {
-				return ir, "", fmt.Errorf("vulnerability gate failed: %w", err)
+		for _, repo := range plan.Repos {
+			if !seenRepo[repo] {
+				seenRepo[repo] = true
+				repos = append(repos, repo)
 			}
 		}
 	}
 
-	// Smoke test the image before signing: don't sign or ship one that doesn't
-	// even start.
-	if !o.SkipTest && p.Config.Test.Enabled {
-		testRef := digestRef(plan.Repos[0], digest)
-		fmt.Fprintf(progress, "    smoke test %s: docker run %s\n", plan.Image.ID, strings.Join(p.Config.Test.Cmd, " "))
-		if err := tester.Run(r, p.Config.Test, testRef); err != nil {
-			return ir, "", fmt.Errorf("smoke test gate failed: %w", err)
+	irs := make([]summary.Image, len(plans))
+	for i, plan := range plans {
+		irs[i] = summary.Image{
+			ID:         plan.Image.ID,
+			Version:    plan.Version,
+			Refs:       plan.Refs,
+			Signed:     !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
+			SBOM:       !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
+			Provenance: !o.NoPush && p.Config.Provenance.Enabled,
+			Tested:     !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
 		}
 	}
 
+	label := rep.Image.ID
+	if len(plans) > 1 {
+		label = fmt.Sprintf("%s (+%d)", rep.Image.ID, len(plans)-1)
+	}
+	fmt.Fprintf(progress, "==> building %s\n", label)
+	for _, ref := range refs {
+		fmt.Fprintf(progress, "    - %s\n", ref)
+	}
+	spec := toSpec(rep, o.Dir, !o.NoPush, false, p.Config.Provenance)
+	spec.Refs = refs // push the one build to every member's tags
+	digest, err := builder.Build(r, spec)
+	if err != nil {
+		return irs, "", err
+	}
+	if digest == "" && o.DryRun {
+		digest = "sha256:<digest-resolved-at-build-time>"
+	}
+	for i := range irs {
+		irs[i].Digest = digest
+	}
+
+	// With --no-push there is no published artifact, so every stage that
+	// operates on the pushed digest is skipped.
+	if o.NoPush {
+		return irs, "", nil
+	}
+
+	// Scan before signing: never sign or ship an image that fails the gate. One
+	// artifact → scan once.
+	if !o.SkipScan && p.Config.Scan.Enabled {
+		scanRef := digestRef(repos[0], digest)
+		res, err := scanner.Scan(r, p.Config.Scan, filepath.Join(o.Dir, p.Config.Dist), rep.Image.ID, scanRef)
+		if err != nil {
+			return irs, "", err
+		}
+		if res != nil && !o.DryRun {
+			for i := range irs {
+				irs[i].Vulns = res.Counts
+			}
+			fmt.Fprintf(progress, "    scan %s (%s): %s\n", rep.Image.ID, res.Scanner, res.Summary())
+			if err := res.GateError(p.Config.Scan.FailOn); err != nil {
+				return irs, "", fmt.Errorf("vulnerability gate failed: %w", err)
+			}
+		}
+	}
+
+	// Smoke test the shared artifact once.
+	if !o.SkipTest && p.Config.Test.Enabled {
+		testRef := digestRef(repos[0], digest)
+		fmt.Fprintf(progress, "    smoke test %s: docker run %s\n", rep.Image.ID, strings.Join(p.Config.Test.Cmd, " "))
+		if err := tester.Run(r, p.Config.Test, testRef); err != nil {
+			return irs, "", fmt.Errorf("smoke test gate failed: %w", err)
+		}
+	}
+
+	// Sign every member repository by digest.
 	if !o.SkipSign {
-		if err := signer.Sign(r, p.Config.Sign.Cosign, plan.Repos, digest); err != nil {
-			return ir, "", err
+		if err := signer.Sign(r, p.Config.Sign.Cosign, repos, digest); err != nil {
+			return irs, "", err
 		}
 	}
 
 	depSection := ""
 	if !o.SkipSBOM && p.Config.SBOM.Enabled {
-		ref := digestRef(plan.Repos[0], digest)
-		sbomPath, err := sbom.Generate(r, p.Config.SBOM, filepath.Join(o.Dir, p.Config.Dist), plan.Image.ID, ref)
+		ref := digestRef(repos[0], digest)
+		sbomPath, err := sbom.Generate(r, p.Config.SBOM, filepath.Join(o.Dir, p.Config.Dist), rep.Image.ID, ref)
 		if err != nil {
-			return ir, "", err
+			return irs, "", err
 		}
 		if p.Config.SBOM.Attest && !o.SkipSign && p.Config.Sign.Cosign.Enabled && sbomPath != "" {
 			pt := sbom.PredicateType(p.Config.SBOM.Format)
-			if err := signer.Attest(r, p.Config.Sign.Cosign, plan.Repos, digest, sbomPath, pt); err != nil {
-				return ir, "", err
+			if err := signer.Attest(r, p.Config.Sign.Cosign, repos, digest, sbomPath, pt); err != nil {
+				return irs, "", err
 			}
 		}
 		if p.Config.Changelog.DependencyDiff && !o.DryRun && sbomPath != "" && p.Git.PreviousTag != "" {
-			depSection = dependencyDiff(r, p, plan, sbomPath)
+			depSection = dependencyDiff(r, p, rep, sbomPath)
 		}
 	}
-	return ir, depSection, nil
+	return irs, depSection, nil
+}
+
+// buildKey hashes the parts of an image plan that determine the built artifact,
+// so images with an identical build (differing only by destination repo/tag)
+// group together and build once. Repositories, tags, and cache settings are
+// excluded — they don't change the artifact.
+func buildKey(dir string, plan ImagePlan) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "dockerfile=%s\n", abs(dir, plan.Image.Dockerfile))
+	fmt.Fprintf(h, "context=%s\n", abs(dir, plan.Image.Context))
+	fmt.Fprintf(h, "target=%s\n", plan.Image.Target)
+	plats := append([]string(nil), plan.Image.Platforms...)
+	sort.Strings(plats)
+	fmt.Fprintf(h, "platforms=%s\n", strings.Join(plats, ","))
+	args := append([]string(nil), plan.BuildArgs...)
+	sort.Strings(args)
+	for _, a := range args {
+		fmt.Fprintf(h, "arg=%s\n", a)
+	}
+	lkeys := make([]string, 0, len(plan.Labels))
+	for k := range plan.Labels {
+		lkeys = append(lkeys, k)
+	}
+	sort.Strings(lkeys)
+	for _, k := range lkeys {
+		fmt.Fprintf(h, "label=%s=%s\n", k, plan.Labels[k])
+	}
+	for _, s := range plan.Image.Secrets {
+		fmt.Fprintf(h, "secret=%s\n", s.ID)
+	}
+	for _, f := range plan.Image.ExtraFlags {
+		fmt.Fprintf(h, "flag=%s\n", f)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // allRefs flattens the published references across all image plans.

@@ -291,6 +291,14 @@ For `--only-changed`, the fingerprint file lives under `dist/` (git-ignored);
 persist it between CI runs like a build cache (e.g. `actions/cache`). A fresh
 checkout with no fingerprint safely rebuilds everything.
 
+### Build once, tag many
+
+Images whose build spec is identical (same Dockerfile, context, target, platforms,
+build args, and labels) and differ only by destination repository/tag are **built
+once** and pushed to every member's tags in a single `buildx` invocation — no
+redundant rebuilds. Images that differ by a build arg (e.g. a `PROJECT=`) stay
+separate. Grouping is automatic; nothing to configure.
+
 ## Configuration
 
 stevedore looks for `.stevedore.yaml`, `.stevedore.yml`, `stevedore.yaml`, or
