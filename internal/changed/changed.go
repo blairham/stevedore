@@ -32,6 +32,54 @@ func FilesSince(dir, ref string) ([]string, error) {
 	return files, nil
 }
 
+// MarkerRef returns the marker ref name for an image id.
+func MarkerRef(prefix, id string) string {
+	return prefix + id
+}
+
+// RefExists reports whether a git ref resolves in the repository at dir.
+func RefExists(dir, ref string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref)
+	cmd.Dir = dir
+	return cmd.Run() == nil
+}
+
+// FetchMarkers best-effort fetches the marker ref namespace from origin so
+// change detection sees the latest per-image baselines (important on a fresh CI
+// checkout). Errors are non-fatal.
+func FetchMarkers(dir, prefix string) {
+	spec := prefix + "*:" + prefix + "*"
+	cmd := exec.Command("git", "fetch", "--quiet", "origin", spec)
+	cmd.Dir = dir
+	_ = cmd.Run()
+}
+
+// AdvanceMarker points ref at HEAD and, when an origin remote exists, pushes it
+// so the baseline persists across CI runs.
+func AdvanceMarker(dir, ref string) error {
+	up := exec.Command("git", "update-ref", ref, "HEAD")
+	up.Dir = dir
+	if out, err := up.CombinedOutput(); err != nil {
+		return fmt.Errorf("update-ref %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
+	}
+	if !hasOrigin(dir) {
+		return nil
+	}
+	push := exec.Command("git", "push", "--quiet", "origin", ref)
+	push.Dir = dir
+	if out, err := push.CombinedOutput(); err != nil {
+		return fmt.Errorf("push %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func hasOrigin(dir string) bool {
+	cmd := exec.Command("git", "remote")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	return err == nil && strings.Contains(string(out), "origin")
+}
+
 // Decision explains why an image is (or isn't) considered changed.
 type Decision struct {
 	Changed bool

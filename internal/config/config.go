@@ -104,6 +104,16 @@ type ChangeDetection struct {
 	// instead of hand-written Paths. Currently only "dotnet" (walks .csproj
 	// <ProjectReference> transitively). Empty disables auto-resolution.
 	Resolver string `yaml:"resolver"`
+
+	// MarkerRefs, when true, advances a per-image git ref after each successful
+	// push and uses it as that image's default change-detection base. An image
+	// then rebuilds iff its sources changed since ITS OWN last release —
+	// statelessly, with no fingerprint file to persist across CI runs.
+	MarkerRefs bool `yaml:"marker_refs"`
+
+	// MarkerPrefix is the ref namespace for markers (default
+	// refs/releases/image/). The image id is appended.
+	MarkerPrefix string `yaml:"marker_prefix"`
 }
 
 // Versioning controls how the release version string is derived.
@@ -332,6 +342,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Provenance.Enabled && c.Provenance.Mode == "" {
 		c.Provenance.Mode = "max"
+	}
+	if c.ChangeDetection.MarkerRefs && c.ChangeDetection.MarkerPrefix == "" {
+		c.ChangeDetection.MarkerPrefix = "refs/releases/image/"
 	}
 	if c.Versioning.Strategy == "" {
 		c.Versioning.Strategy = "git"

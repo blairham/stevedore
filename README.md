@@ -236,6 +236,12 @@ change. There are two modes:
 |------|----------------|----------|
 | `--changed-since <ref>` | git diff since a ref; an image builds if a changed file matches its paths | CI (stateless — compare a PR to `main`) |
 | `--only-changed` | content fingerprint vs. the last release, stored in `<dist>/fingerprints.json` | local iteration |
+| `change_detection.marker_refs` | each image diffs against **its own** last-release git ref (`refs/releases/image/<id>`), advanced after each push | CI, per-image release cadence (stateless, no ref to pass) |
+
+With `marker_refs: true`, an image rebuilds iff its sources changed since *its own*
+last release — even across independent releases and fresh checkouts. After a
+successful push, stevedore advances `refs/releases/image/<id>` to `HEAD` and pushes
+it, so the baseline lives in git (no state file to persist).
 
 ```sh
 stevedore release --changed-since origin/main

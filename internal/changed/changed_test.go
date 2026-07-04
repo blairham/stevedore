@@ -1,6 +1,55 @@
 package changed
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
+
+func TestMarkerRef(t *testing.T) {
+	if got := MarkerRef("refs/releases/image/", "checkout"); got != "refs/releases/image/checkout" {
+		t.Errorf("MarkerRef = %q", got)
+	}
+}
+
+func TestRefExistsAndAdvance(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	git("config", "user.email", "t@t.co")
+	git("config", "user.name", "t")
+	os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644)
+	git("add", "-A")
+	git("commit", "-qm", "init")
+
+	ref := MarkerRef("refs/releases/image/", "svc")
+	if RefExists(dir, ref) {
+		t.Fatal("marker should not exist yet")
+	}
+	// No origin remote: AdvanceMarker just sets the ref locally.
+	if err := AdvanceMarker(dir, ref); err != nil {
+		t.Fatal(err)
+	}
+	if !RefExists(dir, ref) {
+		t.Fatal("marker should exist after AdvanceMarker")
+	}
+	// The marker points at HEAD, so nothing changed since it.
+	files, err := FilesSince(dir, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Errorf("expected no changes since marker, got %v", files)
+	}
+}
 
 func TestMatch(t *testing.T) {
 	patterns := []string{"Acme.Reports/**", "Directory.*", "*.sln"}

@@ -343,7 +343,8 @@ func Release(o Options) error {
 	}
 
 	var depDiffSections []string
-	shared := p.Config.ChangeDetection.SharedPaths
+	cd := p.Config.ChangeDetection
+	shared := cd.SharedPaths
 
 	// --changed-since: resolve the git diff once, up front.
 	var changedFiles []string
@@ -352,6 +353,14 @@ func Release(o Options) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// Marker mode: with no explicit --changed-since, use each image's own
+	// release-marker ref as its change-detection base. Fetch the latest markers
+	// first (important on a fresh CI checkout).
+	markerMode := cd.MarkerRefs && o.ChangedSince == ""
+	if markerMode {
+		changed.FetchMarkers(o.Dir, cd.MarkerPrefix)
 	}
 
 	// Pre-pass (sequential): apply change detection and collect the images that
@@ -368,6 +377,20 @@ func Release(o Options) error {
 				result.Images = append(result.Images, summary.Image{ID: plan.Image.ID, Skipped: true})
 				continue
 			}
+		} else if markerMode {
+			ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
+			if changed.RefExists(o.Dir, ref) {
+				files, err := changed.FilesSince(o.Dir, ref)
+				if err != nil {
+					return err
+				}
+				if d := changed.Evaluate(plan.Paths, shared, files); !d.Changed {
+					fmt.Fprintf(progress, "==> skipping %s (%s since its release marker)\n", plan.Image.ID, d.Reason)
+					result.Images = append(result.Images, summary.Image{ID: plan.Image.ID, Skipped: true})
+					continue
+				}
+			}
+			// No marker yet → never released → build it.
 		}
 		fpScoped := scopedFingerprintPaths(plan.Paths, shared)
 		fp, err := fingerprint.Compute(o.Dir, plan.Image, p.Config.Dist, fpScoped)
@@ -433,6 +456,23 @@ func Release(o Options) error {
 	if !o.DryRun {
 		if err := state.Save(fpPath); err != nil {
 			return fmt.Errorf("save fingerprint state: %w", err)
+		}
+	}
+
+	// Advance each built image's release marker to HEAD (and push it) so the
+	// next run's change detection diffs against this release. Only on a real
+	// push of a real release.
+	if markerMode && !o.DryRun && !o.NoPush && !o.Snapshot {
+		for _, im := range result.Images {
+			if im.Skipped {
+				continue
+			}
+			ref := changed.MarkerRef(cd.MarkerPrefix, im.ID)
+			if err := changed.AdvanceMarker(o.Dir, ref); err != nil {
+				fmt.Fprintf(progress, "warning: advance release marker %s: %v\n", ref, err)
+			} else {
+				fmt.Fprintf(progress, "==> advanced release marker %s\n", ref)
+			}
 		}
 	}
 
