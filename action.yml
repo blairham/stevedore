@@ -55,6 +55,9 @@ outputs:
   plan:
     description: "The JSON build plan emitted by `command: plan` (matrix mode); empty for other commands."
     value: ${{ steps.run.outputs.plan }}
+  summary:
+    description: "Compact JSON release summary ({project, images: [{id, version, digest, repositories, pushed, skipped, reason, …}]}) written by `command: release`/`build`; empty for other commands. Filter on `pushed` before notifying downstream systems."
+    value: ${{ steps.run.outputs.summary }}
 
 runs:
   using: "composite"

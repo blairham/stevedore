@@ -13,10 +13,18 @@ import (
 
 // Image is one image's outcome in a release.
 type Image struct {
-	ID         string         `json:"id"`
-	Version    string         `json:"version,omitempty"`
-	Digest     string         `json:"digest,omitempty"`
-	Refs       []string       `json:"refs,omitempty"`
+	ID      string   `json:"id"`
+	Version string   `json:"version,omitempty"`
+	Digest  string   `json:"digest,omitempty"`
+	Refs    []string `json:"refs,omitempty"`
+	// Repositories are the bare repos (no tag) this image publishes to.
+	Repositories []string `json:"repositories,omitempty"`
+	// Pushed reports whether the refs were actually published (false under
+	// --no-push validation builds) — notification consumers key off this.
+	Pushed bool `json:"pushed"`
+	// Reason says why the image built ("src/… since its release marker") or
+	// why it was skipped ("inputs unchanged").
+	Reason     string         `json:"reason,omitempty"`
 	Skipped    bool           `json:"skipped"`
 	Signed     bool           `json:"signed"`
 	SBOM       bool           `json:"sbom"`
@@ -37,6 +45,28 @@ func (r Result) JSON() ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
 }
 
+// WriteGitHubOutput appends the compact single-line JSON as a `summary` step
+// output to the file named by $GITHUB_OUTPUT, if set — the composite action
+// republishes it so workflows can drive per-image follow-ups (e.g. deploy
+// notifications) without knowing the dist path. No-op outside GitHub Actions.
+func (r Result) WriteGitHubOutput() error {
+	path := os.Getenv("GITHUB_OUTPUT")
+	if path == "" {
+		return nil
+	}
+	data, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "summary=%s\n", data)
+	return err
+}
+
 // Markdown renders a GitHub-friendly summary table.
 func (r Result) Markdown() string {
 	var b strings.Builder
@@ -49,7 +79,11 @@ func (r Result) Markdown() string {
 	b.WriteString("|-------|---------|--------|:------:|:----:|:----:|:----:|-------|\n")
 	for _, img := range r.Images {
 		if img.Skipped {
-			fmt.Fprintf(&b, "| `%s` | — | _skipped (unchanged)_ | | | | | |\n", img.ID)
+			reason := img.Reason
+			if reason == "" {
+				reason = "unchanged"
+			}
+			fmt.Fprintf(&b, "| `%s` | — | _skipped (%s)_ | | | | | |\n", img.ID, reason)
 			continue
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | `%s` | %s | %s | %s | %s | %s |\n",
