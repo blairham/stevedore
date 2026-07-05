@@ -3,9 +3,11 @@ package builder
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/blairham/stevedore/internal/config"
+	"github.com/blairham/stevedore/internal/run"
 )
 
 func TestSecretArg(t *testing.T) {
@@ -59,5 +61,38 @@ func TestReadDigest(t *testing.T) {
 
 	if _, err := readDigest(filepath.Join(dir, "nope.json")); err == nil {
 		t.Error("expected error for missing file")
+	}
+}
+
+func TestBuildSkipsEmptyCacheEntries(t *testing.T) {
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &run.Runner{DryRun: true, Stderr: stderr}
+
+	_, err = Build(r, Spec{
+		Dockerfile: "Dockerfile",
+		Context:    ".",
+		CacheFrom:  []string{"", "type=gha,scope=build"},
+		CacheTo:    []string{""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := string(out)
+	if !strings.Contains(cmd, "--cache-from type=gha,scope=build") {
+		t.Errorf("non-empty cache_from entry missing from command: %s", cmd)
+	}
+	if strings.Count(cmd, "--cache-from") != 1 {
+		t.Errorf("empty cache_from entry should be skipped: %s", cmd)
+	}
+	if strings.Contains(cmd, "--cache-to") {
+		t.Errorf("empty cache_to entry should be skipped: %s", cmd)
 	}
 }
