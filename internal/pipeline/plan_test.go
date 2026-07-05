@@ -81,17 +81,36 @@ func TestNewPlanResult_EmptyPlanMarshalsEmptyInclude(t *testing.T) {
 	}
 }
 
-func TestFilterPlans(t *testing.T) {
-	plans := []ImagePlan{
-		{Image: config.Image{ID: "a"}},
-		{Image: config.Image{ID: "b"}},
-		{Image: config.Image{ID: "c"}},
+func TestResolvePlans_OnlySkipsExcludedImages(t *testing.T) {
+	ctx := newCtx("main", "main", false)
+	cfg := &config.Config{
+		Versioning: config.Versioning{Strategy: "registry"},
+		Images: []config.Image{
+			{ID: "a", Repositories: []string{"reg/a"}, Tags: []string{"{{ .Version }}"}},
+			{ID: "b", Repositories: []string{"reg/b"}, Tags: []string{"{{ .Version }}"}},
+			{ID: "c", Repositories: []string{"reg/c"}, Tags: []string{"{{ .Version }}"}},
+		},
 	}
-	got := filterPlans(plans, []string{"c", "a"})
+	// Excluded images must never reach version resolution — a matrix job's
+	// credentials may only have registry access to its own repositories.
+	versionFor := func(repo string) (string, error) {
+		if repo == "reg/b" {
+			t.Errorf("versionFor called for excluded image repo %s", repo)
+		}
+		return map[string]string{"reg/a": "1.0.1", "reg/c": "3.0.3"}[repo], nil
+	}
+	got, err := resolvePlans(cfg, ctx, false, versionFor, nil, []string{"c", "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || got[0].Image.ID != "a" || got[1].Image.ID != "c" {
-		t.Errorf("filterPlans = %v, want [a c] in config order", got)
+		t.Errorf("plans = %v, want [a c] in config order", got)
 	}
-	if all := filterPlans(plans, nil); len(all) != 3 {
+	if got[0].Version != "1.0.1" || got[1].Version != "3.0.3" {
+		t.Errorf("versions = %s/%s, want 1.0.1/3.0.3", got[0].Version, got[1].Version)
+	}
+	anyVersion := func(string) (string, error) { return "0.0.1", nil }
+	if all, _ := resolvePlans(cfg, ctx, false, anyVersion, nil, nil); len(all) != 3 {
 		t.Errorf("empty filter should pass everything through, got %d", len(all))
 	}
 }

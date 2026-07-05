@@ -110,6 +110,10 @@ func Prepare(o Options) (*Prepared, error) {
 		now = time.Now()
 	}
 
+	if err := validateImageIDs(cfg, o); err != nil {
+		return nil, err
+	}
+
 	// Resolve the release version via the configured strategy (git, registry,
 	// static, env, or command) and let it drive the template context.
 	ver, err := resolveVersion(cfg, gi, o)
@@ -126,14 +130,10 @@ func Prepare(o Options) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateImageIDs(cfg, o); err != nil {
-		return nil, err
-	}
-	plans, err := resolvePlans(cfg, ctx, o.Snapshot, versionFor, o.PinVersions)
+	plans, err := resolvePlans(cfg, ctx, o.Snapshot, versionFor, o.PinVersions, o.Only)
 	if err != nil {
 		return nil, err
 	}
-	plans = filterPlans(plans, o.Only)
 	// Resolve each image's dependency paths for change detection (per-image
 	// paths plus any project-graph expansion).
 	for i := range plans {
@@ -244,32 +244,43 @@ func validateImageIDs(cfg *config.Config, o Options) error {
 	return nil
 }
 
-// filterPlans restricts plans to the given image IDs (order preserved from the
-// config). A nil/empty filter returns plans unchanged.
-func filterPlans(plans []ImagePlan, only []string) []ImagePlan {
+// firstSelectedImage returns the first config image included by --only (config
+// order), or the first image overall when there is no selection.
+func firstSelectedImage(cfg *config.Config, only []string) *config.Image {
+	if len(cfg.Images) == 0 {
+		return nil
+	}
 	if len(only) == 0 {
-		return plans
+		return &cfg.Images[0]
 	}
-	want := map[string]bool{}
+	sel := map[string]bool{}
 	for _, id := range only {
-		want[id] = true
+		sel[id] = true
 	}
-	var out []ImagePlan
-	for _, p := range plans {
-		if want[p.Image.ID] {
-			out = append(out, p)
+	for i := range cfg.Images {
+		if sel[cfg.Images[i].ID] {
+			return &cfg.Images[i]
 		}
 	}
-	return out
+	return nil
 }
 
 // resolvePlans renders tags/repos/build-args/labels and computes the published
 // references. Floating "latest" tags are dropped off the default branch or in a
 // snapshot build. A pinned version (pins[id]) overrides resolution for that
-// image entirely.
-func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error), pins map[string]string) ([]ImagePlan, error) {
+// image entirely. A non-empty `only` restricts plans to those image IDs (config
+// order preserved) — excluded images are skipped before version resolution, so
+// a matrix job's credentials only need registry access to its own repositories.
+func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error), pins map[string]string, only []string) ([]ImagePlan, error) {
+	selected := map[string]bool{}
+	for _, id := range only {
+		selected[id] = true
+	}
 	var plans []ImagePlan
 	for _, img := range cfg.Images {
+		if len(selected) > 0 && !selected[img.ID] {
+			continue
+		}
 		// Repositories are rendered with the release context (they key on .Env,
 		// not .Version), and drive per-image version resolution.
 		repos, err := tmpl.RenderAll(img.Repositories, ctx)
@@ -867,12 +878,25 @@ func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance)
 // give `check` and dry-runs an accurate preview.
 func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, error) {
 	r := run.New(o.DryRun, o.Verbose)
+
+	// Anchor the release-level version on the first *selected* image so a
+	// matrix job (`release --only ...`) never queries a repository outside its
+	// slice of the config.
+	first := firstSelectedImage(cfg, o.Only)
 	var defaultRepo string
-	if len(cfg.Images) > 0 && len(cfg.Images[0].Repositories) > 0 {
-		defaultRepo = cfg.Images[0].Repositories[0]
+	if first != nil && len(first.Repositories) > 0 {
+		defaultRepo = first.Repositories[0]
 	}
 
 	vcfg := cfg.Versioning
+	// Per-image registry mode with the anchor image pinned: the pin is the
+	// release version — no registry read needed at all.
+	if isRegistryStrategy(vcfg.Strategy) && vcfg.Repo == "" && first != nil {
+		if pin, ok := o.PinVersions[first.ID]; ok {
+			return pin, nil
+		}
+	}
+
 	repo := vcfg.Repo
 	if repo == "" {
 		repo = defaultRepo

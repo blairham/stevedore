@@ -48,7 +48,7 @@ func demoCfg() *config.Config {
 
 func TestResolvePlans_DefaultBranchKeepsLatest(t *testing.T) {
 	ctx := newCtx("main", "main", false)
-	plans, err := resolvePlans(demoCfg(), ctx, false, nil, nil)
+	plans, err := resolvePlans(demoCfg(), ctx, false, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestResolvePlans_DefaultBranchKeepsLatest(t *testing.T) {
 
 func TestResolvePlans_FeatureBranchDropsLatest(t *testing.T) {
 	ctx := newCtx("feature/x", "main", false)
-	plans, err := resolvePlans(demoCfg(), ctx, false, nil, nil)
+	plans, err := resolvePlans(demoCfg(), ctx, false, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestResolvePlans_PerImageVersion(t *testing.T) {
 	versionFor := func(repo string) (string, error) {
 		return map[string]string{"reg/checkout": "0.0.336", "reg/billing": "0.0.285"}[repo], nil
 	}
-	plans, err := resolvePlans(cfg, ctx, false, versionFor, nil)
+	plans, err := resolvePlans(cfg, ctx, false, versionFor, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestResolvePlans_PerImageVersion(t *testing.T) {
 
 func TestResolvePlans_SnapshotDropsLatest(t *testing.T) {
 	ctx := newCtx("main", "main", true)
-	plans, err := resolvePlans(demoCfg(), ctx, true, nil, nil)
+	plans, err := resolvePlans(demoCfg(), ctx, true, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestResolvePlans_PinnedVersionWins(t *testing.T) {
 		}
 		return "0.0.285", nil
 	}
-	plans, err := resolvePlans(cfg, ctx, false, versionFor, map[string]string{"checkout": "0.0.400"})
+	plans, err := resolvePlans(cfg, ctx, false, versionFor, map[string]string{"checkout": "0.0.400"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,5 +149,29 @@ func TestResolvePlans_PinnedVersionWins(t *testing.T) {
 	}
 	if plans[1].Version != "0.0.285" {
 		t.Errorf("unpinned billing plan = %+v, want resolved 0.0.285", plans[1])
+	}
+}
+
+func TestResolveVersion_OnlyPinnedAnchorSkipsRegistry(t *testing.T) {
+	cfg := &config.Config{
+		Versioning: config.Versioning{Strategy: "ecr"},
+		Images: []config.Image{
+			{ID: "a", Repositories: []string{"reg/a"}},
+			{ID: "b", Repositories: []string{"reg/b"}},
+		},
+	}
+	gi := &gitinfo.Info{Commit: "deadbeefcafe", ShortCommit: "deadbee", Branch: "main"}
+	// The release version anchors on the first --only image; with that image
+	// pinned there is nothing left to resolve, so no registry command runs
+	// (a real read would fail here — no credentials in the test env).
+	ver, err := resolveVersion(cfg, gi, Options{
+		Only:        []string{"b"},
+		PinVersions: map[string]string{"b": "2.0.0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ver != "2.0.0" {
+		t.Errorf("version = %q, want the pinned 2.0.0", ver)
 	}
 }
