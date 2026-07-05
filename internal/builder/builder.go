@@ -71,11 +71,18 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	for _, sec := range s.Secrets {
 		args = append(args, "--secret", secretArg(sec))
 	}
+	// Empty entries (e.g. a {{ index .Env "STEVEDORE_CACHE_TO" }} template rendering to
+	// "" outside CI) are skipped, so configs can gate caching on environment
+	// presence without breaking local builds.
 	for _, c := range s.CacheFrom {
-		args = append(args, "--cache-from", c)
+		if c != "" {
+			args = append(args, "--cache-from", c)
+		}
 	}
 	for _, c := range s.CacheTo {
-		args = append(args, "--cache-to", c)
+		if c != "" {
+			args = append(args, "--cache-to", c)
+		}
 	}
 	switch {
 	case s.Push:

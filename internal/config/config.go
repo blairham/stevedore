@@ -207,12 +207,14 @@ type Image struct {
 
 	// CacheFrom lists buildx --cache-from sources, e.g.
 	// "type=registry,ref=ghcr.io/acme/myapp:buildcache". Values may contain
-	// templates.
+	// templates; entries that render to an empty string are skipped, so a
+	// value like '{{ index .Env "STEVEDORE_CACHE_FROM" }}' enables caching only where
+	// the environment provides it (e.g. CI) without breaking local builds.
 	CacheFrom []string `yaml:"cache_from"`
 
 	// CacheTo lists buildx --cache-to destinations, e.g.
 	// "type=registry,ref=ghcr.io/acme/myapp:buildcache,mode=max". Values may
-	// contain templates.
+	// contain templates; empty-rendering entries are skipped (see CacheFrom).
 	CacheTo []string `yaml:"cache_to"`
 
 	// ExtraFlags are passed verbatim to `docker buildx build`.

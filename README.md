@@ -400,10 +400,14 @@ images:
         env: GITHUB_TOKEN
       # - id: npmrc
       #   file: ./.npmrc
-    cache_from:           # buildx --cache-from sources
+    cache_from:           # buildx --cache-from sources; empty-rendering
+      # entries are skipped, so an env-templated value enables caching only
+      # where the environment provides it (e.g. CI) and stays inert locally
       - "type=registry,ref=ghcr.io/acme/myapp:buildcache"
-    cache_to:             # buildx --cache-to destinations
+      # - '{{ index .Env "STEVEDORE_CACHE_FROM" }}'
+    cache_to:             # buildx --cache-to destinations (same skip rule)
       - "type=registry,ref=ghcr.io/acme/myapp:buildcache,mode=max"
+      # - '{{ index .Env "STEVEDORE_CACHE_TO" }}'
     paths:                # change-detection globs (see Monorepos); ** supported
       - "services/myapp/**"
     project: ""           # or a .csproj to auto-derive paths from its graph
