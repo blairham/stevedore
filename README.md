@@ -101,6 +101,7 @@ stevedore release
 | Command | What it does |
 |---------|--------------|
 | `stevedore release` | Full pipeline: build all platforms → push → sign → SBOM → changelog. Requires a clean, tagged checkout unless `--snapshot`. |
+| `stevedore plan` | Resolve versions, change detection, and build-once grouping — print the plan as JSON without building. The `include` array is GitHub Actions matrix shape (see [Matrix mode](#matrix-mode-one-ci-job-per-build)). |
 | `stevedore build` | Inner-loop build: one platform, loaded into the local docker daemon, no push. `--push` publishes multi-arch but skips the release extras. |
 | `stevedore check` | Validate the config and print the fully-resolved release plan (the exact refs that would publish). |
 | `stevedore verify <ref>` | Verify a pushed image's cosign signature, SBOM attestation, and SLSA provenance. |
@@ -123,6 +124,12 @@ stevedore release
 `--skip-changelog`, `--skip-publish`, `--only-changed` / `--changed-since <ref>`
 (skip unchanged images — see [Monorepos](#monorepos)), and `--output json`
 (emit a machine-readable release summary to stdout).
+
+`--only <id,…>` builds just those images, **unconditionally** — selection was the
+planner's decision, so change detection is skipped. `--pin-version <id>=<ver>`
+(repeatable) makes the run tag exactly what the plan resolved instead of
+re-resolving. Both come straight out of a `stevedore plan` entry (`.only` /
+`.pins`); see [Matrix mode](#matrix-mode-one-ci-job-per-build).
 
 Every release also writes `<dist>/release-summary.json` and, in GitHub Actions, a
 job-summary table (images, digests, signed/sbom/provenance/test status, vuln
@@ -298,6 +305,61 @@ build args, and labels) and differ only by destination repository/tag are **buil
 once** and pushed to every member's tags in a single `buildx` invocation — no
 redundant rebuilds. Images that differ by a build arg (e.g. a `PROJECT=`) stay
 separate. Grouping is automatic; nothing to configure.
+
+### Matrix mode: one CI job per build
+
+A single runner with `--parallel N` is fine for a handful of images, but a
+change touching many heavy images wants one runner *each*. `stevedore plan`
+splits deciding from building so CI can fan out:
+
+```json
+{
+  "include": [
+    {"group": "checkout", "ids": ["checkout"], "only": "checkout",
+     "versions": {"checkout": "0.0.513"}, "pins": "--pin-version checkout=0.0.513",
+     "reason": "src/Acme/… changed since its release marker"}
+  ],
+  "skipped": [{"id": "billing-gateway", "reason": "unchanged since its release marker"}]
+}
+```
+
+`plan` resolves per-image versions, runs change detection (marker refs,
+`--changed-since`, or `--only-changed`), and applies build-once grouping — a
+group is **one** entry, so images sharing a build still ride one runner.
+Each matrix job then runs `release --only <entry.only> <entry.pins>`: it builds
+its entry unconditionally, tags exactly what the plan resolved, and advances
+only its own release markers. Progress goes to stderr; stdout is only the JSON.
+
+```yaml
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: blairham/stevedore@v1
+        id: plan
+        with: {command: plan}
+
+  build:
+    needs: plan
+    if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
+    strategy:
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: blairham/stevedore@v1
+        with:
+          command: release
+          args: --only ${{ matrix.only }} ${{ matrix.pins }}
+```
+
+Entries carry the member `ids`, so a caller can also map per-entry metadata —
+e.g. pick a per-service cloud credential/role for single-member entries.
 
 ## Configuration
 
