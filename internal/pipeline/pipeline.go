@@ -57,7 +57,14 @@ type Options struct {
 	ChangedSince  string // git ref: skip images not touched by the diff since this ref
 	SoftVersion   bool   // tolerate version-resolution failure (check): warn + placeholder
 	OutputJSON    bool   // emit a JSON release summary to stdout (progress to stderr)
-	Now           time.Time
+	// Only restricts the run to these image IDs and builds them unconditionally
+	// (change detection is the planner's job — see the plan command). Matrix
+	// mode: each CI job runs `release --only <ids>` for one plan entry.
+	Only []string
+	// PinVersions overrides per-image version resolution (id → version), so a
+	// matrix job tags exactly what the plan resolved.
+	PinVersions map[string]string
+	Now         time.Time
 }
 
 // ImagePlan is a fully-resolved plan for one image.
@@ -103,6 +110,10 @@ func Prepare(o Options) (*Prepared, error) {
 		now = time.Now()
 	}
 
+	if err := validateImageIDs(cfg, o); err != nil {
+		return nil, err
+	}
+
 	// Resolve the release version via the configured strategy (git, registry,
 	// static, env, or command) and let it drive the template context.
 	ver, err := resolveVersion(cfg, gi, o)
@@ -119,7 +130,7 @@ func Prepare(o Options) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
-	plans, err := resolvePlans(cfg, ctx, o.Snapshot, versionFor)
+	plans, err := resolvePlans(cfg, ctx, o.Snapshot, versionFor, o.PinVersions, o.Only)
 	if err != nil {
 		return nil, err
 	}
@@ -212,12 +223,64 @@ func dedupeStrings(in []string) []string {
 	return out
 }
 
+// validateImageIDs rejects --only / --pin-version references to image IDs that
+// don't exist in the config, so a typo fails fast instead of silently building
+// nothing (or resolving a version nobody pinned).
+func validateImageIDs(cfg *config.Config, o Options) error {
+	known := map[string]bool{}
+	for _, img := range cfg.Images {
+		known[img.ID] = true
+	}
+	for _, id := range o.Only {
+		if !known[id] {
+			return fmt.Errorf("--only: unknown image id %q", id)
+		}
+	}
+	for id := range o.PinVersions {
+		if !known[id] {
+			return fmt.Errorf("--pin-version: unknown image id %q", id)
+		}
+	}
+	return nil
+}
+
+// firstSelectedImage returns the first config image included by --only (config
+// order), or the first image overall when there is no selection.
+func firstSelectedImage(cfg *config.Config, only []string) *config.Image {
+	if len(cfg.Images) == 0 {
+		return nil
+	}
+	if len(only) == 0 {
+		return &cfg.Images[0]
+	}
+	sel := map[string]bool{}
+	for _, id := range only {
+		sel[id] = true
+	}
+	for i := range cfg.Images {
+		if sel[cfg.Images[i].ID] {
+			return &cfg.Images[i]
+		}
+	}
+	return nil
+}
+
 // resolvePlans renders tags/repos/build-args/labels and computes the published
 // references. Floating "latest" tags are dropped off the default branch or in a
-// snapshot build.
-func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error)) ([]ImagePlan, error) {
+// snapshot build. A pinned version (pins[id]) overrides resolution for that
+// image entirely. A non-empty `only` restricts plans to those image IDs (config
+// order preserved) — excluded images are skipped before version resolution, so
+// a matrix job's credentials only need registry access to its own repositories.
+func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error), pins map[string]string, only []string) ([]ImagePlan, error) {
+	selected := map[string]bool{}
+	for _, id := range only {
+		selected[id] = true
+	}
 	var plans []ImagePlan
 	for _, img := range cfg.Images {
+		if len(selected) > 0 && !selected[img.ID] {
+			continue
+		}
 		// Repositories are rendered with the release context (they key on .Env,
 		// not .Version), and drive per-image version resolution.
 		repos, err := tmpl.RenderAll(img.Repositories, ctx)
@@ -225,11 +288,15 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 			return nil, fmt.Errorf("image %s repositories: %w", img.ID, err)
 		}
 
-		// Determine this image's version. Under per-image registry versioning it
-		// comes from the image's own repo; otherwise it's the release version.
+		// Determine this image's version. A pin (from the plan) wins outright;
+		// under per-image registry versioning it comes from the image's own
+		// repo; otherwise it's the release version.
 		imgCtx := ctx
 		imgVersion := ctx.Version
-		if versionFor != nil && len(repos) > 0 {
+		if pin, ok := pins[img.ID]; ok {
+			imgVersion = pin
+			imgCtx = ctx.WithVersion(pin)
+		} else if versionFor != nil && len(repos) > 0 {
 			v, err := versionFor(repos[0])
 			if err != nil {
 				return nil, fmt.Errorf("image %s version: %w", img.ID, err)
@@ -346,94 +413,22 @@ func Release(o Options) error {
 
 	var depDiffSections []string
 	cd := p.Config.ChangeDetection
-	shared := cd.SharedPaths
 
-	// --changed-since: resolve the git diff once, up front.
-	var changedFiles []string
-	if o.ChangedSince != "" {
-		changedFiles, err = changed.FilesSince(o.Dir, o.ChangedSince)
-		if err != nil {
-			return err
-		}
+	// Pre-pass: change detection + fingerprints, then group identical build
+	// specs (shared with the plan command).
+	evals, err := evaluateImages(o, p, state)
+	if err != nil {
+		return err
 	}
-
-	// Marker mode: with no explicit --changed-since, use each image's own
-	// release-marker ref as its change-detection base. Fetch the latest markers
-	// first (important on a fresh CI checkout).
-	markerMode := cd.MarkerRefs && o.ChangedSince == ""
-	if markerMode {
-		changed.FetchMarkers(o.Dir, cd.MarkerPrefix)
+	toBuild, skipped := groupPlans(o.Dir, evals)
+	for _, m := range skipped {
+		fmt.Fprintf(progress, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
+		result.Images = append(result.Images, summary.Image{ID: m.plan.Image.ID, Skipped: true})
 	}
-
-	// Pre-pass (sequential): evaluate change detection and fingerprint per image.
-	type member struct {
-		plan    ImagePlan
-		fp      string
-		changed bool
-		reason  string
-	}
-	var evals []member
-	for _, plan := range p.Plans {
-		ch, reason := true, ""
-		if o.ChangedSince != "" {
-			d := changed.Evaluate(plan.Paths, shared, changedFiles)
-			ch, reason = d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince)
-		} else if markerMode {
-			ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
-			if changed.RefExists(o.Dir, ref) {
-				files, err := changed.FilesSince(o.Dir, ref)
-				if err != nil {
-					return err
-				}
-				d := changed.Evaluate(plan.Paths, shared, files)
-				ch, reason = d.Changed, fmt.Sprintf("%s since its release marker", d.Reason)
-			} // no marker yet → never released → build it
+	for _, grp := range toBuild {
+		if len(grp) > 1 {
+			fmt.Fprintf(progress, "==> %d images share one build: %s\n", len(grp), strings.Join(evalIDs(grp), ", "))
 		}
-		fpScoped := scopedFingerprintPaths(plan.Paths, shared)
-		fp, err := fingerprint.Compute(o.Dir, plan.Image, p.Config.Dist, fpScoped)
-		if err != nil {
-			return fmt.Errorf("fingerprint %s: %w", plan.Image.ID, err)
-		}
-		if ch && o.OnlyChanged && state[plan.Image.ID] == fp {
-			ch, reason = false, "inputs unchanged"
-		}
-		evals = append(evals, member{plan: plan, fp: fp, changed: ch, reason: reason})
-	}
-
-	// Group images with an identical build spec — they build once and push to
-	// every group member's repositories/tags. A group builds if ANY member
-	// changed (they share one artifact).
-	var order []string
-	groups := map[string][]member{}
-	for _, e := range evals {
-		k := buildKey(o.Dir, e.plan)
-		if _, ok := groups[k]; !ok {
-			order = append(order, k)
-		}
-		groups[k] = append(groups[k], e)
-	}
-	var toBuild [][]member
-	for _, k := range order {
-		members := groups[k]
-		anyChanged := false
-		for _, m := range members {
-			anyChanged = anyChanged || m.changed
-		}
-		if !anyChanged {
-			for _, m := range members {
-				fmt.Fprintf(progress, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
-				result.Images = append(result.Images, summary.Image{ID: m.plan.Image.ID, Skipped: true})
-			}
-			continue
-		}
-		if len(members) > 1 {
-			var ids []string
-			for _, m := range members {
-				ids = append(ids, m.plan.Image.ID)
-			}
-			fmt.Fprintf(progress, "==> %d images share one build: %s\n", len(members), strings.Join(ids, ", "))
-		}
-		toBuild = append(toBuild, members)
 	}
 
 	// Build each group, up to o.Parallel groups at a time.
@@ -459,7 +454,7 @@ func Release(o Options) error {
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(grp []member) {
+		go func(grp []imageEval) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			plans := make([]ImagePlan, len(grp))
@@ -498,8 +493,11 @@ func Release(o Options) error {
 
 	// Advance each built image's release marker to HEAD (and push it) so the
 	// next run's change detection diffs against this release. Only on a real
-	// push of a real release.
-	if markerMode && !o.DryRun && !o.NoPush && !o.Snapshot {
+	// push of a real release — but regardless of how THIS run selected its
+	// images (marker diff, --changed-since, or --only): the marker records
+	// "last released", not "last marker-diffed", so matrix jobs running
+	// `release --only <id>` keep every image's baseline current.
+	if cd.MarkerRefs && !o.DryRun && !o.NoPush && !o.Snapshot {
 		for _, im := range result.Images {
 			if im.Skipped {
 				continue
@@ -880,12 +878,25 @@ func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance)
 // give `check` and dry-runs an accurate preview.
 func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, error) {
 	r := run.New(o.DryRun, o.Verbose)
+
+	// Anchor the release-level version on the first *selected* image so a
+	// matrix job (`release --only ...`) never queries a repository outside its
+	// slice of the config.
+	first := firstSelectedImage(cfg, o.Only)
 	var defaultRepo string
-	if len(cfg.Images) > 0 && len(cfg.Images[0].Repositories) > 0 {
-		defaultRepo = cfg.Images[0].Repositories[0]
+	if first != nil && len(first.Repositories) > 0 {
+		defaultRepo = first.Repositories[0]
 	}
 
 	vcfg := cfg.Versioning
+	// Per-image registry mode with the anchor image pinned: the pin is the
+	// release version — no registry read needed at all.
+	if isRegistryStrategy(vcfg.Strategy) && vcfg.Repo == "" && first != nil {
+		if pin, ok := o.PinVersions[first.ID]; ok {
+			return pin, nil
+		}
+	}
+
 	repo := vcfg.Repo
 	if repo == "" {
 		repo = defaultRepo

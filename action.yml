@@ -7,7 +7,7 @@ branding:
 
 inputs:
   command:
-    description: "stevedore subcommand to run (release, build, check, verify, doctor)."
+    description: "stevedore subcommand to run (release, plan, build, check, verify, doctor)."
     required: false
     default: "release"
   args:
@@ -50,6 +50,11 @@ inputs:
     description: "Install crane (needed when versioning.strategy: registry)."
     required: false
     default: "false"
+
+outputs:
+  plan:
+    description: "The JSON build plan emitted by `command: plan` (matrix mode); empty for other commands."
+    value: ${{ steps.run.outputs.plan }}
 
 runs:
   using: "composite"
@@ -114,6 +119,7 @@ runs:
       run: stevedore doctor || true
 
     - name: Run stevedore
+      id: run
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -128,4 +134,12 @@ runs:
         # shellcheck disable=SC2206
         if [ -n "$SD_ARGS" ]; then cmd+=($SD_ARGS); fi
         echo "+ ${cmd[*]}"
-        "${cmd[@]}"
+        if [ "$SD_COMMAND" = "plan" ]; then
+          # plan prints one compact JSON line on stdout (progress on stderr);
+          # expose it as the `plan` output for a matrix fan-out.
+          out="${RUNNER_TEMP:-/tmp}/stevedore-plan.json"
+          "${cmd[@]}" | tee "$out"
+          echo "plan=$(cat "$out")" >> "$GITHUB_OUTPUT"
+        else
+          "${cmd[@]}"
+        fi
