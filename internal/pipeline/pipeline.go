@@ -423,7 +423,7 @@ func Release(o Options) error {
 	toBuild, skipped := groupPlans(o.Dir, evals)
 	for _, m := range skipped {
 		fmt.Fprintf(progress, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
-		result.Images = append(result.Images, summary.Image{ID: m.plan.Image.ID, Skipped: true})
+		result.Images = append(result.Images, summary.Image{ID: m.plan.Image.ID, Skipped: true, Reason: m.reason})
 	}
 	for _, grp := range toBuild {
 		if len(grp) > 1 {
@@ -457,11 +457,7 @@ func Release(o Options) error {
 		go func(grp []imageEval) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			plans := make([]ImagePlan, len(grp))
-			for i, m := range grp {
-				plans[i] = m.plan
-			}
-			irs, dep, err := buildGroup(o, p, r, plans)
+			irs, dep, err := buildGroup(o, p, r, grp)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -548,6 +544,9 @@ func Release(o Options) error {
 func emitSummary(o Options, p *Prepared, result summary.Result) error {
 	if err := result.WriteGitHubStepSummary(); err != nil {
 		fmt.Fprintf(progress, "warning: could not write GitHub step summary: %v\n", err)
+	}
+	if err := result.WriteGitHubOutput(); err != nil {
+		fmt.Fprintf(progress, "warning: could not write GitHub summary output: %v\n", err)
 	}
 	data, err := result.JSON()
 	if err != nil {
@@ -663,7 +662,11 @@ func announceBody(p *Prepared) (string, error) {
 // invocation, then runs the post-build stages once (the artifact is shared) and
 // signs every member repository by digest. It returns one summary entry per
 // member. Safe to call concurrently.
-func buildGroup(o Options, p *Prepared, r *run.Runner, plans []ImagePlan) ([]summary.Image, string, error) {
+func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summary.Image, string, error) {
+	plans := make([]ImagePlan, len(grp))
+	for i, m := range grp {
+		plans[i] = m.plan
+	}
 	rep := plans[0]
 
 	// Union of every member's refs and repos (deduped, order-stable).
@@ -687,13 +690,16 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, plans []ImagePlan) ([]sum
 	irs := make([]summary.Image, len(plans))
 	for i, plan := range plans {
 		irs[i] = summary.Image{
-			ID:         plan.Image.ID,
-			Version:    plan.Version,
-			Refs:       plan.Refs,
-			Signed:     !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
-			SBOM:       !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
-			Provenance: !o.NoPush && p.Config.Provenance.Enabled,
-			Tested:     !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
+			ID:           plan.Image.ID,
+			Version:      plan.Version,
+			Refs:         plan.Refs,
+			Repositories: plan.Repos,
+			Pushed:       !o.NoPush && !o.DryRun,
+			Reason:       grp[i].reason,
+			Signed:       !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
+			SBOM:         !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
+			Provenance:   !o.NoPush && p.Config.Provenance.Enabled,
+			Tested:       !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
 		}
 	}
 

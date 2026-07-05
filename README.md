@@ -133,7 +133,12 @@ re-resolving. Both come straight out of a `stevedore plan` entry (`.only` /
 
 Every release also writes `<dist>/release-summary.json` and, in GitHub Actions, a
 job-summary table (images, digests, signed/sbom/provenance/test status, vuln
-counts) to `$GITHUB_STEP_SUMMARY`.
+counts) to `$GITHUB_STEP_SUMMARY`. Each image entry carries `repositories`,
+`pushed` (false under `--no-push`), and a `reason` — why it built ("src/…
+since its release marker") or why it was skipped ("inputs unchanged"). Under
+GitHub Actions the compact JSON is also written as a `summary` step output
+(republished by the composite action), so workflows can drive per-image
+follow-ups — e.g. deploy notifications — filtered on `pushed`.
 
 ### Editor support
 
