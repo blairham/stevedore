@@ -400,11 +400,11 @@ images:
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.revision: "{{ .Commit }}"
       org.opencontainers.image.created: "{{ .Date }}"
-    secrets:              # BuildKit --secret entries
-      - id: github_token
-        env: GITHUB_TOKEN
-      # - id: npmrc
-      #   file: ./.npmrc
+    secrets:              # BuildKit --secret entries. An env-backed secret
+      - id: github_token  # whose variable is unset or empty is SKIPPED (like an
+        env: GITHUB_TOKEN # empty cache entry), so a config can declare a
+      # - id: npmrc        # CI-minted token (e.g. a private-module fetch token)
+      #   file: ./.npmrc   # that stays inert on local builds that don't export it.
     cache_from:           # buildx --cache-from sources; empty-rendering
       # entries are skipped, so an env-templated value enables caching only
       # where the environment provides it (e.g. CI) and stays inert locally
