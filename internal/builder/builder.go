@@ -69,7 +69,9 @@ func Build(r *run.Runner, s Spec) (string, error) {
 		args = append(args, "--label", k+"="+s.Labels[k])
 	}
 	for _, sec := range s.Secrets {
-		args = append(args, "--secret", secretArg(sec))
+		if arg, ok := secretArg(sec); ok {
+			args = append(args, "--secret", arg)
+		}
 	}
 	// Empty entries (e.g. a {{ index .Env "STEVEDORE_CACHE_TO" }} template rendering to
 	// "" outside CI) are skipped, so configs can gate caching on environment
@@ -117,16 +119,25 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	return readDigest(metaFile)
 }
 
-// secretArg renders a --secret value from an env- or file-backed secret.
-func secretArg(s config.Secret) string {
+// secretArg renders a --secret value from an env- or file-backed secret. The
+// bool is false when the secret should be omitted entirely: an env-backed
+// secret whose backing variable is unset or empty is skipped, so a config can
+// declare a secret (e.g. a CI-minted token for a private-module fetch) that is
+// simply absent where the environment doesn't provide it — the same
+// opt-in-by-environment contract the empty cache entries use. A file-backed
+// secret is always emitted; a missing file is a config error buildx surfaces.
+func secretArg(s config.Secret) (string, bool) {
 	if s.File != "" {
-		return fmt.Sprintf("id=%s,src=%s", s.ID, s.File)
+		return fmt.Sprintf("id=%s,src=%s", s.ID, s.File), true
 	}
 	env := s.Env
 	if env == "" {
 		env = s.ID
 	}
-	return fmt.Sprintf("id=%s,env=%s", s.ID, env)
+	if v, ok := os.LookupEnv(env); !ok || v == "" {
+		return "", false
+	}
+	return fmt.Sprintf("id=%s,env=%s", s.ID, env), true
 }
 
 func readDigest(path string) (string, error) {

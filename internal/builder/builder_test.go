@@ -11,22 +11,41 @@ import (
 )
 
 func TestSecretArg(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "x")
+	t.Setenv("GH_PRIVATE_TOKEN", "x")
 	cases := []struct {
 		name   string
 		secret config.Secret
 		want   string
+		ok     bool
 	}{
-		{"file-backed", config.Secret{ID: "npmrc", File: "/run/secrets/npmrc"}, "id=npmrc,src=/run/secrets/npmrc"},
-		{"env-backed", config.Secret{ID: "token", Env: "GITHUB_TOKEN"}, "id=token,env=GITHUB_TOKEN"},
-		{"env defaults to id", config.Secret{ID: "GITHUB_TOKEN"}, "id=GITHUB_TOKEN,env=GITHUB_TOKEN"},
-		{"file wins over env", config.Secret{ID: "s", Env: "E", File: "/f"}, "id=s,src=/f"},
+		{"file-backed", config.Secret{ID: "npmrc", File: "/run/secrets/npmrc"}, "id=npmrc,src=/run/secrets/npmrc", true},
+		{"env-backed", config.Secret{ID: "token", Env: "GITHUB_TOKEN"}, "id=token,env=GITHUB_TOKEN", true},
+		{"env defaults to id", config.Secret{ID: "GH_PRIVATE_TOKEN"}, "id=GH_PRIVATE_TOKEN,env=GH_PRIVATE_TOKEN", true},
+		{"file wins over env", config.Secret{ID: "s", Env: "E", File: "/f"}, "id=s,src=/f", true},
+		// An env-backed secret whose backing variable is unset is skipped, so a
+		// config can declare a CI-minted token that is simply absent locally.
+		{"env unset skips", config.Secret{ID: "gh_token", Env: "STEVEDORE_UNSET_SECRET_ENV"}, "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := secretArg(tc.secret); got != tc.want {
+			got, ok := secretArg(tc.secret)
+			if ok != tc.ok {
+				t.Fatalf("secretArg ok = %v, want %v", ok, tc.ok)
+			}
+			if got != tc.want {
 				t.Errorf("secretArg = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// An env-backed secret set to the empty string is treated as absent, matching
+// the unset case — a minted-but-empty token must not reach buildx.
+func TestSecretArgEmptyEnvSkips(t *testing.T) {
+	t.Setenv("STEVEDORE_EMPTY_SECRET_ENV", "")
+	if got, ok := secretArg(config.Secret{ID: "gh_token", Env: "STEVEDORE_EMPTY_SECRET_ENV"}); ok {
+		t.Errorf("secretArg = %q, ok=true, want skipped", got)
 	}
 }
 
