@@ -47,6 +47,33 @@ homebrew_casks:
     homepage: "https://github.com/blairham/stevedore"
     description: "Release Docker/OCI images the way goreleaser releases binaries"
     license: "MIT"
+    hooks:
+      post:
+        # Drop the download's quarantine flag, then ad-hoc sign ONLY if the
+        # binary has no valid signature already. The guard matters: once the
+        # notarize block is live, `codesign --force` would replace a real
+        # Developer ID signature with an ad-hoc one and undo the notarization.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/stevedore"]
+            if system_command("/usr/bin/codesign", args: ["-v", "#{staged_path}/stevedore"]).exit_status != 0
+              system_command "/usr/bin/codesign", args: ["--force", "--sign", "-", "#{staged_path}/stevedore"]
+            end
+          end
+
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids:
+        - stevedore
+      sign:
+        certificate: "{{.Env.MACOS_SIGN_P12}}"
+        password: "{{.Env.MACOS_SIGN_PASSWORD}}"
+      notarize:
+        issuer_id: "{{.Env.MACOS_NOTARY_ISSUER_ID}}"
+        key_id: "{{.Env.MACOS_NOTARY_KEY_ID}}"
+        key: "{{.Env.MACOS_NOTARY_KEY}}"
+        wait: true
 
 release:
   github:

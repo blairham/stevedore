@@ -62,3 +62,11 @@ jobs:
           # A PAT with contents:write on blairham/homebrew-tap, so the cask can
           # be committed to that separate repo.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Apple Developer ID signing + notarization of the darwin binaries.
+          # The notarize block in .goreleaser.yaml self-disables when
+          # MACOS_SIGN_P12 is unset, so releases still work without these.
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
