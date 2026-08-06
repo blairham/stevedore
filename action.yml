@@ -91,7 +91,7 @@ runs:
 
     - name: Install cosign
       if: ${{ inputs.install-cosign == 'true' }}
-      uses: sigstore/cosign-installer@v4
+      uses: sigstore/cosign-installer@v3
 
     - name: Install syft
       if: ${{ inputs.install-syft == 'true' }}
