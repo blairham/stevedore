@@ -589,7 +589,7 @@ stevedore release --snapshot --dry-run   # dogfood: stevedore releases itself
 
 Releases use two tools, one per artifact kind: **stevedore** builds and publishes
 its own container image (dogfooding), and **GoReleaser** (`.goreleaser.yaml`)
-publishes the CLI binary, the GitHub release, and the Homebrew cask. See
+publishes the CLI binary, the GitHub release, and the Homebrew formula. See
 `.github/workflows/release.yml`.
 
 ## License
