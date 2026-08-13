@@ -5,10 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
+
 	"github.com/blairham/stevedore/internal/importer"
 	"github.com/blairham/stevedore/internal/run"
 	"github.com/blairham/stevedore/internal/scaffold"
-	"github.com/spf13/cobra"
 )
 
 func newInitCmd() *cobra.Command {

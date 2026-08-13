@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/blairham/stevedore/internal/pipeline"
 	"github.com/spf13/cobra"
+
+	"github.com/blairham/stevedore/internal/pipeline"
 )
 
 // parsePins parses repeated --pin-version id=version flags into a map.

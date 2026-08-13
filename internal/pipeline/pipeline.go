@@ -961,8 +961,10 @@ func tagLister(cfg *config.Config, r *run.Runner) func(string) ([]string, error)
 			if region != "" {
 				reg = region
 			}
-			args := []string{"ecr", "describe-images", "--repository-name", name,
-				"--query", "imageDetails[].imageTags[]", "--output", "text"}
+			args := []string{
+				"ecr", "describe-images", "--repository-name", name,
+				"--query", "imageDetails[].imageTags[]", "--output", "text",
+			}
 			if reg != "" {
 				args = append(args, "--region", reg)
 			}

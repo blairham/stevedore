@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/blairham/stevedore/internal/pipeline"
 	"github.com/spf13/cobra"
+
+	"github.com/blairham/stevedore/internal/pipeline"
 )
 
 func newPlanCmd() *cobra.Command {

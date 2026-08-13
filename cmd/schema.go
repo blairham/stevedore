@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/jsonschema"
-	"github.com/spf13/cobra"
 )
 
 func newSchemaCmd() *cobra.Command {

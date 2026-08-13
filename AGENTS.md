@@ -29,9 +29,9 @@ Prefer `make` — run `make help` to list targets.
 ```sh
 make build     # go build ./...
 make test      # go test -race ./...
-make lint      # gofmt (check) + go vet
+make lint      # gofumpt (check) + go vet + golangci-lint
 make check     # lint + test (mirror CI locally, run before a PR)
-make fmt       # gofmt -w .
+make fmt       # go tool gofumpt -w .
 make tidy      # go mod tidy  (after changing deps)
 ```
 
@@ -83,6 +83,10 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 - **Templates use `missingkey=error`** — referencing an undefined field is an
   error, never a silent empty string.
 - Keep the binary dependency-light; think twice before adding a module.
+- **Formatter is gofumpt**, pinned in `go.mod`'s `tool` block and run as
+  `go tool gofumpt`. At commit time formatting is applied by the
+  `golangci-lint-fmt` hook, which runs every formatter in `.golangci.yml`
+  (gofumpt AND goimports) — a superset of what `make fmt` does.
 
 ## Architecture — the release pipeline
 
@@ -108,6 +112,12 @@ publishes the CLI binary + Homebrew cask + GitHub release. See
 
 ## Working agreements
 
-- Run `make check` before proposing a change; keep the tree `gofmt`-clean.
+- Run `make check` before proposing a change; keep the tree `gofumpt`-clean.
+- `pre-commit install` once per clone. Hooks: hygiene (trailing whitespace,
+  EOF, YAML, large files, merge conflicts, private keys), `go-mod-tidy-repo`,
+  `go-fumpt-repo`, and gitleaks (allowlist in `.gitleaks.toml`).
+- **Linter is golangci-lint v2**, `go tool`-pinned, config in `.golangci.yml`.
+  It runs in CI and in `make lint` — not in pre-commit, where it's too slow
+  for every commit. `go tool golangci-lint fmt` applies the formatter fixes.
 - Add/extend table tests for pure logic you touch.
 - Don't commit, push, tag, or create releases unless explicitly asked.
