@@ -3,10 +3,11 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/run"
 	"github.com/blairham/stevedore/internal/verifier"
-	"github.com/spf13/cobra"
 )
 
 func newVerifyCmd() *cobra.Command {

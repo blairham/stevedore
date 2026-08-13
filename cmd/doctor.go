@@ -3,9 +3,10 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/preflight"
-	"github.com/spf13/cobra"
 )
 
 func newDoctorCmd() *cobra.Command {

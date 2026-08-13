@@ -13,14 +13,15 @@ test: ## Run tests with the race detector
 	go test -race ./...
 
 fmt: ## Format the code
-	gofmt -w .
+	go tool gofumpt -w .
 
 vet: ## Run go vet
 	go vet ./...
 
-lint: ## Static checks: gofmt (check) + go vet
-	@test -z "$$(gofmt -l .)" || (echo "gofmt needed in:"; gofmt -l .; exit 1)
+lint: ## Static checks: gofumpt (check) + go vet + golangci-lint
+	@test -z "$$(go tool gofumpt -l .)" || (echo "gofumpt needed in:"; go tool gofumpt -l .; exit 1)
 	go vet ./...
+	go tool golangci-lint run --timeout=10m
 
 check: lint test ## Lint + test (mirror CI locally, run before a PR)
 

@@ -445,10 +445,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("test.timeout %q invalid: %w", c.Test.Timeout, err)
 		}
 	}
-	if err := c.Versioning.validate(); err != nil {
-		return err
-	}
-	return nil
+	return c.Versioning.validate()
 }
 
 // validate checks the versioning strategy and its required fields.

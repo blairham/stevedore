@@ -17,13 +17,27 @@ jobs:
         with:
           go-version: "stable"
       - name: Format check
-        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+        run: test -z "$(go tool gofumpt -l .)" || (go tool gofumpt -l . && exit 1)
       - name: Vet
         run: go vet ./...
       - name: Test
         run: go test -race ./...
       - name: Build
         run: go build ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+          cache: true
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          args: --timeout=10m
 
   action-smoke:
     # Exercises the composite action end to end against the CURRENT checkout:

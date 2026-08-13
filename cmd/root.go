@@ -4,9 +4,10 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/pipeline"
-	"github.com/spf13/cobra"
 )
 
 // Build-time version, overridden via -ldflags "-X .../cmd.version=...".
