@@ -107,7 +107,7 @@ whose scoped paths didn't change, using per-image globs or the `.csproj` graph.
 
 Two tools, one per artifact kind: **stevedore** releases its own container image
 (dogfooding, `.stevedore.yaml`), and **GoReleaser** (`.goreleaser.yaml`)
-publishes the CLI binary + Homebrew cask + GitHub release. See
+publishes the CLI binary + Homebrew formula + GitHub release. See
 `.github/workflows/release.yml`.
 
 ## Working agreements
