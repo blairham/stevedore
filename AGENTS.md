@@ -46,7 +46,7 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 
 | Package | Purpose |
 |---------|---------|
-| `cmd` | cobra commands: release, plan, build, check, verify, doctor, init, schema |
+| `cmd` | cobra commands: release, merge, plan, build, check, verify, doctor, init, schema |
 | `internal/config` | `.stevedore.yaml` schema, load, defaults, validation |
 | `internal/pipeline` | orchestrates the whole release; the integration layer |
 | `internal/builder` | `docker buildx` build/push (multi-arch, provenance, cache) |
@@ -102,6 +102,12 @@ The version feeding the tags is resolved first (`internal/versioner`); under the
 `registry`/`ecr` strategies each image is versioned independently from its own
 repo. Change detection (`--only-changed` / `--changed-since`) can skip images
 whose scoped paths didn't change, using per-image globs or the `.csproj` graph.
+
+Split mode spreads the build across native-arch CI runners: `release --split
+<platform>` legs push untagged by digest (recorded under `dist/digests/`), and
+`stevedore merge` assembles the tagged manifest lists and runs the tail stages.
+`plan --split-platforms` emits the per-platform matrix (with runner hints) that
+drives the fan-out.
 
 ## Releasing stevedore itself
 

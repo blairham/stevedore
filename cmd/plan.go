@@ -11,9 +11,10 @@ import (
 
 func newPlanCmd() *cobra.Command {
 	var (
-		onlyChanged  bool
-		changedSince string
-		snapshot     bool
+		onlyChanged    bool
+		changedSince   string
+		snapshot       bool
+		splitPlatforms bool
 	)
 	cmd := &cobra.Command{
 		Use:   "plan",
@@ -22,7 +23,10 @@ func newPlanCmd() *cobra.Command {
 			"detection (marker refs, --changed-since, or --only-changed), and build-once\n" +
 			"grouping — and prints it as JSON without building anything. The `include`\n" +
 			"array is GitHub Actions matrix shape: fan one CI job out per entry and run\n" +
-			"`stevedore release --only <entry.only> <entry.pins>` in each.",
+			"`stevedore release --only <entry.only> <entry.pins>` in each.\n" +
+			"With --split-platforms each entry covers one platform of its build group\n" +
+			"(plus a native `runner` hint): legs add `--split <entry.platform>` and a\n" +
+			"final job runs `stevedore merge` to assemble the manifest lists.",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			o, err := baseOptions()
 			if err != nil {
@@ -31,6 +35,7 @@ func newPlanCmd() *cobra.Command {
 			o.OnlyChanged = onlyChanged
 			o.ChangedSince = changedSince
 			o.Snapshot = snapshot
+			o.SplitPerPlatform = splitPlatforms
 			result, err := pipeline.Plan(o)
 			if err != nil {
 				return err
@@ -48,5 +53,6 @@ func newPlanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
 	cmd.Flags().StringVar(&changedSince, "changed-since", "", "git ref: plan only images whose paths changed since this ref")
 	cmd.Flags().BoolVar(&snapshot, "snapshot", false, "plan a snapshot release (affects floating tags and versioning)")
+	cmd.Flags().BoolVar(&splitPlatforms, "split-platforms", false, "emit one matrix entry per build group per platform, with native runner hints (pair with `release --split` and `merge`)")
 	return cmd
 }

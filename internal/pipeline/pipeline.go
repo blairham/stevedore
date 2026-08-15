@@ -64,7 +64,19 @@ type Options struct {
 	// PinVersions overrides per-image version resolution (id → version), so a
 	// matrix job tags exactly what the plan resolved.
 	PinVersions map[string]string
-	Now         time.Time
+	// SplitPlatforms restricts the build to these platforms and pushes the
+	// result untagged, by digest (split mode: one native-arch CI leg). Digests
+	// land under dist/digests/ for a later `merge` run; the release tail
+	// (scan/test/sign/sbom/changelog/publish) is skipped.
+	SplitPlatforms []string
+	// FromDigests skips building entirely: each image's per-arch digests
+	// (written by split legs into dist/digests/) are merged into a tagged
+	// manifest list via `imagetools create`, then the release tail runs.
+	FromDigests bool
+	// SplitPerPlatform makes the plan emit one matrix entry per build group
+	// per platform (with a native runner hint) instead of one per group.
+	SplitPerPlatform bool
+	Now              time.Time
 }
 
 // ImagePlan is a fully-resolved plan for one image.
@@ -368,6 +380,16 @@ func isFloating(tag string) bool {
 // every stage that needs a pushed artifact (sign, SBOM, scan, provenance,
 // GitHub release, announce).
 func Release(o Options) error {
+	split := len(o.SplitPlatforms) > 0
+	if split {
+		if o.NoPush {
+			return fmt.Errorf("--split pushes per-arch images by digest; drop --no-push")
+		}
+		// A split leg only builds and pushes by digest; everything that
+		// operates on the final tagged manifest list belongs to the merge run.
+		o.SkipChangelog = true
+		o.SkipPublish = true
+	}
 	o.Push = !o.NoPush
 	if o.NoPush {
 		// A validate-only build discards the tag, so a version that can't be
@@ -393,6 +415,11 @@ func Release(o Options) error {
 		ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && p.Config.Release.GitHub.Enabled
 		// --no-push builds only; none of the push-dependent tools are required.
 		opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease}
+		if split {
+			// A split leg needs only the build toolchain — the merge run
+			// carries the sign/scan/sbom/publish requirements.
+			opts = preflight.Opts{}
+		}
 		if err := checkTools(p.Config, opts); err != nil {
 			return err
 		}
@@ -493,7 +520,9 @@ func Release(o Options) error {
 	// images (marker diff, --changed-since, or --only): the marker records
 	// "last released", not "last marker-diffed", so matrix jobs running
 	// `release --only <id>` keep every image's baseline current.
-	if cd.MarkerRefs && !o.DryRun && !o.NoPush && !o.Snapshot {
+	// Split legs never advance markers: "released" means the merged manifest
+	// list was published, which is the merge run's outcome.
+	if cd.MarkerRefs && !o.DryRun && !o.NoPush && !o.Snapshot && !split {
 		for _, im := range result.Images {
 			if im.Skipped {
 				continue
@@ -534,8 +563,20 @@ func Release(o Options) error {
 		return err
 	}
 
-	fmt.Fprintln(progress, "==> release complete")
+	if split {
+		fmt.Fprintln(progress, "==> split build complete — assemble with `stevedore merge`")
+	} else {
+		fmt.Fprintln(progress, "==> release complete")
+	}
 	return nil
+}
+
+// Merge is the second half of a split release: it stitches the per-arch
+// digests the split legs pushed (dist/digests/) into one tagged manifest list
+// per image, then runs the full release tail on the merged artifact.
+func Merge(o Options) error {
+	o.FromDigests = true
+	return Release(o)
 }
 
 // emitSummary writes the release report: a GitHub Actions job-summary table
@@ -687,6 +728,7 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 		}
 	}
 
+	split := len(o.SplitPlatforms) > 0
 	irs := make([]summary.Image, len(plans))
 	for i, plan := range plans {
 		irs[i] = summary.Image{
@@ -696,10 +738,14 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 			Repositories: plan.Repos,
 			Pushed:       !o.NoPush && !o.DryRun,
 			Reason:       grp[i].reason,
-			Signed:       !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
-			SBOM:         !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
+			Signed:       !split && !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
+			SBOM:         !split && !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
 			Provenance:   !o.NoPush && p.Config.Provenance.Enabled,
-			Tested:       !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
+			Tested:       !split && !o.NoPush && !o.SkipTest && p.Config.Test.Enabled,
+		}
+		if split {
+			// A split leg pushes by digest only — no tagged refs exist yet.
+			irs[i].Refs = nil
 		}
 	}
 
@@ -707,13 +753,53 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 	if len(plans) > 1 {
 		label = fmt.Sprintf("%s (+%d)", rep.Image.ID, len(plans)-1)
 	}
-	fmt.Fprintf(progress, "==> building %s\n", label)
-	for _, ref := range refs {
-		fmt.Fprintf(progress, "    - %s\n", ref)
+
+	// Split leg: build the given platform(s) natively, push untagged by
+	// digest, record the digest for the merge run, and stop — every stage
+	// below operates on the tagged manifest list the merge run creates.
+	if split {
+		fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(o.SplitPlatforms, ","))
+		spec := toSpec(rep, o.Dir, true, false, p.Config.Provenance)
+		spec.Platforms = o.SplitPlatforms
+		spec.PushByDigest = true
+		spec.Refs = repos // untagged: bare repo names
+		digest, err := builder.Build(r, spec)
+		if err != nil {
+			return irs, "", err
+		}
+		if digest == "" && o.DryRun {
+			digest = "sha256:<digest-resolved-at-build-time>"
+		}
+		for i := range irs {
+			irs[i].Digest = digest
+		}
+		if !o.DryRun {
+			if err := writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), o.SplitPlatforms, digest); err != nil {
+				return irs, "", err
+			}
+		}
+		return irs, "", nil
 	}
-	spec := toSpec(rep, o.Dir, !o.NoPush, false, p.Config.Provenance)
-	spec.Refs = refs // push the one build to every member's tags
-	digest, err := builder.Build(r, spec)
+
+	var digest string
+	var err error
+	if o.FromDigests {
+		// Merge mode: the split legs already built and pushed per-arch images
+		// by digest; assemble them into one tagged manifest list per repo.
+		fmt.Fprintf(progress, "==> merging %s\n", label)
+		for _, ref := range refs {
+			fmt.Fprintf(progress, "    - %s\n", ref)
+		}
+		digest, err = mergeGroup(r, o, rep, p.Config.Dist, repos, refs)
+	} else {
+		fmt.Fprintf(progress, "==> building %s\n", label)
+		for _, ref := range refs {
+			fmt.Fprintf(progress, "    - %s\n", ref)
+		}
+		spec := toSpec(rep, o.Dir, !o.NoPush, false, p.Config.Provenance)
+		spec.Refs = refs // push the one build to every member's tags
+		digest, err = builder.Build(r, spec)
+	}
 	if err != nil {
 		return irs, "", err
 	}

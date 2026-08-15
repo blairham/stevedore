@@ -48,7 +48,7 @@ func TestNewPlanResult_MatrixShape(t *testing.T) {
 	}
 	skipped := []imageEval{evalFor("c", "other/Dockerfile", "3.0.0", false, "unchanged")}
 
-	r := newPlanResult(toBuild, skipped)
+	r := newPlanResult(toBuild, skipped, false)
 
 	if len(r.Include) != 1 {
 		t.Fatalf("include entries = %d, want 1", len(r.Include))
@@ -75,7 +75,7 @@ func TestNewPlanResult_MatrixShape(t *testing.T) {
 }
 
 func TestNewPlanResult_EmptyPlanMarshalsEmptyInclude(t *testing.T) {
-	r := newPlanResult(nil, nil)
+	r := newPlanResult(nil, nil, false)
 	if r.Include == nil || len(r.Include) != 0 {
 		t.Errorf("include should be an empty (non-nil) slice so JSON emits [], got %#v", r.Include)
 	}
