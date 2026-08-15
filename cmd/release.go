@@ -89,7 +89,7 @@ func newReleaseCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to build unconditionally, skipping change detection (matrix mode: one plan entry per job)")
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; from the plan's `pins`)")
 	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
-	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation and announcements")
+	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation, announcements, and notify webhooks")
 	cmd.Flags().StringSliceVar(&split, "split", nil, "platform(s) to build natively on this runner, pushed untagged by digest for a later `stevedore merge` (native multi-arch CI: one matrix leg per arch)")
 	return cmd
 }

@@ -50,6 +50,7 @@ type Config struct {
 	Changelog  Changelog  `yaml:"changelog"`
 	Release    Release    `yaml:"release"`
 	Announce   Announce   `yaml:"announce"`
+	Notify     Notify     `yaml:"notify"`
 }
 
 // Release configures post-build publishing steps.
@@ -69,6 +70,30 @@ type GitHubRelease struct {
 type Announce struct {
 	Slack   Webhook `yaml:"slack"`
 	Discord Webhook `yaml:"discord"`
+}
+
+// Notify configures machine-readable post-push notifications, so a CD system
+// can react to newly published image digests. Distinct from announce: notify
+// fires once per pushed image with a structured JSON payload, while announce
+// posts one human-readable end-of-release message.
+type Notify struct {
+	Webhook NotifyWebhook `yaml:"webhook"`
+}
+
+// NotifyWebhook is a generic webhook that receives one JSON payload per pushed
+// image. The URL and any credentials are read from environment variables so
+// secrets stay out of the config file.
+type NotifyWebhook struct {
+	Enabled bool `yaml:"enabled"`
+	// URLEnv is the environment variable holding the webhook URL.
+	URLEnv string `yaml:"url_env"`
+	// BearerEnv names an environment variable whose value is sent as an
+	// "Authorization: Bearer <token>" header (optional).
+	BearerEnv string `yaml:"bearer_env"`
+	// HMACEnv names an environment variable holding a shared secret; when set,
+	// the request body is signed with HMAC-SHA256 and the digest is sent as
+	// "X-Stevedore-Signature: sha256=<hex>" (optional).
+	HMACEnv string `yaml:"hmac_env"`
 }
 
 // Webhook is a single chat webhook target. The URL is read from an environment
@@ -439,6 +464,9 @@ func (c *Config) Validate() error {
 		default:
 			return fmt.Errorf("provenance.mode %q invalid (want min or max)", c.Provenance.Mode)
 		}
+	}
+	if c.Notify.Webhook.Enabled && c.Notify.Webhook.URLEnv == "" {
+		return fmt.Errorf("notify.webhook.enabled requires notify.webhook.url_env")
 	}
 	if c.Test.Enabled && c.Test.Timeout != "" {
 		if _, err := time.ParseDuration(c.Test.Timeout); err != nil {

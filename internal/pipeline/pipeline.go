@@ -536,6 +536,34 @@ func Release(o Options) error {
 		}
 	}
 
+	// Machine-readable post-push notifications fire once per pushed image so a
+	// CD system can react to the new digests. Unlike announce they also fire on
+	// snapshots (the payload carries the snapshot flag) — but never on split
+	// legs, where the merged manifest list hasn't been published yet.
+	if p.Config.Notify.Webhook.Enabled && !o.NoPush && !o.SkipPublish {
+		var notes []publish.Notification
+		for _, im := range result.Images {
+			if im.Skipped {
+				continue
+			}
+			notes = append(notes, publish.Notification{
+				Project:      p.Config.ProjectName,
+				Snapshot:     o.Snapshot,
+				Image:        im.ID,
+				Version:      im.Version,
+				Digest:       im.Digest,
+				Repositories: im.Repositories,
+				Refs:         im.Refs,
+			})
+		}
+		if err := publish.Notify(r, p.Config.Notify.Webhook, notes); err != nil {
+			return err
+		}
+		if len(notes) > 0 {
+			fmt.Fprintf(progress, "==> notified webhook of %d pushed image(s)\n", len(notes))
+		}
+	}
+
 	changelogPath := ""
 	if !o.SkipChangelog && p.Config.Changelog.Enabled {
 		notes, err := changelog.Generate(p.Config.Changelog, p.Git, o.Dir)

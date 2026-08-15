@@ -579,10 +579,45 @@ announce:
   discord:
     enabled: false
     webhook_env: DISCORD_WEBHOOK
+
+notify:                   # machine-readable post-push notification (CD trigger)
+  webhook:
+    enabled: true
+    url_env: DEPLOY_WEBHOOK_URL    # env var holding the webhook URL
+    # bearer_env: DEPLOY_WEBHOOK_TOKEN   # sent as "Authorization: Bearer <token>"
+    # hmac_env: DEPLOY_WEBHOOK_SECRET    # body signed with HMAC-SHA256, sent as
+    #                                    # "X-Stevedore-Signature: sha256=<hex>"
 ```
 
 Publishing (`release.github` + `announce`) runs only on real releases, never on
 `--snapshot`, and can be turned off per-run with `--skip-publish`.
+
+### Post-push notifications
+
+Where `announce` posts one human-readable message at the end of a release,
+`notify.webhook` POSTs one structured JSON payload **per pushed image**, so a CD
+system can react to the newly published digest (GitOps sync, rollout trigger)
+without bespoke CI glue:
+
+```json
+{
+  "project": "myapp",
+  "snapshot": false,
+  "image": "api",
+  "version": "1.4.0",
+  "digest": "sha256:9f8e…",
+  "repositories": ["ghcr.io/acme/api"],
+  "refs": ["ghcr.io/acme/api:1.4.0", "ghcr.io/acme/api:latest"]
+}
+```
+
+Notifications fire only after the image passed every gate (scan, smoke test)
+and its release stages completed. Unlike `announce`, they also fire on
+`--snapshot` pushes — the payload carries the `snapshot` flag so the consumer
+can route dev vs. prod — and they respect `--skip-publish`. On a split release
+they fire from the `merge` run, once the tagged manifest lists exist. The URL
+and credentials come from environment variables; a missing variable or a
+non-2xx response fails the release rather than silently skipping the trigger.
 
 ### Template context
 

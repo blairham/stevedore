@@ -27,7 +27,8 @@ func newMergeCmd() *cobra.Command {
 			"and pushes it untagged, by digest, recording the digest under dist/digests/.\n" +
 			"merge then stitches those digests into one tagged manifest list per image\n" +
 			"(docker buildx imagetools create) and runs the release tail on the merged\n" +
-			"artifact: scan, smoke test, sign, SBOM, changelog, GitHub release, announce.\n" +
+			"artifact: scan, smoke test, sign, SBOM, changelog, GitHub release,\n" +
+			"announce, notify.\n" +
 			"In CI, upload dist/digests/ from every leg and download it before merging.",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			o, err := baseOptions()
@@ -57,7 +58,7 @@ func newMergeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipScan, "skip-scan", false, "skip vulnerability scanning")
 	cmd.Flags().BoolVar(&skipTest, "skip-test", false, "skip the post-build smoke test")
 	cmd.Flags().BoolVar(&skipChangelog, "skip-changelog", false, "skip changelog generation")
-	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation and announcements")
+	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation, announcements, and notify webhooks")
 	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to merge (matrix mode: match the split legs' --only)")
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; match the split legs' pins)")
 	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")

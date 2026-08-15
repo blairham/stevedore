@@ -64,7 +64,7 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 | `internal/changed` | git-diff change detection + glob matching |
 | `internal/fingerprint` | content-hash change detection (`--only-changed`) |
 | `internal/projgraph` | .NET `.csproj` dependency-graph resolver |
-| `internal/publish` | GitHub release (`gh`) + Slack/Discord announce |
+| `internal/publish` | GitHub release (`gh`) + Slack/Discord announce + notify webhook |
 | `internal/summary` | JSON + GitHub-step-summary release report |
 | `internal/preflight` | verify required external tools are installed |
 | `internal/scaffold` | `stevedore init` — scan Dockerfiles |

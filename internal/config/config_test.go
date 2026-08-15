@@ -132,6 +132,20 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "notify webhook without url_env",
+			cfg: Config{Version: 1, Images: []Image{
+				{ID: "a", Repositories: []string{"r1"}},
+			}, Notify: Notify{Webhook: NotifyWebhook{Enabled: true}}},
+			wantErr: true,
+		},
+		{
+			name: "notify webhook with url_env",
+			cfg: Config{Version: 1, Images: []Image{
+				{ID: "a", Repositories: []string{"r1"}},
+			}, Notify: Notify{Webhook: NotifyWebhook{Enabled: true, URLEnv: "DEPLOY_HOOK"}}},
+			wantErr: false,
+		},
+		{
 			name: "valid",
 			cfg: Config{Version: 1, Images: []Image{
 				{ID: "a", Repositories: []string{"r1"}, Secrets: []Secret{{ID: "s", Env: "E"}}},
