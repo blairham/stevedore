@@ -2,4 +2,4 @@
 # Install all: asdf install
 
 # Go compiler — keep in sync with go.mod
-golang 1.26.1
+golang 1.26.6
