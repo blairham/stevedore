@@ -118,9 +118,9 @@ func TestRenderYAML(t *testing.T) {
 		"- id: api",
 		"dockerfile: api/Dockerfile",
 		"target: prod",
-		"platforms: [linux/amd64, linux/arm64]",
-		`repositories: ["ghcr.io/acme/api"]`,
-		"cache_from:",
+		"platforms:\n      - linux/amd64\n      - linux/arm64",
+		"repositories:\n      - ghcr.io/acme/api",
+		"cache_from:\n      - \"type=registry,ref=ghcr.io/acme/api:cache\"",
 		"cosign:",
 	} {
 		if !strings.Contains(out, want) {

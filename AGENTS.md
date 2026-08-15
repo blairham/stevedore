@@ -68,7 +68,7 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 | `internal/summary` | JSON + GitHub-step-summary release report |
 | `internal/preflight` | verify required external tools are installed |
 | `internal/scaffold` | `stevedore init` — scan Dockerfiles |
-| `internal/importer` | import from a goreleaser or docker-bake config |
+| `internal/importer` | import from a goreleaser, docker-bake, or per-service manifest config |
 | `internal/jsonschema` | JSON Schema of the config, from the Go structs |
 
 ## Code Conventions

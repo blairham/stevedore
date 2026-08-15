@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,9 +15,11 @@ import (
 
 func newInitCmd() *cobra.Command {
 	var (
-		force bool
-		from  string
-		file  string
+		force        bool
+		from         string
+		file         string
+		mapFields    []string
+		mapBuildArgs []string
 	)
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -25,7 +28,14 @@ func newInitCmd() *cobra.Command {
 			"Dockerfiles (one image each). With --from it imports an existing setup:\n\n" +
 			"  --from dockerfiles   scan Dockerfiles (default)\n" +
 			"  --from goreleaser    import a GoReleaser config's dockers: blocks\n" +
-			"  --from bake          import a docker-bake target set\n\n" +
+			"  --from bake          import a docker-bake target set\n" +
+			"  --from services      import a directory of per-service manifests\n" +
+			"                       (--file <dir>, one YAML per service)\n\n" +
+			"For --from services, each manifest maps to one image. The default field\n" +
+			"names are name, image, dockerfile, context, target, sourcePaths, and\n" +
+			"project (emitted as a PROJECT build arg); adapt them to your schema with\n" +
+			"--map (e.g. --map paths=source_paths, dotted paths reach nested keys) and\n" +
+			"--map-build-arg (e.g. --map-build-arg BUILD_PROJECT=build.project).\n\n" +
 			"Signing, SBOM, scan, and provenance are enabled by default — review before\n" +
 			"running `stevedore release`.",
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -35,7 +45,7 @@ func newInitCmd() *cobra.Command {
 			}
 			name := filepath.Base(mustAbs(flagDir))
 
-			content, summary, err := scaffoldContent(from, file, name)
+			content, summary, err := scaffoldContent(from, file, name, mapFields, mapBuildArgs)
 			if err != nil {
 				return err
 			}
@@ -48,12 +58,14 @@ func newInitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing config")
-	cmd.Flags().StringVar(&from, "from", "dockerfiles", "source: dockerfiles | goreleaser | bake")
-	cmd.Flags().StringVar(&file, "file", "", "source file (for --from goreleaser|bake)")
+	cmd.Flags().StringVar(&from, "from", "dockerfiles", "source: dockerfiles | goreleaser | bake | services")
+	cmd.Flags().StringVar(&file, "file", "", "source file (for --from goreleaser|bake) or directory (for --from services)")
+	cmd.Flags().StringArrayVar(&mapFields, "map", nil, "services: map a config field to a manifest key, field=key (fields: id, repositories, dockerfile, context, target, paths)")
+	cmd.Flags().StringArrayVar(&mapBuildArgs, "map-build-arg", nil, "services: emit a build arg from a manifest key, ARG=key (replaces the default PROJECT=project)")
 	return cmd
 }
 
-func scaffoldContent(from, file, name string) (content, summary string, err error) {
+func scaffoldContent(from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
 	switch from {
 	case "", "dockerfiles":
 		imgs, err := scaffold.ScanDockerfiles(flagDir, name)
@@ -86,9 +98,63 @@ func scaffoldContent(from, file, name string) (content, summary string, err erro
 		}
 		return importer.RenderYAML(name, "docker-bake", imgs), fmt.Sprintf("imported %d image(s) from docker-bake", len(imgs)), nil
 
+	case "services":
+		if file == "" {
+			return "", "", fmt.Errorf("--from services needs --file <dir> pointing at the per-service manifests")
+		}
+		m, err := serviceMapping(mapFields, mapBuildArgs)
+		if err != nil {
+			return "", "", err
+		}
+		imgs, err := importer.FromServicesDir(filepath.Join(flagDir, file), m)
+		if err != nil {
+			return "", "", err
+		}
+		return importer.RenderYAML(name, "services ("+file+")", imgs), fmt.Sprintf("imported %d image(s) from %s", len(imgs), file), nil
+
 	default:
-		return "", "", fmt.Errorf("unknown --from %q (want dockerfiles, goreleaser, or bake)", from)
+		return "", "", fmt.Errorf("unknown --from %q (want dockerfiles, goreleaser, bake, or services)", from)
 	}
+}
+
+// serviceMapping applies --map / --map-build-arg overrides on top of the
+// default per-service manifest field names. Any --map-build-arg replaces the
+// default build-arg set outright — the org's args are theirs to define.
+func serviceMapping(mapFields, mapBuildArgs []string) (importer.ServiceMapping, error) {
+	m := importer.DefaultServiceMapping()
+	for _, kv := range mapFields {
+		field, key, ok := strings.Cut(kv, "=")
+		if !ok || field == "" || key == "" {
+			return m, fmt.Errorf("--map %q: want field=manifest_key", kv)
+		}
+		switch field {
+		case "id":
+			m.ID = key
+		case "repositories":
+			m.Repositories = key
+		case "dockerfile":
+			m.Dockerfile = key
+		case "context":
+			m.Context = key
+		case "target":
+			m.Target = key
+		case "paths":
+			m.Paths = key
+		default:
+			return m, fmt.Errorf("--map: unknown field %q (want id, repositories, dockerfile, context, target, or paths)", field)
+		}
+	}
+	if len(mapBuildArgs) > 0 {
+		m.BuildArgs = map[string]string{}
+	}
+	for _, kv := range mapBuildArgs {
+		arg, key, ok := strings.Cut(kv, "=")
+		if !ok || arg == "" || key == "" {
+			return m, fmt.Errorf("--map-build-arg %q: want ARG=manifest_key", kv)
+		}
+		m.BuildArgs[arg] = key
+	}
+	return m, nil
 }
 
 // bakeImages resolves a bake target set via `docker buildx bake --print` and

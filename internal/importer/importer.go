@@ -1,5 +1,6 @@
-// Package importer converts an existing docker-bake or GoReleaser config into a
-// stevedore config, so teams can adopt stevedore without hand-writing one.
+// Package importer converts an existing docker-bake, GoReleaser, or
+// per-service manifest setup into a stevedore config, so teams can adopt
+// stevedore without hand-writing one.
 package importer
 
 import (
@@ -24,6 +25,7 @@ type Image struct {
 	Labels       map[string]string
 	Repositories []string
 	Tags         []string
+	Paths        []string
 	CacheFrom    []string
 	CacheTo      []string
 }
@@ -46,12 +48,11 @@ func RenderYAML(projectName, source string, imgs []Image) string {
 		if img.Target != "" {
 			fmt.Fprintf(&b, "    target: %s\n", img.Target)
 		}
-		if len(img.Platforms) > 0 {
-			fmt.Fprintf(&b, "    platforms: [%s]\n", strings.Join(img.Platforms, ", "))
-		}
+		writeList(&b, "platforms", img.Platforms)
 		writeList(&b, "repositories", img.Repositories)
 		writeList(&b, "tags", defaultTags(img.Tags))
 		writeList(&b, "build_args", img.BuildArgs)
+		writeList(&b, "paths", img.Paths)
 		writeList(&b, "cache_from", img.CacheFrom)
 		writeList(&b, "cache_to", img.CacheTo)
 		if len(img.Labels) > 0 {
@@ -86,15 +87,24 @@ changelog:
 	return b.String()
 }
 
+// writeList emits a block-style YAML sequence, quoting entries only when a
+// plain scalar would misparse (templates, colons, comments, …).
 func writeList(b *strings.Builder, key string, vals []string) {
 	if len(vals) == 0 {
 		return
 	}
-	quoted := make([]string, len(vals))
-	for i, v := range vals {
-		quoted[i] = fmt.Sprintf("%q", v)
+	fmt.Fprintf(b, "    %s:\n", key)
+	for _, v := range vals {
+		fmt.Fprintf(b, "      - %s\n", yamlScalar(v))
 	}
-	fmt.Fprintf(b, "    %s: [%s]\n", key, strings.Join(quoted, ", "))
+}
+
+// yamlScalar returns v quoted when it can't stand as a plain YAML scalar.
+func yamlScalar(v string) string {
+	if v == "" || v != strings.TrimSpace(v) || strings.ContainsAny(v, "{}[]:#'\"&*?|>%@`,") {
+		return fmt.Sprintf("%q", v)
+	}
+	return v
 }
 
 func defaultTags(tags []string) []string {
