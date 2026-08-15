@@ -132,6 +132,26 @@ type PlanEntry struct {
 	Pins string `json:"pins"`
 	// Reason is why this group builds (first changed member's reason).
 	Reason string `json:"reason"`
+	// Platform is set under --split-platforms: this entry builds one platform
+	// of its group, via `release --only <only> <pins> --split <platform>`.
+	Platform string `json:"platform,omitempty"`
+	// Runner is the suggested GitHub-hosted runner label for Platform
+	// (`runs-on: ${{ matrix.runner }}`); empty when there is no native
+	// GitHub-hosted runner for the platform.
+	Runner string `json:"runner,omitempty"`
+}
+
+// defaultRunner maps a build platform to the GitHub-hosted runner that executes
+// it natively. Platforms without a hosted native runner return "" — the
+// workflow picks (or emulates) one itself.
+func defaultRunner(platform string) string {
+	switch platform {
+	case "linux/amd64":
+		return "ubuntu-24.04"
+	case "linux/arm64":
+		return "ubuntu-24.04-arm"
+	}
+	return ""
 }
 
 // PlanSkip is one image the plan decided not to build.
@@ -172,11 +192,14 @@ func Plan(o Options) (*PlanResult, error) {
 		return nil, err
 	}
 	toBuild, skipped := groupPlans(o.Dir, evals)
-	return newPlanResult(toBuild, skipped), nil
+	return newPlanResult(toBuild, skipped, o.SplitPerPlatform), nil
 }
 
 // newPlanResult renders build groups and skips into the emitted plan document.
-func newPlanResult(toBuild [][]imageEval, skipped []imageEval) *PlanResult {
+// Under splitPerPlatform each group multiplies into one entry per platform
+// (with a native-runner hint) so a workflow can fan a leg out per arch; groups
+// with no configured platforms keep a single, unsplit entry.
+func newPlanResult(toBuild [][]imageEval, skipped []imageEval, splitPerPlatform bool) *PlanResult {
 	result := &PlanResult{Include: []PlanEntry{}, Skipped: []PlanSkip{}}
 	for _, grp := range toBuild {
 		entry := PlanEntry{
@@ -194,6 +217,15 @@ func newPlanResult(toBuild [][]imageEval, skipped []imageEval) *PlanResult {
 			}
 		}
 		entry.Pins = strings.Join(pins, " ")
+		if platforms := grp[0].plan.Image.Platforms; splitPerPlatform && len(platforms) > 0 {
+			for _, platform := range platforms {
+				e := entry
+				e.Platform = platform
+				e.Runner = defaultRunner(platform)
+				result.Include = append(result.Include, e)
+			}
+			continue
+		}
 		result.Include = append(result.Include, entry)
 	}
 	for _, m := range skipped {

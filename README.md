@@ -100,8 +100,9 @@ stevedore release
 
 | Command | What it does |
 |---------|--------------|
-| `stevedore release` | Full pipeline: build all platforms → push → sign → SBOM → changelog. Requires a clean, tagged checkout unless `--snapshot`. |
-| `stevedore plan` | Resolve versions, change detection, and build-once grouping — print the plan as JSON without building. The `include` array is GitHub Actions matrix shape (see [Matrix mode](#matrix-mode-one-ci-job-per-build)). |
+| `stevedore release` | Full pipeline: build all platforms → push → sign → SBOM → changelog. Requires a clean, tagged checkout unless `--snapshot`. `--split <platform>` builds one native-arch leg of a split release (see [Native multi-arch](#native-multi-arch-one-runner-per-platform)). |
+| `stevedore merge` | Second half of a split release: stitch the legs' per-arch digests into tagged manifest lists (`imagetools create`) and run the release tail (scan, test, sign, SBOM, changelog, publish). |
+| `stevedore plan` | Resolve versions, change detection, and build-once grouping — print the plan as JSON without building. The `include` array is GitHub Actions matrix shape (see [Matrix mode](#matrix-mode-one-ci-job-per-build)); `--split-platforms` emits one entry per platform with native runner hints. |
 | `stevedore build` | Inner-loop build: one platform, loaded into the local docker daemon, no push. `--push` publishes multi-arch but skips the release extras. |
 | `stevedore check` | Validate the config and print the fully-resolved release plan (the exact refs that would publish). |
 | `stevedore verify <ref>` | Verify a pushed image's cosign signature, SBOM attestation, and SLSA provenance. |
@@ -130,6 +131,12 @@ planner's decision, so change detection is skipped. `--pin-version <id>=<ver>`
 (repeatable) makes the run tag exactly what the plan resolved instead of
 re-resolving. Both come straight out of a `stevedore plan` entry (`.only` /
 `.pins`); see [Matrix mode](#matrix-mode-one-ci-job-per-build).
+
+`--split <platform>` builds only that platform, natively, and pushes it
+**untagged, by digest** — no tags, no sign/scan/SBOM/publish. The digest lands
+under `<dist>/digests/<image-id>/` for a later `stevedore merge`, which
+assembles the manifest list and runs the whole release tail. See
+[Native multi-arch](#native-multi-arch-one-runner-per-platform).
 
 Every release also writes `<dist>/release-summary.json` and, in GitHub Actions, a
 job-summary table (images, digests, signed/sbom/provenance/test status, vuln
@@ -365,6 +372,91 @@ jobs:
 
 Entries carry the member `ids`, so a caller can also map per-entry metadata —
 e.g. pick a per-service cloud credential/role for single-member entries.
+
+### Native multi-arch: one runner per platform
+
+A single-runner multi-arch build emulates every non-native platform with QEMU —
+often 5–10× slower for compile-heavy stages. GitHub hosts native arm64 runners
+(`ubuntu-24.04-arm`, free for public repos), so stevedore can split the build:
+each matrix leg builds **one platform on its native runner** and pushes it
+untagged, by digest; a final job merges the digests into one tagged manifest
+list per image and runs the release tail (scan → smoke test → sign → SBOM →
+changelog → publish) against the merged artifact — so nothing is ever signed or
+published before every arch exists.
+
+A composite action can't spawn jobs, so the fan-out lives in the workflow:
+`plan --split-platforms` emits one matrix entry per build group per platform,
+each with a `runner` hint (`linux/amd64` → `ubuntu-24.04`, `linux/arm64` →
+`ubuntu-24.04-arm`; other platforms leave it empty for you to map):
+
+```yaml
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: blairham/stevedore@v1
+        id: plan
+        with: {command: plan, args: --split-platforms}
+
+  build:
+    needs: plan
+    if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
+    strategy:
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: docker/login-action@v3
+        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
+      - uses: blairham/stevedore@v1
+        with:
+          command: release
+          args: --only ${{ matrix.only }} ${{ matrix.pins }} --split ${{ matrix.platform }}
+      # The legs and the merge job share dist/digests/ via artifacts.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.group }}-${{ strategy.job-index }}
+          path: dist/digests/
+
+  merge:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: dist/digests/
+          merge-multiple: true
+      - uses: docker/login-action@v3
+        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
+      - uses: blairham/stevedore@v1
+        with:
+          command: merge
+```
+
+The legs record each pushed digest as `dist/digests/<image-id>/<platform>`;
+`merge` refuses to publish while any configured platform has no digest, so a
+failed or missing leg can never ship a partial manifest list. Signing, SBOM
+attestation, and the vulnerability/smoke-test gates all run once, against the
+merged manifest-list digest — per-arch SLSA provenance from `--provenance` is
+attached by the legs at build time and survives the merge.
+
+For simple repos you can skip `plan` entirely and hardcode the matrix
+(`matrix: {include: [{platform: linux/amd64, runner: ubuntu-24.04}, …]}`);
+`release --split` and `merge` don't care where the fan-out came from.
+
+> **Tip:** if your image is pure Go (`CGO_ENABLED=0`), cross-compiling inside
+> the Dockerfile (`FROM --platform=$BUILDPLATFORM` + `GOOS`/`GOARCH` from
+> `TARGETOS`/`TARGETARCH`) removes QEMU from the hot path with zero workflow
+> changes — split builds earn their keep when build stages must *execute* on
+> the target arch (CGO, native compilers, test suites in `RUN` steps).
 
 ## Configuration
 

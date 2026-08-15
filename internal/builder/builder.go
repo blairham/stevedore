@@ -22,10 +22,15 @@ type Spec struct {
 	BuildArgs  []string
 	Labels     map[string]string
 	Secrets    []config.Secret
-	// Refs are the full repo:tag references to tag the build with.
+	// Refs are the full repo:tag references to tag the build with. Under
+	// PushByDigest they are bare repository names instead (no tag).
 	Refs []string
 	// Push publishes to the registries.
 	Push bool
+	// PushByDigest pushes untagged, by digest only (split mode: one platform
+	// leg of a multi-arch build, merged into a tagged manifest list later by
+	// `imagetools create`). Requires Push.
+	PushByDigest bool
 	// Load loads the built image into the local docker daemon (single platform
 	// only). Used for local builds; ignored when Push is set. When neither Push
 	// nor Load is set, the build runs to validate only (no output) — the
@@ -59,8 +64,10 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	if s.Target != "" {
 		args = append(args, "--target", s.Target)
 	}
-	for _, ref := range s.Refs {
-		args = append(args, "--tag", ref)
+	if !s.PushByDigest {
+		for _, ref := range s.Refs {
+			args = append(args, "--tag", ref)
+		}
 	}
 	for _, ba := range s.BuildArgs {
 		args = append(args, "--build-arg", ba)
@@ -88,7 +95,14 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	}
 	switch {
 	case s.Push:
-		args = append(args, "--push")
+		if s.PushByDigest {
+			// The name list is quoted because --output's value is itself CSV.
+			args = append(args, "--output",
+				fmt.Sprintf("type=image,%q,push-by-digest=true,name-canonical=true,push=true",
+					"name="+strings.Join(s.Refs, ",")))
+		} else {
+			args = append(args, "--push")
+		}
 		if metaFile != "" {
 			args = append(args, "--metadata-file", metaFile)
 		}

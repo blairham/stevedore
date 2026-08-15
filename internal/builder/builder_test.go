@@ -83,6 +83,50 @@ func TestReadDigest(t *testing.T) {
 	}
 }
 
+// Push-by-digest legs must publish untagged: the tag flags are replaced by an
+// --output that names every repo and pushes by digest only.
+func TestBuildPushByDigest(t *testing.T) {
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &run.Runner{DryRun: true, Stderr: stderr}
+
+	_, err = Build(r, Spec{
+		Dockerfile:   "Dockerfile",
+		Context:      ".",
+		Platforms:    []string{"linux/arm64"},
+		Refs:         []string{"ghcr.io/x/app", "reg.io/x/app"},
+		Push:         true,
+		PushByDigest: true,
+		Provenance:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := string(out)
+	if !strings.Contains(cmd, `type=image,"name=ghcr.io/x/app,reg.io/x/app",push-by-digest=true,name-canonical=true,push=true`) {
+		t.Errorf("push-by-digest output flag missing: %s", cmd)
+	}
+	if strings.Contains(cmd, "--tag") {
+		t.Errorf("push-by-digest build must not tag: %s", cmd)
+	}
+	if strings.Contains(cmd, "--push ") || strings.HasSuffix(strings.TrimSpace(cmd), "--push") {
+		t.Errorf("push-by-digest build must not also pass --push: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--platform linux/arm64") {
+		t.Errorf("platform flag missing: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--provenance=mode=max") {
+		t.Errorf("provenance must still apply to digest pushes: %s", cmd)
+	}
+}
+
 func TestBuildSkipsEmptyCacheEntries(t *testing.T) {
 	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
 	if err != nil {

@@ -7,7 +7,7 @@ branding:
 
 inputs:
   command:
-    description: "stevedore subcommand to run (release, plan, build, check, verify, doctor)."
+    description: "stevedore subcommand to run (release, merge, plan, build, check, verify, doctor)."
     required: false
     default: "release"
   args:

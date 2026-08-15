@@ -50,6 +50,7 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(
 		newReleaseCmd(),
+		newMergeCmd(),
 		newPlanCmd(),
 		newBuildCmd(),
 		newCheckCmd(),
