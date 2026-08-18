@@ -14,6 +14,11 @@ reconstruct by reading a dozen files.
 code — the `examples` CI job resolves every example config with the real binary.
 Changing config behavior means updating the examples in the same PR.
 
+`docs/announcement.md` is the launch playbook — the positioning, the honest
+state of every claim, and what we will not claim. Keep its "Honest state" table
+current when adoption or platform support changes; it is the thing that stops a
+post from overclaiming.
+
 ## Project Overview
 
 stevedore is a CLI that releases Docker/OCI images the way GoReleaser releases
