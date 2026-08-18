@@ -68,15 +68,31 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         SD_VERSION: ${{ inputs.version }}
+        SD_ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
         os=$(uname -s)          # Linux | Darwin (matches the release asset naming)
         arch=$(uname -m)        # x86_64 | aarch64 | arm64
         case "$arch" in aarch64) arch=arm64 ;; esac
         tag=""
-        [ "$SD_VERSION" != "latest" ] && tag="$SD_VERSION"
+        if [ "$SD_VERSION" != "latest" ]; then
+          tag="$SD_VERSION"
+        elif [[ "${SD_ACTION_REF:-}" =~ ^v([0-9]+)($|\.) ]]; then
+          # `uses: …@v1` must not start pulling v2 binaries the day v2 ships:
+          # the action and the binary it drives are one contract. Resolve
+          # "latest" inside the action's own major line, falling back to the
+          # newest release overall when that lookup finds nothing.
+          tag=$(gh release list --repo blairham/stevedore --limit 100 \
+                  --exclude-drafts --exclude-pre-releases --json tagName \
+                  --jq "[.[].tagName | select(startswith(\"v${BASH_REMATCH[1]}.\"))] | first // empty" \
+                2>/dev/null || true)
+        fi
         dest="${RUNNER_TEMP:-/tmp}/stevedore-bin"
         mkdir -p "$dest"
+        # $tag is deliberately unquoted: empty must disappear from the
+        # argument list entirely (that is how `gh` is asked for the newest
+        # release), where "" would be rejected as a bad tag.
+        # shellcheck disable=SC2086
         gh release download $tag --repo blairham/stevedore \
           --pattern "stevedore_*_${os}_${arch}.tar.gz" \
           --output "$dest/stevedore.tar.gz" --clobber
