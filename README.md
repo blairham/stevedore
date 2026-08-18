@@ -1,3 +1,5 @@
+<img src="assets/mascot.svg" alt="stevedore mascot: a dock worker in a red knit cap carrying a shipping container" width="132" align="right">
+
 # stevedore
 
 [![CI](https://github.com/blairham/stevedore/actions/workflows/ci.yml/badge.svg)](https://github.com/blairham/stevedore/actions/workflows/ci.yml)
