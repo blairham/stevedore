@@ -84,3 +84,58 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+
+  # Repoint the moving major and minor tags (v1, v1.0) at this release, so
+  # `uses: blairham/stevedore@v1` — the form the README documents and the form
+  # Actions users expect — actually resolves.
+  #
+  # Gated on both artifact jobs: a moving tag pointing at a release that failed
+  # halfway is worse than one that does not exist, because it resolves.
+  moving-tags:
+    needs: [image, binary]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # the tag list, to decide whether this is the newest
+
+      - name: Repoint moving tags
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # A prerelease never moves a floating pointer: `@v1` has to mean the
+          # newest release we told people to run, not the newest rc.
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            echo "::notice::$TAG is not a plain semver tag; moving tags untouched"
+            exit 0
+          fi
+          major="v${BASH_REMATCH[1]}"
+          minor="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+
+          # Only ever move forward. Re-running this workflow for an older patch
+          # release must not drag `@v1` backwards onto it.
+          newest=$(git tag --list "${major}.*.*" \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -1 || true)
+          if [ -n "$newest" ] && [ "$newest" != "$TAG" ]; then
+            echo "::notice::$newest is newer than $TAG; leaving $major and $minor where they are"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for t in "$major" "$minor"; do
+            # Read the remote's current value *before* overwriting the local
+            # tag, so the lease below is a real expectation rather than a
+            # restatement of what we just did locally. Empty means "must not
+            # exist yet", which is the first-v1 case.
+            old=$(git ls-remote --tags origin "refs/tags/$t" | cut -f1)
+            git tag -f -a "$t" -m "$t -> $TAG"
+            # A lease rather than a bare force: if a concurrent release already
+            # moved the pointer, fail loudly instead of dragging it backwards.
+            git push --force-with-lease="refs/tags/$t:${old}" origin "refs/tags/$t"
+            echo "==> $t -> $TAG"
+          done

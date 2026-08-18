@@ -720,6 +720,24 @@ jobs:
           command: release
 ```
 
+### Pinning the action
+
+`@v1` is a **moving major tag**, repointed at each release: you get bug fixes
+without editing a workflow, and never a breaking change, since a breaking change
+ships as `v2`. Pin harder if you'd rather review every bump:
+
+| Pin | Resolves to |
+|-----|-------------|
+| `blairham/stevedore@v1` | newest `v1.x.y` — recommended |
+| `blairham/stevedore@v1.2` | newest `v1.2.z` |
+| `blairham/stevedore@v1.2.3` | exactly that release |
+| `blairham/stevedore@<sha>` | exactly that commit — the strictest option |
+
+The action's `version` input controls the **stevedore binary** it downloads,
+which is a separate choice from the action code above. Left at its `latest`
+default it resolves to the newest release *in the action's own major line*, so
+`@v1` keeps running v1 binaries after v2 ships.
+
 ### Action inputs
 
 | Input | Default | Description |
