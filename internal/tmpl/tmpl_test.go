@@ -98,3 +98,38 @@ func TestRenderAll(t *testing.T) {
 		t.Error("RenderAll should propagate render errors")
 	}
 }
+
+// TestNewContextDetachedHEAD covers the seam that let the floating-tag bug
+// ship: every test above builds an Info with a branch name, which is the one
+// shape a tag-triggered release never has.
+func TestNewContextDetachedHEAD(t *testing.T) {
+	onMain := &gitinfo.Info{
+		Tag:      "v1.2.3",
+		Branch:   "HEAD",
+		Detached: true,
+		Branches: []string{"origin/main", "main"},
+	}
+	ctx := NewContext("demo", "main", onMain, false, time.Unix(0, 0).UTC(), nil)
+	if !ctx.IsDefault {
+		t.Error("IsDefault = false for a tag cut from main; floating tags would be withheld from every release")
+	}
+	if !ctx.Detached {
+		t.Error("Detached should be carried into the context so the pipeline can explain itself")
+	}
+
+	offMain := &gitinfo.Info{
+		Tag:      "v1.2.3",
+		Branch:   "HEAD",
+		Detached: true,
+		Branches: []string{"origin/release-1.x", "release-1.x"},
+	}
+	if NewContext("demo", "main", offMain, false, time.Unix(0, 0).UTC(), nil).IsDefault {
+		t.Error("IsDefault = true for a tag cut off the default branch")
+	}
+
+	// A shallow clone knows no branches at all: unknown resolves to "no".
+	unknown := &gitinfo.Info{Tag: "v1.2.3", Branch: "HEAD", Detached: true}
+	if NewContext("demo", "main", unknown, false, time.Unix(0, 0).UTC(), nil).IsDefault {
+		t.Error("IsDefault = true with no branch refs to go on")
+	}
+}

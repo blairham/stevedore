@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -289,6 +290,11 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 		selected[id] = true
 	}
 	var plans []ImagePlan
+	// Floating tags withheld this run, reported once at the end rather than
+	// once per image x repository.
+	withheld := map[string]bool{}
+	var withheldOrder []string
+	defer func() { warnWithheldFloating(withheldOrder, cfg.DefaultBranch, ctx) }()
 	for _, img := range cfg.Images {
 		if len(selected) > 0 && !selected[img.ID] {
 			continue
@@ -346,6 +352,14 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 		for _, repo := range repos {
 			for _, tag := range tags {
 				if isFloating(tag) && (snapshot || !imgCtx.IsDefault) {
+					// A snapshot withholding "latest" is the point of a
+					// snapshot; off the default branch it is a decision the
+					// user needs to see, because the alternative is finding
+					// out from the registry weeks later.
+					if !snapshot && !withheld[tag] {
+						withheld[tag] = true
+						withheldOrder = append(withheldOrder, tag)
+					}
 					continue
 				}
 				refs = append(refs, repo+":"+tag)
@@ -366,6 +380,28 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 		})
 	}
 	return plans, nil
+}
+
+// warnWithheldFloating explains, once per run, why floating tags are not being
+// published. It writes to stderr rather than the progress writer so that `plan`
+// and `--output json` keep a clean stdout.
+func warnWithheldFloating(tags []string, defaultBranch string, ctx *tmpl.Context) {
+	if len(tags) == 0 {
+		return
+	}
+	quoted := make([]string, len(tags))
+	for i, t := range tags {
+		quoted[i] = strconv.Quote(t)
+	}
+	fmt.Fprintf(os.Stderr, "warning: not publishing floating tag(s) %s: HEAD is not on the default branch %q\n",
+		strings.Join(quoted, ", "), defaultBranch)
+	if ctx.Detached {
+		// The common cause, and the one with a one-line fix. A shallow clone
+		// has no branch refs for the commit to be reachable from, so a detached
+		// HEAD looks identical to a genuine side branch.
+		fmt.Fprintf(os.Stderr, "         HEAD is detached, so the branch is resolved from the refs containing the commit; "+
+			"that needs the full history (actions/checkout: fetch-depth: 0).\n")
+	}
 }
 
 // isFloating reports whether a tag is a mutable pointer that should only move on

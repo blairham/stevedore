@@ -24,6 +24,7 @@ type Context struct {
 	Timestamp   int64
 	IsSnapshot  bool
 	IsDefault   bool // HEAD is on the configured default branch
+	Detached    bool // HEAD points at a commit, not a branch (a tag checkout)
 	Env         map[string]string
 }
 
@@ -39,8 +40,13 @@ func NewContext(projectName, defaultBranch string, gi *gitinfo.Info, snapshot bo
 		Date:        now.UTC().Format(time.RFC3339),
 		Timestamp:   now.UTC().Unix(),
 		IsSnapshot:  snapshot,
-		IsDefault:   gi.Branch == defaultBranch,
-		Env:         env,
+		// Not a string compare against gi.Branch: a tag-triggered release runs
+		// on a detached HEAD, where that is the literal "HEAD" and never equals
+		// the default branch — which silently withheld every floating tag from
+		// every real release.
+		IsDefault: gi.OnBranch(defaultBranch),
+		Detached:  gi.Detached,
+		Env:       env,
 	}
 }
 
