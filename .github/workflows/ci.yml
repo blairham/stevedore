@@ -60,3 +60,41 @@ jobs:
           install-stevedore: "false"
           command: check
           install-crane: "false"
+
+  examples:
+    # The examples are documentation people copy, so they are checked like code:
+    # each one is resolved by the real binary in a scratch repo shaped the way
+    # its config expects. A stale example is worse than no example, because it
+    # is copied before it is read.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+      - name: Build stevedore from checkout
+        run: go build -o /usr/local/bin/stevedore .
+      - name: Check every example config
+        run: |
+          set -euo pipefail
+          scratch=$(mktemp -d)
+          cd "$scratch"
+          git init -q -b main
+          git config user.email ci@example.com
+          git config user.name ci
+          # The Dockerfiles the example configs reference.
+          mkdir -p services/api services/worker
+          touch Dockerfile services/api/Dockerfile services/worker/Dockerfile
+          git add -A && git commit -qm init && git tag v1.0.0
+          for cfg in "$GITHUB_WORKSPACE"/examples/*/.stevedore.yaml; do
+            echo "::group::$(basename "$(dirname "$cfg")")"
+            cp "$cfg" .stevedore.yaml
+            stevedore check
+            echo "::endgroup::"
+          done
+      - name: Lint the example workflow
+        run: |
+          # It is a workflow people paste into .github/workflows, so it has to
+          # parse as one — it lives outside that directory precisely so GitHub
+          # does not try to run it here.
+          python3 -c "import yaml,sys; yaml.safe_load(open('examples/split-multiarch/release.yml'))"
