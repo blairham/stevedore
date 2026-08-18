@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/blairham/stevedore/discussions
+    about: For "how do I…" and "should stevedore…" — no template, no triage.
+  - name: Report a vulnerability
+    url: https://github.com/blairham/stevedore/security/advisories/new
+    about: Privately, please — not as a public issue.
