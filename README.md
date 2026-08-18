@@ -1,5 +1,10 @@
 # stevedore
 
+[![CI](https://github.com/blairham/stevedore/actions/workflows/ci.yml/badge.svg)](https://github.com/blairham/stevedore/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/blairham/stevedore?sort=semver)](https://github.com/blairham/stevedore/releases/latest)
+[![Go Report Card](https://goreportcard.com/badge/github.com/blairham/stevedore)](https://goreportcard.com/report/github.com/blairham/stevedore)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Release Docker/OCI images the way [goreleaser](https://goreleaser.com) releases binaries.**
 
 stevedore builds multi-arch container images, tags them from git state, pushes to
@@ -775,6 +780,15 @@ Releases use two tools, one per artifact kind: **stevedore** builds and publishe
 its own container image (dogfooding), and **GoReleaser** (`.goreleaser.yaml`)
 publishes the CLI binary, the GitHub release, and the Homebrew formula. See
 `.github/workflows/release.yml`.
+
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the build,
+the test conventions, and where the extension points are.
+[docs/stability.md](docs/stability.md) is the compatibility contract: what v1
+promises about your config and your published tags, and what it does not.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md) — privately, please.
 
 ## License
 
