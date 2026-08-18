@@ -103,7 +103,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.plan }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {fetch-depth: 0}
       - uses: blairham/stevedore@v1
         id: plan
@@ -116,7 +116,7 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {fetch-depth: 0}
       - uses: blairham/stevedore@v1
         with:
@@ -150,7 +150,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.plan }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {fetch-depth: 0}
       - uses: blairham/stevedore@v1
         id: plan
@@ -163,16 +163,16 @@ jobs:
       matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {fetch-depth: 0}
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
       - uses: blairham/stevedore@v1
         with:
           command: release
           args: --only ${{ matrix.only }} ${{ matrix.pins }} --split ${{ matrix.platform }}
       # The legs and the merge job share dist/digests/ via artifacts.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.group }}-${{ strategy.job-index }}
           path: dist/digests/
@@ -181,14 +181,14 @@ jobs:
     needs: [plan, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {fetch-depth: 0}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: digests-*
           path: dist/digests/
           merge-multiple: true
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
       - uses: blairham/stevedore@v1
         with:

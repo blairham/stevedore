@@ -59,7 +59,7 @@ jobs:
       # this one falls back on a restore-keys prefix and is saved at job end —
       # after goreleaser — so it warms every cross-compiled GOOS/GOARCH target.
       - name: Restore release Go cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/go/pkg/mod
