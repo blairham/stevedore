@@ -20,10 +20,10 @@ jobs:
       packages: write   # push to ghcr.io
       id-token: write   # keyless cosign signing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0            # tags + history for versioning/changelog
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
