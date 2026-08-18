@@ -1,0 +1,59 @@
+# The common case: one service, one Dockerfile, signed and attested releases.
+#
+#   stevedore check                      # resolve and validate, publish nothing
+#   stevedore release --snapshot --dry-run
+#   git tag v1.0.0 && stevedore release
+version: 1
+
+project_name: myapp
+
+images:
+  - id: myapp
+    dockerfile: Dockerfile
+    context: .
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    repositories:
+      - ghcr.io/acme/myapp
+    tags:
+      # Immutable, always published.
+      - "{{ .Version }}"
+      - "{{ .ShortCommit }}"
+      # Floating: publishes only on the default branch of a real release, so a
+      # feature branch or a --snapshot can never move what production pulls.
+      - "latest"
+    build_args:
+      - "VERSION={{ .Version }}"
+    labels:
+      # Set image.source and ghcr links the package to the repo, which is also
+      # what makes the package public alongside a public repo.
+      org.opencontainers.image.source: "https://github.com/acme/myapp"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .Commit }}"
+
+# The gates run before signing, so a failing image is never signed.
+scan:
+  enabled: true
+  scanner: grype
+  fail_on: high
+
+test:
+  enabled: true
+  cmd: ["/usr/bin/myapp", "--version"]
+  expect_exit: 0
+
+sign:
+  cosign:
+    enabled: true # keyless: no `key:` means OIDC, which needs id-token: write
+
+sbom:
+  enabled: true
+  attest: true
+
+provenance:
+  enabled: true
+  mode: max
+
+changelog:
+  enabled: true

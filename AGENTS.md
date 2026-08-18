@@ -4,9 +4,15 @@ Guidance for AI coding agents (Claude Code, Cursor, Copilot, Codex, OpenCode, �
 working in this repository. This is the **cross-tool single source of truth** —
 `CLAUDE.md` imports it, so keep durable project context here, not there.
 
-`README.md` is the user-facing reference (what stevedore is, config, CLI). This
-file covers what the README doesn't: the internal layout and the conventions
-you'd otherwise reconstruct by reading a dozen files.
+`README.md` is the front door — the pitch, install, quick start, and an index.
+The user-facing reference lives in `docs/` (configuration, CLI, versioning,
+supply chain, monorepos, CI, comparison, stability). This file covers what
+neither does: the internal layout and the conventions you'd otherwise
+reconstruct by reading a dozen files.
+
+`examples/` is documentation people copy rather than read, so it is checked like
+code — the `examples` CI job resolves every example config with the real binary.
+Changing config behavior means updating the examples in the same PR.
 
 ## Project Overview
 

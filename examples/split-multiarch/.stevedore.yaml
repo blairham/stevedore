@@ -1,0 +1,35 @@
+# Native multi-arch: one runner per platform, no QEMU.
+#
+# The config is ordinary — `platforms:` lists both arches exactly as it would
+# for a single-runner build. Splitting is a *workflow* decision, not a config
+# one: the same file builds single-runner locally and split in CI.
+version: 1
+
+project_name: myapp
+
+images:
+  - id: myapp
+    dockerfile: Dockerfile
+    context: .
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    repositories:
+      - ghcr.io/acme/myapp
+    tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
+
+scan:
+  enabled: true
+  fail_on: high
+
+sign:
+  cosign:
+    enabled: true
+
+sbom:
+  enabled: true
+  attest: true
+
+provenance:
+  enabled: true
+  mode: max

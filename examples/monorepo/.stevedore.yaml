@@ -1,0 +1,76 @@
+# A monorepo of services that release on independent cadences.
+#
+# The problem this solves: every image's build context is the whole repo, so
+# without scoping, a one-line change to one service rebuilds all of them.
+version: 1
+
+project_name: acme-platform
+
+images:
+  - id: api
+    dockerfile: services/api/Dockerfile
+    context: .
+    platforms: [linux/amd64, linux/arm64]
+    repositories: [ghcr.io/acme/api]
+    tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
+    paths:
+      - "services/api/**"
+      - "libs/shared/**" # api depends on it, so a change here rebuilds api
+
+  - id: worker
+    dockerfile: services/worker/Dockerfile
+    context: .
+    platforms: [linux/amd64, linux/arm64]
+    repositories: [ghcr.io/acme/worker]
+    tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
+    paths:
+      - "services/worker/**"
+      - "libs/shared/**"
+
+  # Same Dockerfile and context as `worker`, differing only by a build arg, so
+  # these two are NOT built once — a differing build arg makes them distinct
+  # builds. Two images differing only by destination WOULD share one build.
+  - id: worker-eu
+    dockerfile: services/worker/Dockerfile
+    context: .
+    platforms: [linux/amd64, linux/arm64]
+    repositories: [ghcr.io/acme/worker-eu]
+    tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
+    build_args: ["REGION=eu"]
+    paths:
+      - "services/worker/**"
+      - "libs/shared/**"
+
+change_detection:
+  # A change to any of these rebuilds every image — the things no single
+  # service owns.
+  shared_paths:
+    - "Dockerfile*"
+    - "go.mod"
+    - "go.sum"
+    - ".stevedore.yaml"
+
+  # Each image diffs against ITS OWN last release ref
+  # (refs/releases/image/<id>), advanced after each successful push. This is
+  # the mode to use in CI: it is stateless across fresh checkouts, needs no
+  # --changed-since argument, and survives services releasing independently.
+  marker_refs: true
+
+# Each image versions from its own registry repository, so api can be at 1.9.0
+# while worker is at 0.3.2. Set `repo:` to pin one repo for a unified version.
+versioning:
+  strategy: registry
+  bump: patch
+  initial: "0.1.0"
+
+scan:
+  enabled: true
+  fail_on: high
+
+sign:
+  cosign:
+    enabled: true
+
+sbom:
+  enabled: true
+  attest: true

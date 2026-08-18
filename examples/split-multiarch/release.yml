@@ -1,0 +1,77 @@
+# Copy to .github/workflows/release.yml in your repo.
+# Native per-arch legs plus a merge job. A composite action cannot spawn jobs,
+# so the fan-out lives here; `plan --split-platforms` supplies the matrix.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write # keyless cosign
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags and history: versioning, changelog, and the
+          # default-branch check that gates floating tags
+      - uses: blairham/stevedore@v1
+        id: plan
+        with:
+          command: plan
+          args: --split-platforms
+
+  build:
+    needs: plan
+    # An empty plan (nothing changed) would otherwise fail the matrix.
+    if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
+    strategy:
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }} # ubuntu-24.04 / ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: blairham/stevedore@v1
+        with:
+          command: release
+          # Pushes untagged, by digest. No tags, no signing, no publish — those
+          # all happen once, in merge, against the assembled manifest list.
+          args: --only ${{ matrix.only }} ${{ matrix.pins }} --split ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.group }}-${{ strategy.job-index }}
+          path: dist/digests/
+
+  merge:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: dist/digests/
+          merge-multiple: true
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: blairham/stevedore@v1
+        with:
+          command: merge

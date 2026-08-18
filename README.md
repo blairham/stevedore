@@ -34,6 +34,31 @@ the SBOM, hand-maintain a changelog. stevedore turns all of that into one config
 file you check in — so `stevedore release` does the same thing on your laptop and in
 CI, and every image ships signed and attested by default.
 
+## Is this just `X`?
+
+| | What it is | Where stevedore sits |
+|---|---|---|
+| `docker buildx` / `bake` | the builder; bake describes **build targets** | stevedore calls buildx and describes **releases**. `init --from bake` imports your targets |
+| `docker/build-push-action` | buildx as a GitHub Action | same layer as bake. It builds and pushes one image; stevedore decides *which* images, *what version*, and everything after the push |
+| `ko` | Dockerfile-free image builds for **Go** | a builder, and Go-only. stevedore's input is a Dockerfile and a context |
+| GoReleaser `dockers:` | binary releases that can also build images | the closest overlap — see below |
+| release-please | version + changelog from commits | no images. Already using it? `versioning.strategy: env` takes the version from it |
+
+stevedore does not build anything — `docker buildx` does — and it does not
+deploy anything. It owns the part in between: deciding what to build, what to
+call it, whether it is allowed to ship, and what must be true before it does.
+The tagline is exact: GoReleaser doesn't compile your code either.
+
+**If GoReleaser's `dockers:` block already covers you, keep using it.** One tool
+beats two. It differs where images are the *primary* artifact: stevedore's input
+is a Dockerfile rather than a Go build, multi-arch is one `platforms:` field
+instead of per-arch images plus a manifest block, and monorepos get change
+detection and per-image versions. This repo uses both — stevedore publishes the
+image, GoReleaser publishes the CLI binary.
+
+[docs/comparison.md](docs/comparison.md) has the long version, including what
+stevedore deliberately is **not**.
+
 ## Install
 
 Homebrew:
@@ -103,670 +128,45 @@ git tag v1.4.0
 stevedore release
 ```
 
+## Examples
+
+Working configs, each validated in CI against the real binary:
+
+| | |
+|---|---|
+| [`examples/single-image`](examples/single-image) | one service, signed and attested |
+| [`examples/monorepo`](examples/monorepo) | many services, change detection, per-image versions |
+| [`examples/split-multiarch`](examples/split-multiarch) | one native runner per platform, no QEMU |
+
 ## Commands
 
 | Command | What it does |
 |---------|--------------|
-| `stevedore release` | Full pipeline: build all platforms → push → sign → SBOM → changelog. Requires a clean, tagged checkout unless `--snapshot`. `--split <platform>` builds one native-arch leg of a split release (see [Native multi-arch](#native-multi-arch-one-runner-per-platform)). |
-| `stevedore merge` | Second half of a split release: stitch the legs' per-arch digests into tagged manifest lists (`imagetools create`) and run the release tail (scan, test, sign, SBOM, changelog, publish). |
-| `stevedore plan` | Resolve versions, change detection, and build-once grouping — print the plan as JSON without building. The `include` array is GitHub Actions matrix shape (see [Matrix mode](#matrix-mode-one-ci-job-per-build)); `--split-platforms` emits one entry per platform with native runner hints. |
-| `stevedore build` | Inner-loop build: one platform, loaded into the local docker daemon, no push. `--push` publishes multi-arch but skips the release extras. |
-| `stevedore check` | Validate the config and print the fully-resolved release plan (the exact refs that would publish). |
-| `stevedore verify <ref>` | Verify a pushed image's cosign signature, SBOM attestation, and SLSA provenance. |
-| `stevedore doctor` | Probe for docker/buildx/git/cosign/syft/grype/crane/aws, report versions, and print install hints for anything your config requires. |
-| `stevedore init` | Scaffold a `.stevedore.yaml` by scanning Dockerfiles, or `--from goreleaser` / `--from bake` / `--from services` to import an existing setup (see [Importing a config](#importing-a-config)). |
-| `stevedore schema` | Print the JSON Schema for `.stevedore.yaml` (for editor autocomplete/validation). |
-
-### Global flags
-
-| Flag | Description |
-|------|-------------|
-| `-f, --config` | Path to config file (default: autodiscover `.stevedore.yaml`). |
-| `--dir` | Project/repository root (default `.`). |
-| `--dry-run` | Print every command without executing it. |
-| `-v, --verbose` | Verbose output. |
-
-### `release` flags
-
-`--snapshot`, `--skip-sign`, `--skip-sbom`, `--skip-scan`, `--skip-test`,
-`--skip-changelog`, `--skip-publish`, `--only-changed` / `--changed-since <ref>`
-(skip unchanged images — see [Monorepos](#monorepos)), and `--output json`
-(emit a machine-readable release summary to stdout).
-
-`--only <id,…>` builds just those images, **unconditionally** — selection was the
-planner's decision, so change detection is skipped. `--pin-version <id>=<ver>`
-(repeatable) makes the run tag exactly what the plan resolved instead of
-re-resolving. Both come straight out of a `stevedore plan` entry (`.only` /
-`.pins`); see [Matrix mode](#matrix-mode-one-ci-job-per-build).
-
-`--split <platform>` builds only that platform, natively, and pushes it
-**untagged, by digest** — no tags, no sign/scan/SBOM/publish. The digest lands
-under `<dist>/digests/<image-id>/` for a later `stevedore merge`, which
-assembles the manifest list and runs the whole release tail. See
-[Native multi-arch](#native-multi-arch-one-runner-per-platform).
-
-Every release also writes `<dist>/release-summary.json` and, in GitHub Actions, a
-job-summary table (images, digests, signed/sbom/provenance/test status, vuln
-counts) to `$GITHUB_STEP_SUMMARY`. Each image entry carries `repositories`,
-`pushed` (false under `--no-push`), and a `reason` — why it built ("src/…
-since its release marker") or why it was skipped ("inputs unchanged"). Under
-GitHub Actions the compact JSON is also written as a `summary` step output
-(republished by the composite action), so workflows can drive per-image
-follow-ups — e.g. deploy notifications — filtered on `pushed`.
-
-### Editor support
-
-```sh
-stevedore schema > stevedore.schema.json
-```
-
-Then add to the top of `.stevedore.yaml` for autocomplete + validation:
-
-```yaml
-# yaml-language-server: $schema=./stevedore.schema.json
-```
-
-### Importing a config
-
-`stevedore init` can bootstrap `.stevedore.yaml` from a setup you already have
-instead of scanning Dockerfiles:
-
-- `--from goreleaser` reads a `.goreleaser.yaml`'s `dockers:` blocks, merging
-  per-arch entries into multi-arch images.
-- `--from bake` resolves a docker-bake target set (`docker buildx bake --print`).
-- `--from services --file <dir>` reads a directory of per-service manifests —
-  the monorepo convention of one YAML per service — and scaffolds one image
-  each.
-
-For `--from services`, the default manifest shape is:
-
-```yaml
-# .platform/services/api.yaml
-name: api                        # → id
-image: ghcr.io/acme/api          # → repositories (string or list)
-dockerfile: docker/Dockerfile    # → dockerfile
-target: runtime                  # → target
-project: src/Api/Api.csproj      # → build_args: ["PROJECT=…"]
-sourcePaths:                     # → paths (change detection)
-  - src/Api/**
-  - src/Shared/**
-```
-
-Manifest schemas vary by org, so the field names are remappable: `--map
-field=key` (fields: `id`, `repositories`, `dockerfile`, `context`, `target`,
-`paths`) and `--map-build-arg ARG=key` (replaces the default
-`PROJECT=project`). Keys are dotted paths, so nested manifests work too:
-
-```sh
-stevedore init --from services --file .platform/services \
-  --map id=service --map paths=source_paths \
-  --map-build-arg BUILD_PROJECT=build.project
-```
-
-## How tags are resolved
-
-The set of published references is the **cartesian product of `repositories` × `tags`**.
-Tags are Go templates rendered against git state (see [Template context](#template-context)).
-
-**Floating tags** — `latest` or anything ending in `-latest` — are treated specially:
-they only publish on the **default branch** of a **non-snapshot** release. This means
-`latest` never accidentally moves from a feature branch or a snapshot build, while
-immutable tags like the version and commit SHA always publish.
-
-Signing and SBOM generation happen **by digest** (`repo@sha256:…`), not by tag, so the
-exact artifact is pinned regardless of how many mutable tags point at it.
-
-## Versioning
-
-The release version can be derived several ways via the `versioning:` block. The
-default is `git`; the others let you avoid relying on git tags entirely.
-
-| Strategy | Where the version comes from |
-|----------|------------------------------|
-| `git` (default) | Git tags. Clean, tagged checkout → the tag with any leading `v` stripped (`v1.4.0` → `1.4.0`). Otherwise a snapshot like `1.4.0-SNAPSHOT-9f8e7d6` (`-dirty` if the tree is dirty). |
-| `registry` | Lists the existing tags in a registry repo (via `crane`), takes the highest semver, and bumps it by `patch`/`minor`/`major`. Non-semver tags (`latest`, commit SHAs) are ignored. |
-| `ecr` | Like `registry`, but lists tags via `aws ecr describe-images` using your AWS credentials directly — no `crane` or docker credential helper. Region is inferred from the ECR host (override with `region:`). |
-| `static` | An explicit `value:`. |
-| `env` | Read from an environment variable. |
-| `command` | The trimmed stdout of a command — an escape hatch for anything. |
-
-In a multi-image config, `registry`/`ecr` version **each image independently from
-its own repo**, preserving per-service versions. Set `repo:` to pin one repo for a
-single unified version instead. A repo with no semver tags starts at
-`versioning.initial` (default `0.1.0`). `stevedore check` never hard-fails on an
-unreachable registry — it warns and shows a placeholder so the rest of the config
-still validates offline.
-
-`stevedore release` refuses to run on a dirty tree unless you pass `--snapshot`. A
-git tag on HEAD is required **only** for the `git` strategy — the others source the
-version elsewhere, which is handy when your tags drift out of sync with what's
-actually published.
-
-### Deriving the version from ECR
-
-```yaml
-versioning:
-  strategy: ecr
-  bump: minor            # patch (default) | minor | major
-  # region: us-east-1    # optional; inferred from the ECR host otherwise
-  # repo: "..."          # optional; defaults to each image's own repository
-```
-
-The `ecr` strategy shells out to `aws ecr describe-images` using your AWS
-credentials directly (SSO profile / env / IRSA) — **no `crane` and no docker
-credential helper**. In CI, run `aws-actions/configure-aws-credentials` first.
-
-If you'd rather use `crane` (works across ghcr/Docker Hub/ECR via the Docker
-credential chain), use `strategy: registry` with the
-[`amazon-ecr-credential-helper`](https://github.com/awslabs/amazon-ecr-credential-helper)
-configured. `stevedore check` prints the version it resolves, so you can preview the
-next release without publishing anything.
-
-## Supply chain
-
-stevedore is secure-by-default: every release is signed, gets an SBOM, and (when
-enabled) carries SLSA build provenance. The pipeline runs in this order so a bad
-image never gets signed or shipped:
-
-```
-build → scan (gate) → smoke test (gate) → sign → SBOM + attest → provenance → changelog → publish
-```
-
-- **Scan gate** — `scan.fail_on` blocks the release if the built image has a
-  vulnerability at or above the given severity (defaults to `critical`).
-- **Smoke test gate** — `test.cmd` runs the image and blocks the release unless it
-  exits `test.expect_exit`. Don't sign or ship an image that doesn't even start.
-- **Signing** — cosign, keyed or keyless (OIDC), always by digest.
-- **SBOM** — syft, optionally attached to the image as a signed attestation.
-- **Provenance** — BuildKit SLSA provenance (`mode=max` records the full build).
-
-Both gates run *before* signing, so a failing image is never signed or published.
-
-Verify any published image round-trips:
-
-```sh
-stevedore verify ghcr.io/acme/myapp:1.4.0 \
-  --certificate-identity "https://github.com/acme/myapp/.*" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
-```
-
-## Monorepos
-
-For a repo that builds many images, stevedore can skip images whose code didn't
-change. There are two modes:
-
-| Mode | How it decides | Best for |
-|------|----------------|----------|
-| `--changed-since <ref>` | git diff since a ref; an image builds if a changed file matches its paths | CI (stateless — compare a PR to `main`) |
-| `--only-changed` | content fingerprint vs. the last release, stored in `<dist>/fingerprints.json` | local iteration |
-| `change_detection.marker_refs` | each image diffs against **its own** last-release git ref (`refs/releases/image/<id>`), advanced after each push | CI, per-image release cadence (stateless, no ref to pass) |
-
-With `marker_refs: true`, an image rebuilds iff its sources changed since *its own*
-last release — even across independent releases and fresh checkouts. After a
-successful push, stevedore advances `refs/releases/image/<id>` to `HEAD` and pushes
-it, so the baseline lives in git (no state file to persist).
-
-```sh
-stevedore release --changed-since origin/main
-# ==> building api
-# ==> skipping worker (no matching files since origin/main)
-```
-
-### Scoping each image
-
-The hard case is **many images built from one Dockerfile and one context** (they
-differ only by a build arg). Without scoping, any change rebuilds everything —
-because every image's context is the whole repo. Declare what each image actually
-depends on:
-
-```yaml
-change_detection:
-  shared_paths:                 # a change here rebuilds every image
-    - "Dockerfile"
-    - "*.sln"
-images:
-  - id: reports
-    build_args: ["PROJECT=Reports"]
-    paths: ["Reports/**"]       # this image depends only on these (+ shared_paths)
-```
-
-### Auto-deriving paths from a project graph
-
-Hand-maintaining `paths` gets ugly once shared libraries and transitive
-dependencies are involved. For .NET, let stevedore read the `.csproj`
-`<ProjectReference>` graph instead:
-
-```yaml
-change_detection:
-  resolver: dotnet
-  shared_paths: ["Dockerfile", "*.sln", "Directory.*"]
-images:
-  - id: payments-gateway
-    build_args: ["PROJECT=Acme.PaymentsGateway"]
-    project: Acme.PaymentsGateway/Acme.PaymentsGateway.csproj
-    # paths auto-resolved to PaymentsGateway + Payments + Fix + Shared (transitively)
-```
-
-Now a change to a shared library rebuilds exactly the images that reference it —
-transitively — and nothing else.
-
-For `--only-changed`, the fingerprint file lives under `dist/` (git-ignored);
-persist it between CI runs like a build cache (e.g. `actions/cache`). A fresh
-checkout with no fingerprint safely rebuilds everything.
-
-### Build once, tag many
-
-Images whose build spec is identical (same Dockerfile, context, target, platforms,
-build args, and labels) and differ only by destination repository/tag are **built
-once** and pushed to every member's tags in a single `buildx` invocation — no
-redundant rebuilds. Images that differ by a build arg (e.g. a `PROJECT=`) stay
-separate. Grouping is automatic; nothing to configure.
-
-### Matrix mode: one CI job per build
-
-A single runner with `--parallel N` is fine for a handful of images, but a
-change touching many heavy images wants one runner *each*. `stevedore plan`
-splits deciding from building so CI can fan out:
-
-```json
-{
-  "include": [
-    {"group": "checkout", "ids": ["checkout"], "only": "checkout",
-     "versions": {"checkout": "0.0.513"}, "pins": "--pin-version checkout=0.0.513",
-     "reason": "src/Acme/… changed since its release marker"}
-  ],
-  "skipped": [{"id": "billing-gateway", "reason": "unchanged since its release marker"}]
-}
-```
-
-`plan` resolves per-image versions, runs change detection (marker refs,
-`--changed-since`, or `--only-changed`), and applies build-once grouping — a
-group is **one** entry, so images sharing a build still ride one runner.
-Each matrix job then runs `release --only <entry.only> <entry.pins>`: it builds
-its entry unconditionally, tags exactly what the plan resolved, and advances
-only its own release markers. Progress goes to stderr; stdout is only the JSON.
-
-```yaml
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.plan }}
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - uses: blairham/stevedore@v1
-        id: plan
-        with: {command: plan}
-
-  build:
-    needs: plan
-    if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
-    strategy:
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - uses: blairham/stevedore@v1
-        with:
-          command: release
-          args: --only ${{ matrix.only }} ${{ matrix.pins }}
-```
-
-Entries carry the member `ids`, so a caller can also map per-entry metadata —
-e.g. pick a per-service cloud credential/role for single-member entries.
-
-### Native multi-arch: one runner per platform
-
-A single-runner multi-arch build emulates every non-native platform with QEMU —
-often 5–10× slower for compile-heavy stages. GitHub hosts native arm64 runners
-(`ubuntu-24.04-arm`, free for public repos), so stevedore can split the build:
-each matrix leg builds **one platform on its native runner** and pushes it
-untagged, by digest; a final job merges the digests into one tagged manifest
-list per image and runs the release tail (scan → smoke test → sign → SBOM →
-changelog → publish) against the merged artifact — so nothing is ever signed or
-published before every arch exists.
-
-A composite action can't spawn jobs, so the fan-out lives in the workflow:
-`plan --split-platforms` emits one matrix entry per build group per platform,
-each with a `runner` hint (`linux/amd64` → `ubuntu-24.04`, `linux/arm64` →
-`ubuntu-24.04-arm`; other platforms leave it empty for you to map):
-
-```yaml
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.plan }}
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - uses: blairham/stevedore@v1
-        id: plan
-        with: {command: plan, args: --split-platforms}
-
-  build:
-    needs: plan
-    if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
-    strategy:
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - uses: docker/login-action@v3
-        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
-      - uses: blairham/stevedore@v1
-        with:
-          command: release
-          args: --only ${{ matrix.only }} ${{ matrix.pins }} --split ${{ matrix.platform }}
-      # The legs and the merge job share dist/digests/ via artifacts.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.group }}-${{ strategy.job-index }}
-          path: dist/digests/
-
-  merge:
-    needs: [plan, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: digests-*
-          path: dist/digests/
-          merge-multiple: true
-      - uses: docker/login-action@v3
-        with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
-      - uses: blairham/stevedore@v1
-        with:
-          command: merge
-```
-
-The legs record each pushed digest as `dist/digests/<image-id>/<platform>`;
-`merge` refuses to publish while any configured platform has no digest, so a
-failed or missing leg can never ship a partial manifest list. Signing, SBOM
-attestation, and the vulnerability/smoke-test gates all run once, against the
-merged manifest-list digest — per-arch SLSA provenance from `--provenance` is
-attached by the legs at build time and survives the merge.
-
-For simple repos you can skip `plan` entirely and hardcode the matrix
-(`matrix: {include: [{platform: linux/amd64, runner: ubuntu-24.04}, …]}`);
-`release --split` and `merge` don't care where the fan-out came from.
-
-> **Tip:** if your image is pure Go (`CGO_ENABLED=0`), cross-compiling inside
-> the Dockerfile (`FROM --platform=$BUILDPLATFORM` + `GOOS`/`GOARCH` from
-> `TARGETOS`/`TARGETARCH`) removes QEMU from the hot path with zero workflow
-> changes — split builds earn their keep when build stages must *execute* on
-> the target arch (CGO, native compilers, test suites in `RUN` steps).
-
-## Configuration
-
-stevedore looks for `.stevedore.yaml`, `.stevedore.yml`, `stevedore.yaml`, or
-`stevedore.yml` (in that order). Unknown fields are rejected, so typos fail fast.
-
-```yaml
-version: 1
-
-project_name: myapp
-default_branch: main      # branch on which floating tags may publish
-dist: dist                # output dir for SBOMs and the changelog
-
-images:
-  - id: myapp             # stable identifier used in logs/artifact names
-    dockerfile: Dockerfile
-    context: .
-    target: ""            # optional multi-stage target
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    repositories:         # destinations without a tag
-      - ghcr.io/acme/myapp
-      - registry.acme.io/myapp
-    tags:                 # Go templates; floating tags gated to default branch
-      - "{{ .Version }}"
-      - "{{ .ShortCommit }}"
-      - "latest"
-    build_args:
-      - "VERSION={{ .Version }}"
-    labels:
-      org.opencontainers.image.source: "https://github.com/acme/myapp"
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.revision: "{{ .Commit }}"
-      org.opencontainers.image.created: "{{ .Date }}"
-    secrets:              # BuildKit --secret entries. An env-backed secret
-      - id: github_token  # whose variable is unset or empty is SKIPPED (like an
-        env: GITHUB_TOKEN # empty cache entry), so a config can declare a
-      # - id: npmrc        # CI-minted token (e.g. a private-module fetch token)
-      #   file: ./.npmrc   # that stays inert on local builds that don't export it.
-    cache_from:           # buildx --cache-from sources; empty-rendering
-      # entries are skipped, so an env-templated value enables caching only
-      # where the environment provides it (e.g. CI) and stays inert locally
-      - "type=registry,ref=ghcr.io/acme/myapp:buildcache"
-      # - '{{ index .Env "STEVEDORE_CACHE_FROM" }}'
-    cache_to:             # buildx --cache-to destinations (same skip rule)
-      - "type=registry,ref=ghcr.io/acme/myapp:buildcache,mode=max"
-      # - '{{ index .Env "STEVEDORE_CACHE_TO" }}'
-    paths:                # change-detection globs (see Monorepos); ** supported
-      - "services/myapp/**"
-    project: ""           # or a .csproj to auto-derive paths from its graph
-    extra_flags: []       # passed verbatim to `docker buildx build`
-
-sign:
-  cosign:
-    enabled: true
-    key: ""               # omit for keyless (OIDC) signing
-    args: []              # extra cosign flags
-
-sbom:
-  enabled: true
-  generator: syft         # only syft is supported
-  format: spdx-json       # or cyclonedx-json
-  attest: true            # attach a signed SBOM attestation (needs cosign)
-
-scan:
-  enabled: true
-  scanner: grype          # grype (default) | trivy
-  fail_on: high           # block the release at this severity or above;
-                          # negligible|low|medium|high|critical. Empty = report only.
-  ignore:                 # vulnerability IDs to exclude from the gate
-    - CVE-2024-0000
-  args: []                # extra flags passed to the scanner
-
-provenance:
-  enabled: true           # emit a SLSA build-provenance attestation (push only)
-  mode: max               # min | max (max records the full build definition)
-
-test:
-  enabled: true           # smoke-test the built image before signing/pushing
-  cmd: ["/usr/bin/myapp", "--version"]   # run inside the container
-  expect_exit: 0          # required exit code
-  timeout: 30s            # Go duration; default 60s
-
-versioning:
-  strategy: git           # git (default) | registry | ecr | static | env | command
-  # registry/ecr strategies:
-  # bump: patch           # patch | minor | major
-  # repo: ghcr.io/acme/myapp   # defaults to each image's own repository
-  # region: us-east-1     # ecr only; inferred from the ECR host otherwise
-  # initial: "0.1.0"      # when the repo has no semver tags yet
-
-change_detection:         # scope --only-changed / --changed-since for monorepos
-  resolver: ""            # "dotnet" auto-derives per-image paths from .csproj refs
-  shared_paths:           # a change here rebuilds every image
-    - "Dockerfile"
-    - "*.sln"
-
-changelog:
-  enabled: true
-  sort: asc               # asc | desc
-  exclude:                # drop commits whose subject matches any regex
-    - "^chore:"
-    - "^docs:"
-    - "^test:"
-  dependency_diff: true   # append packages added/removed/upgraded since the
-                          # previous release (diffs this SBOM vs the previous tag's)
-
-release:
-  github:
-    enabled: true         # create a GitHub release (via gh) with the changelog
-    draft: false
-    prerelease: false
-
-announce:
-  slack:
-    enabled: true
-    webhook_env: SLACK_WEBHOOK   # env var holding the webhook URL
-    template: "🚀 {{ .ProjectName }} {{ .Version }} shipped"   # optional
-  discord:
-    enabled: false
-    webhook_env: DISCORD_WEBHOOK
-
-notify:                   # machine-readable post-push notification (CD trigger)
-  webhook:
-    enabled: true
-    url_env: DEPLOY_WEBHOOK_URL    # env var holding the webhook URL
-    # bearer_env: DEPLOY_WEBHOOK_TOKEN   # sent as "Authorization: Bearer <token>"
-    # hmac_env: DEPLOY_WEBHOOK_SECRET    # body signed with HMAC-SHA256, sent as
-    #                                    # "X-Stevedore-Signature: sha256=<hex>"
-```
-
-Publishing (`release.github` + `announce`) runs only on real releases, never on
-`--snapshot`, and can be turned off per-run with `--skip-publish`.
-
-### Post-push notifications
-
-Where `announce` posts one human-readable message at the end of a release,
-`notify.webhook` POSTs one structured JSON payload **per pushed image**, so a CD
-system can react to the newly published digest (GitOps sync, rollout trigger)
-without bespoke CI glue:
-
-```json
-{
-  "project": "myapp",
-  "snapshot": false,
-  "image": "api",
-  "version": "1.4.0",
-  "digest": "sha256:9f8e…",
-  "repositories": ["ghcr.io/acme/api"],
-  "refs": ["ghcr.io/acme/api:1.4.0", "ghcr.io/acme/api:latest"]
-}
-```
-
-Notifications fire only after the image passed every gate (scan, smoke test)
-and its release stages completed. Unlike `announce`, they also fire on
-`--snapshot` pushes — the payload carries the `snapshot` flag so the consumer
-can route dev vs. prod — and they respect `--skip-publish`. On a split release
-they fire from the `merge` run, once the tagged manifest lists exist. The URL
-and credentials come from environment variables; a missing variable or a
-non-2xx response fails the release rather than silently skipping the trigger.
-
-### Template context
-
-Tags, labels, and build args are rendered with Go's `text/template`. Referencing an
-undefined field is an error (no silent empty strings). Available fields:
-
-| Field | Example |
-|-------|---------|
-| `.ProjectName` | `myapp` |
-| `.Version` | `1.4.0` |
-| `.Tag` | `v1.4.0` |
-| `.Commit` | full SHA |
-| `.ShortCommit` | `9f8e7d6` |
-| `.Branch` | `main` |
-| `.Date` | RFC 3339 build time (UTC) |
-| `.Timestamp` | Unix seconds |
-| `.IsSnapshot` | `true` in a snapshot build |
-| `.IsDefault` | `true` when HEAD is on the default branch |
-| `.Env.NAME` | environment variable `NAME` |
-
-Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`.
-
-### Changelog
-
-When enabled, stevedore reads commits since the previous tag and groups them by
-[Conventional Commit](https://www.conventionalcommits.org) type into **Features**,
-**Bug Fixes**, **Performance**, **Refactors**, **Documentation**, and **Other**. A
-`!` (e.g. `feat!:`) marks a breaking change. Non-conforming subjects land under
-"Other". The result is written to `<dist>/CHANGELOG.md`.
-
-## Using it in CI
-
-stevedore does the same thing locally and in CI. The easiest way is the bundled
-**GitHub Action**, which installs stevedore and every tool it needs (cosign, syft,
-grype, and optionally crane) for you:
-
-```yaml
-name: release
-on:
-  push:
-    tags: ["v*"]
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write   # create the GitHub release
-      packages: write   # push to ghcr.io
-      id-token: write   # keyless cosign signing
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0            # tags + history for versioning/changelog
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: blairham/stevedore@v1  # installs stevedore + cosign/syft/grype
-        with:
-          command: release
-```
-
-### Pinning the action
-
-`@v1` is a **moving major tag**, repointed at each release: you get bug fixes
-without editing a workflow, and never a breaking change, since a breaking change
-ships as `v2`. Pin harder if you'd rather review every bump:
-
-| Pin | Resolves to |
-|-----|-------------|
-| `blairham/stevedore@v1` | newest `v1.x.y` — recommended |
-| `blairham/stevedore@v1.2` | newest `v1.2.z` |
-| `blairham/stevedore@v1.2.3` | exactly that release |
-| `blairham/stevedore@<sha>` | exactly that commit — the strictest option |
-
-The action's `version` input controls the **stevedore binary** it downloads,
-which is a separate choice from the action code above. Left at its `latest`
-default it resolves to the newest release *in the action's own major line*, so
-`@v1` keeps running v1 binaries after v2 ships.
-
-### Action inputs
-
-| Input | Default | Description |
-|-------|---------|-------------|
-| `command` | `release` | Subcommand: `release`, `build`, `check`, `verify`, `doctor`. |
-| `args` | `""` | Extra args, e.g. `--snapshot --only-changed`. |
-| `config` | autodiscover | Path to the config file. |
-| `version` | `latest` | stevedore version to install. |
-| `working-directory` | `.` | Directory to run in. |
-| `install-cosign` / `install-syft` / `install-grype` | `true` | Install that tool. |
-| `install-crane` | `false` | Install crane (enable for `versioning.strategy: registry`). |
-
-A pull-request check that validates the plan without publishing:
-
-```yaml
-      - uses: blairham/stevedore@v1
-        with:
-          command: check
-```
-
-Prefer to wire the tools up yourself? stevedore is just a binary, so
-`go run github.com/blairham/stevedore@latest release` after installing the tools
-works too. Either way, **`fetch-depth: 0` matters**: shallow clones hide the tags and
-history stevedore needs to derive the version and build the changelog.
+| `stevedore release` | Full pipeline: build → push → scan → test → sign → SBOM → changelog. Clean, tagged checkout unless `--snapshot`. |
+| `stevedore merge` | Second half of a split release: stitch the per-arch digests into manifest lists and run the release tail. |
+| `stevedore plan` | Resolve versions, change detection and build grouping, and print the plan as JSON. Builds nothing. |
+| `stevedore build` | Inner loop: one platform, loaded into the local docker daemon, no push. |
+| `stevedore check` | Validate the config and print the exact refs that would publish. |
+| `stevedore verify <ref>` | Check a pushed image's signature, SBOM attestation and provenance. |
+| `stevedore doctor` | Report which external tools are present, and how to install the missing ones. |
+| `stevedore init` | Scaffold a config by scanning Dockerfiles, or import one with `--from`. |
+| `stevedore schema` | Print the JSON Schema, for editor autocomplete and validation. |
+
+Full flag reference: [docs/cli.md](docs/cli.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [Configuration](docs/configuration.md) | every `.stevedore.yaml` field, the template context, the changelog |
+| [CLI reference](docs/cli.md) | commands, flags, and the JSON surfaces meant for machines |
+| [Versioning and tags](docs/versioning.md) | the six version strategies, and how floating tags are gated |
+| [Supply chain](docs/supply-chain.md) | the gate ordering, signing, SBOMs, provenance, verification |
+| [Monorepos](docs/monorepo.md) | change detection, build-once grouping, CI fan-out, native multi-arch |
+| [Using it in CI](docs/ci.md) | the GitHub Action, its inputs, and how to pin it |
+| [Importing a config](docs/importing.md) | `init --from goreleaser` / `bake` / `services` |
+| [Comparison](docs/comparison.md) | ko, bake, build-push-action, GoReleaser — and what this is not |
+| [Stability contract](docs/stability.md) | what v1 promises about your config and your tags |
 
 ## Development
 
