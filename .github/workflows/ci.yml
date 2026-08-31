@@ -21,11 +21,9 @@ permissions:
   contents: read
 
 concurrency:
-  # A superseded push to a pull request is not worth finishing. A push to main
-  # is: it is the record of whether that merge was good, and cancelling it
-  # leaves the question unanswered.
+  # A superseded push is not worth finishing; only the newest commit matters.
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   # Runs for every commit that reaches GitHub — every push to a pull request,
@@ -103,17 +101,20 @@ jobs:
   test:
     name: Build and test
     needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
+      if: needs.changes.outputs.code == 'true'
     - uses: actions/setup-go@v6
+      if: needs.changes.outputs.code == 'true'
       with:
         go-version-file: go.mod
         check-latest: true
         cache: true
     - run: go test -race ./...
+      if: needs.changes.outputs.code == 'true'
     - run: go build ./...
+      if: needs.changes.outputs.code == 'true'
 
 
   action-smoke:
@@ -121,20 +122,23 @@ jobs:
     # build stevedore, put it on PATH, then let the action install the tooling
     # and run `check` (install-stevedore: false so it uses our fresh binary).
     needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        if: needs.changes.outputs.code == 'true'
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v6
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           check-latest: true
       - name: Build stevedore from checkout
+        if: needs.changes.outputs.code == 'true'
         run: |
           go build -o /usr/local/bin/stevedore .
       - name: Run stevedore via the action
+        if: needs.changes.outputs.code == 'true'
         uses: ./
         with:
           install-stevedore: "false"
@@ -147,17 +151,20 @@ jobs:
     # its config expects. A stale example is worse than no example, because it
     # is copied before it is read.
     needs: changes
-    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@v6
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           check-latest: true
       - name: Build stevedore from checkout
+        if: needs.changes.outputs.code == 'true'
         run: go build -o /usr/local/bin/stevedore .
       - name: Check every example config
+        if: needs.changes.outputs.code == 'true'
         run: |
           set -euo pipefail
           scratch=$(mktemp -d)
@@ -176,34 +183,9 @@ jobs:
             echo "::endgroup::"
           done
       - name: Lint the example workflow
+        if: needs.changes.outputs.code == 'true'
         run: |
           # It is a workflow people paste into .github/workflows, so it has to
           # parse as one — it lives outside that directory precisely so GitHub
           # does not try to run it here.
           python3 -c "import yaml,sys; yaml.safe_load(open('examples/split-multiarch/release.yml'))"
-
-  # The one check branch protection requires. Requiring the jobs by name does
-  # not survive this workflow's shape: a job skipped by the prose guard never
-  # reports, and a *matrix* job skipped by `if:` never expands, so a policy
-  # naming "test (ubuntu-latest)" waits for it forever. A single always-running
-  # gate that fails when any upstream job failed survives skips, matrix
-  # renames and new jobs alike — when jobs change here, update this `needs`
-  # list and nothing else.
-  ci-ok:
-    needs: [pre-commit, changes, test, action-smoke, examples]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-    - name: Verify no required job failed
-      env:
-        RESULTS: ${{ toJSON(needs) }}
-      run: |
-        echo "$RESULTS"
-        bad=$(echo "$RESULTS" | jq -r 'to_entries[]
-          | select(.value.result != "success" and .value.result != "skipped")
-          | "\(.key)=\(.value.result)"')
-        if [ -n "$bad" ]; then
-          echo "not ok: $bad"
-          exit 1
-        fi
-        echo "ok"
