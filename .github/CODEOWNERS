@@ -1,0 +1,7 @@
+# Every change needs the maintainer's review. signer/ and verifier/ are where a
+# mistake becomes an artifact signed that should not be, or a signature accepted
+# that should not be; action.yml runs in other people's release pipelines.
+*                    @blairham
+/internal/signer/    @blairham
+/internal/verifier/  @blairham
+/action.yml          @blairham

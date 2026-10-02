@@ -4,7 +4,9 @@
 
 [![CI](https://github.com/blairham/stevedore/actions/workflows/ci.yml/badge.svg)](https://github.com/blairham/stevedore/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/blairham/stevedore?sort=semver)](https://github.com/blairham/stevedore/releases/latest)
-[![Go Report Card](https://goreportcard.com/badge/github.com/blairham/stevedore)](https://goreportcard.com/report/github.com/blairham/stevedore)
+[![CodeQL](https://github.com/blairham/stevedore/actions/workflows/codeql.yml/badge.svg)](https://github.com/blairham/stevedore/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/blairham/stevedore/badge)](https://scorecard.dev/viewer/?uri=github.com/blairham/stevedore)
+[![Go version](https://img.shields.io/github/go-mod/go-version/blairham/stevedore)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Release Docker/OCI images the way [goreleaser](https://goreleaser.com) releases binaries.**

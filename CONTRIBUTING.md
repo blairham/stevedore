@@ -5,11 +5,13 @@ Thanks for looking. Issues, bug reports and pull requests are all welcome.
 ## Before you open a PR
 
 ```sh
-make check     # lint + test — the same thing CI runs
+pre-commit install   # once per clone: formatting, golangci-lint, secrets, YAML
+make check           # go vet + go test -race + build
 ```
 
-`make check` is `gofumpt` (as a check, not a rewrite), `go vet`, `golangci-lint`,
-and `go test -race ./...`. If `gofumpt` complains, `make fmt` fixes it.
+golangci-lint runs as the commit hook and in CI, not as a make target; a
+failing hook fails the commit, and you fix it and commit again. `make fmt`
+applies gofumpt.
 
 You do **not** need docker, cosign, syft or any other external tool to build or
 test stevedore. They are only needed to run an actual release. `stevedore doctor`

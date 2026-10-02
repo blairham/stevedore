@@ -40,8 +40,8 @@ Prefer `make` — run `make help` to list targets.
 ```sh
 make build     # go build ./...
 make test      # go test -race ./...
-make lint      # gofumpt (check) + go vet + golangci-lint
-make check     # lint + test (mirror CI locally, run before a PR)
+make vet       # go vet ./...
+make check     # vet + race tests + build (lint is the commit hook's job)
 make fmt       # go tool gofumpt -w .
 make tidy      # go mod tidy  (after changing deps)
 ```
@@ -129,12 +129,13 @@ publishes the CLI binary + Homebrew formula + GitHub release. See
 
 ## Working agreements
 
-- Run `make check` before proposing a change; keep the tree `gofumpt`-clean.
+- Keep the tree `gofumpt`-clean; push and let CI run the full gate.
 - `pre-commit install` once per clone. Hooks: hygiene (trailing whitespace,
-  EOF, YAML, large files, merge conflicts, private keys), `go-mod-tidy-repo`,
-  `go-fumpt-repo`, and gitleaks (allowlist in `.gitleaks.toml`).
+  EOF, YAML, large files, private keys), `check-conflict-markers`,
+  `go-mod-tidy-repo`, `check-go-version-sync`, `go-vulncheck`, golangci-lint,
+  gitleaks (allowlist in `.gitleaks.toml`) and yamllint (`.yamllint.yml`).
 - **Linter is golangci-lint v2**, `go tool`-pinned, config in `.golangci.yml`.
-  It runs in CI and in `make lint` — not in pre-commit, where it's too slow
-  for every commit. `go tool golangci-lint fmt` applies the formatter fixes.
+  It runs **only** as the pre-commit hook and in CI — there is no `lint` make
+  target, and it is never run by hand. `run.concurrency` bounds its footprint.
 - Add/extend table tests for pure logic you touch.
 - Don't commit, push, tag, or create releases unless explicitly asked.
