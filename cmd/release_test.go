@@ -13,8 +13,8 @@ func TestParsePins(t *testing.T) {
 	if pins["checkout"] != "0.0.400" || pins["billing"] != "1.2.3" {
 		t.Errorf("pins = %v", pins)
 	}
-	if got, _ := parsePins(nil); got != nil {
-		t.Errorf("no flags should yield a nil map, got %v", got)
+	if got, err := parsePins(nil); err != nil || len(got) != 0 {
+		t.Errorf("no flags should yield no pins, got %v, %v", got, err)
 	}
 	for _, bad := range []string{"checkout", "=1.0.0", "checkout="} {
 		if _, err := parsePins([]string{bad}); err == nil {

@@ -14,9 +14,6 @@ import (
 
 // parsePins parses repeated --pin-version id=version flags into a map.
 func parsePins(pins []string) (map[string]string, error) {
-	if len(pins) == 0 {
-		return nil, nil
-	}
 	out := make(map[string]string, len(pins))
 	for _, p := range pins {
 		id, ver, ok := strings.Cut(p, "=")

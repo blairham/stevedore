@@ -87,10 +87,10 @@ type Result struct {
 	Changed []Change
 }
 
-// Diff compares two package maps (old -> new).
-func Diff(old, new map[string]string) Result {
+// Diff compares two package maps (old -> cur).
+func Diff(old, cur map[string]string) Result {
 	var r Result
-	for name, nv := range new {
+	for name, nv := range cur {
 		ov, ok := old[name]
 		if !ok {
 			r.Added = append(r.Added, Pkg{name, nv})
@@ -99,7 +99,7 @@ func Diff(old, new map[string]string) Result {
 		}
 	}
 	for name, ov := range old {
-		if _, ok := new[name]; !ok {
+		if _, ok := cur[name]; !ok {
 			r.Removed = append(r.Removed, Pkg{name, ov})
 		}
 	}

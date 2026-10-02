@@ -87,7 +87,7 @@ func hashMatching(h io.Writer, root string, patterns []string, distDir string) e
 			if skipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
-			if abs, _ := filepath.Abs(path); abs == distDir {
+			if abs, absErr := filepath.Abs(path); absErr == nil && abs == distDir {
 				return filepath.SkipDir
 			}
 			return nil
@@ -109,7 +109,10 @@ func hashMatching(h io.Writer, root string, patterns []string, distDir string) e
 	}
 	sort.Strings(files)
 	for _, f := range files {
-		rel, _ := filepath.Rel(root, f)
+		rel, err := filepath.Rel(root, f)
+		if err != nil {
+			return err
+		}
 		if err := hashFile(h, "path:"+filepath.ToSlash(rel), f); err != nil {
 			return err
 		}
@@ -138,7 +141,7 @@ func hashTree(h io.Writer, root, distDir string) error {
 				return filepath.SkipDir
 			}
 			// Skip the dist dir when it lives inside the context.
-			if abs, _ := filepath.Abs(path); abs == distDir {
+			if abs, absErr := filepath.Abs(path); absErr == nil && abs == distDir {
 				return filepath.SkipDir
 			}
 			return nil
@@ -154,7 +157,10 @@ func hashTree(h io.Writer, root, distDir string) error {
 	}
 	sort.Strings(files)
 	for _, f := range files {
-		rel, _ := filepath.Rel(root, f)
+		rel, err := filepath.Rel(root, f)
+		if err != nil {
+			return err
+		}
 		if err := hashFile(h, "ctx:"+filepath.ToSlash(rel), f); err != nil {
 			return err
 		}
@@ -166,7 +172,7 @@ func hashTree(h io.Writer, root, distDir string) error {
 // recorded as absent rather than erroring, so an optional Dockerfile path is
 // tolerated.
 func hashFile(h io.Writer, label, path string) error {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(h, "%s=<absent>\n", label)
@@ -196,7 +202,7 @@ type State map[string]string
 // Load reads the fingerprint state from path, returning an empty state when the
 // file does not exist.
 func Load(path string) (State, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return State{}, nil
@@ -213,11 +219,12 @@ func Load(path string) (State, error) {
 	return s, nil
 }
 
-// Save writes the state to path as indented JSON.
+// Save writes the state to path as indented JSON, readable only by its owner:
+// it is a build cache, not an artifact.
 func (s State) Save(path string) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return os.WriteFile(path, append(data, '\n'), 0o600)
 }

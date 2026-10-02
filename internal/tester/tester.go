@@ -51,7 +51,7 @@ func Run(r *run.Runner, cfg config.Test, ref string) error {
 	}
 	got := cmd.ProcessState.ExitCode()
 	if got != cfg.ExpectExit {
-		return fmt.Errorf("smoke test of %s exited %d, want %d (%v)", ref, got, cfg.ExpectExit, runErr)
+		return fmt.Errorf("smoke test of %s exited %d, want %d (%w)", ref, got, cfg.ExpectExit, runErr)
 	}
 	return nil
 }

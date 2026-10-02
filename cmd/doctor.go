@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -61,9 +62,12 @@ func newDoctorCmd() *cobra.Command {
 // an empty config so doctor still reports tool presence outside a project.
 func loadConfigForDoctor() (*config.Config, error) {
 	path, err := resolveConfigPath()
-	if err != nil {
+	if errors.Is(err, config.ErrNoConfig) {
 		// No config found: check the always-required tools against defaults.
 		return &config.Config{}, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	cfg, err := config.Load(path)
 	if err != nil {

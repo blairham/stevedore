@@ -47,6 +47,13 @@ func (r *Runner) Run(name string, args ...string) error {
 	return nil
 }
 
+// Preview prints the command the way Run does in dry-run mode, without running
+// it. It is for a caller's dry-run branch that must not execute and so has no
+// result to report.
+func (r *Runner) Preview(name string, args ...string) {
+	r.echo(name, args)
+}
+
 // Capture runs the command and returns its stdout. It executes even in dry-run
 // mode, since it is used for read-only queries (e.g. reading a digest file).
 func (r *Runner) Capture(name string, args ...string) (string, error) {

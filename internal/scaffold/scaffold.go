@@ -45,7 +45,10 @@ func ScanDockerfiles(dir, projectName string) ([]Image, error) {
 		if !isDockerfile(d.Name()) {
 			return nil
 		}
-		rel, _ := filepath.Rel(dir, path)
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
 		relDir := filepath.Dir(rel)
 		baseID := projectName
 		if relDir != "." {

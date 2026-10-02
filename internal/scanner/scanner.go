@@ -46,16 +46,19 @@ type Report struct {
 	Blocking []Vuln
 }
 
+// trivy is both the scanner name in config and its executable.
+const trivy = "trivy"
+
 // Scan scans ref with the configured scanner, writes the raw report to distDir,
-// and returns a normalized Report. In dry-run mode it echoes the command and
-// returns an empty report.
+// and returns a normalized Report. In dry-run mode, or with scanning disabled,
+// it returns an empty report; dry-run also echoes the command.
 func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report, error) {
 	if !cfg.Enabled {
-		return nil, nil
+		return &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}}, nil
 	}
 	name, args, raw := command(cfg, ref, distDir, imageID)
 	if r.DryRun {
-		_ = r.Run(name, args...)
+		r.Preview(name, args...)
 		return &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}}, nil
 	}
 	out, err := r.Capture(name, args...)
@@ -63,7 +66,7 @@ func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report
 		return nil, fmt.Errorf("%s scan of %s: %w", cfg.Scanner, ref, err)
 	}
 	if raw != "" {
-		if werr := os.WriteFile(raw, []byte(out), 0o644); werr != nil {
+		if werr := os.WriteFile(raw, []byte(out), 0o600); werr != nil {
 			return nil, fmt.Errorf("write scan report: %w", werr)
 		}
 	}
@@ -79,9 +82,9 @@ func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report
 func command(cfg config.Scan, ref, distDir, imageID string) (name string, args []string, rawPath string) {
 	rawPath = filepath.Join(distDir, fmt.Sprintf("scan-%s.json", imageID))
 	switch cfg.Scanner {
-	case "trivy":
+	case trivy:
 		args = append([]string{"image", "--quiet", "--format", "json"}, cfg.Args...)
-		return "trivy", append(args, ref), rawPath
+		return trivy, append(args, ref), rawPath
 	default: // grype
 		args = append([]string{ref, "-o", "json"}, cfg.Args...)
 		return "grype", args, rawPath
@@ -136,15 +139,15 @@ func (rep *Report) GateError(failOn string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d vulnerabilit%s at or above %q in %s:", len(rep.Blocking), plural(len(rep.Blocking)), failOn, rep.Ref)
 	shown := rep.Blocking
-	const max = 20
-	if len(shown) > max {
-		shown = shown[:max]
+	const maxShown = 20
+	if len(shown) > maxShown {
+		shown = shown[:maxShown]
 	}
 	for _, v := range shown {
 		fmt.Fprintf(&b, "\n  - [%s] %s (%s %s)", strings.ToUpper(v.Severity), v.ID, v.Package, v.Version)
 	}
-	if len(rep.Blocking) > max {
-		fmt.Fprintf(&b, "\n  ... and %d more", len(rep.Blocking)-max)
+	if len(rep.Blocking) > maxShown {
+		fmt.Fprintf(&b, "\n  ... and %d more", len(rep.Blocking)-maxShown)
 	}
 	return fmt.Errorf("%s", b.String())
 }
@@ -160,7 +163,7 @@ func plural(n int) string {
 
 func parse(scanner string, data []byte) ([]Vuln, error) {
 	switch scanner {
-	case "trivy":
+	case trivy:
 		return parseTrivy(data)
 	default:
 		return parseGrype(data)

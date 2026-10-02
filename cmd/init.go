@@ -53,7 +53,9 @@ func newInitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			// The config is committed to the repository, so it gets the mode git
+			// would check it out with.
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // G306: see above
 				return err
 			}
 			fmt.Printf("wrote %s — %s\n", path, summary)
@@ -131,22 +133,18 @@ func serviceMapping(mapFields, mapBuildArgs []string) (importer.ServiceMapping, 
 		if !ok || field == "" || key == "" {
 			return m, fmt.Errorf("--map %q: want field=manifest_key", kv)
 		}
-		switch field {
-		case "id":
-			m.ID = key
-		case "repositories":
-			m.Repositories = key
-		case "dockerfile":
-			m.Dockerfile = key
-		case "context":
-			m.Context = key
-		case "target":
-			m.Target = key
-		case "paths":
-			m.Paths = key
-		default:
+		dst, known := map[string]*string{
+			"id":           &m.ID,
+			"repositories": &m.Repositories,
+			"dockerfile":   &m.Dockerfile,
+			"context":      &m.Context,
+			"target":       &m.Target,
+			"paths":        &m.Paths,
+		}[field]
+		if !known {
 			return m, fmt.Errorf("--map: unknown field %q (want id, repositories, dockerfile, context, target, or paths)", field)
 		}
+		*dst = key
 	}
 	if len(mapBuildArgs) > 0 {
 		m.BuildArgs = map[string]string{}

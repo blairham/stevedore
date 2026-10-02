@@ -12,11 +12,15 @@ import (
 	"github.com/blairham/stevedore/internal/run"
 )
 
+// cyclonedx is the cosign predicate type for CycloneDX SBOMs, and also one of
+// syft's spellings of the format.
+const cyclonedx = "cyclonedx"
+
 // PredicateType maps a syft format to the cosign attestation predicate type.
 func PredicateType(format string) string {
 	switch format {
-	case "cyclonedx-json", "cyclonedx":
-		return "cyclonedx"
+	case "cyclonedx-json", cyclonedx:
+		return cyclonedx
 	default:
 		return "spdxjson"
 	}
@@ -35,7 +39,7 @@ func Generate(r *run.Runner, cfg config.SBOM, distDir, imageID, ref string) (str
 		return "", fmt.Errorf("sbom.enabled but syft not found on PATH")
 	}
 	ext := "spdx.json"
-	if PredicateType(cfg.Format) == "cyclonedx" {
+	if PredicateType(cfg.Format) == cyclonedx {
 		ext = "cdx.json"
 	}
 	out := filepath.Join(distDir, fmt.Sprintf("sbom-%s.%s", imageID, ext))

@@ -6,8 +6,10 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -326,7 +328,7 @@ type Changelog struct {
 
 // Load reads and parses the config at path, applying defaults.
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
@@ -340,15 +342,18 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+// ErrNoConfig is returned by Discover when dir holds none of DefaultFilenames.
+var ErrNoConfig = errors.New("no stevedore config found")
+
 // Discover finds the first existing default config file in dir.
 func Discover(dir string) (string, error) {
 	for _, name := range DefaultFilenames {
-		p := dir + string(os.PathSeparator) + name
+		p := filepath.Join(dir, name)
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("no stevedore config found (looked for %v)", DefaultFilenames)
+	return "", fmt.Errorf("%w (looked for %v)", ErrNoConfig, DefaultFilenames)
 }
 
 func (c *Config) applyDefaults() {
