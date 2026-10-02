@@ -99,7 +99,8 @@ Keep this section current; it is what stops the post from overclaiming.
 Nothing gets posted until every one of these is true. A broken copy-paste path
 in the first hour costs the whole launch.
 
-- [ ] `brew install blairham/tap/stevedore` works from a clean machine
+- [x] `brew install blairham/tap/stevedore` works from a clean machine —
+      installed from the tap (1.0.4) and runs; the tap now carries 1.0.5
 - [x] `go install github.com/blairham/stevedore@latest` works — installs
       v1.0.5, and `--version` reports 1.0.5 (it said `dev` before #24)
 - [x] `docker run --rm ghcr.io/blairham/stevedore --version` works — i.e. the
@@ -114,10 +115,8 @@ in the first hour costs the whole launch.
       install hints rather than a stack trace — measured with an empty PATH
 - [x] The Action is listed on the GitHub Marketplace — as "Stevedore Release"
       (a GitHub user owns the bare name), https://github.com/marketplace/actions/stevedore-release
-- [ ] Issue templates render, and Discussions is enabled and has a first post
-      — both forms pass GitHub's form rules (labels exist, field types valid);
-      Discussions is still off, which also breaks the template chooser's
-      "Question or idea" link
+- [x] Issue templates render — both forms pass GitHub's form rules (labels
+      exist, field types valid). No Discussions: questions are blank issues
 - [x] The repo has topics, a description and a social preview image — the
       preview is `assets/social-preview.png` (1280×640)
 
