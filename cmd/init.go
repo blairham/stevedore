@@ -4,7 +4,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,7 +48,7 @@ func newInitCmd() *cobra.Command {
 			}
 			name := filepath.Base(mustAbs(flagDir))
 
-			content, summary, err := scaffoldContent(c.Context(), from, file, name, mapFields, mapBuildArgs)
+			content, summary, err := scaffoldContent(run.New(c.Context(), false, flagVerbose), from, file, name, mapFields, mapBuildArgs)
 			if err != nil {
 				return err
 			}
@@ -71,7 +70,7 @@ func newInitCmd() *cobra.Command {
 	return cmd
 }
 
-func scaffoldContent(ctx context.Context, from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
+func scaffoldContent(r *run.Runner, from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
 	switch from {
 	case "", "dockerfiles":
 		imgs, err := scaffold.ScanDockerfiles(flagDir, name)
@@ -87,7 +86,7 @@ func scaffoldContent(ctx context.Context, from, file, name string, mapFields, ma
 		if file == "" {
 			file = firstExisting(".goreleaser.yaml", ".goreleaser.yml")
 		}
-		data, err := os.ReadFile(filepath.Join(flagDir, file))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(flagDir, file)))
 		if err != nil {
 			return "", "", fmt.Errorf("read goreleaser config: %w", err)
 		}
@@ -98,7 +97,7 @@ func scaffoldContent(ctx context.Context, from, file, name string, mapFields, ma
 		return importer.RenderYAML(name, "goreleaser ("+file+")", imgs), fmt.Sprintf("imported %d image(s) from %s", len(imgs), file), nil
 
 	case "bake":
-		imgs, err := bakeImages(ctx, file)
+		imgs, err := bakeImages(r, file)
 		if err != nil {
 			return "", "", err
 		}
@@ -161,8 +160,7 @@ func serviceMapping(mapFields, mapBuildArgs []string) (importer.ServiceMapping, 
 
 // bakeImages resolves a bake target set via `docker buildx bake --print` and
 // imports the resulting targets.
-func bakeImages(ctx context.Context, file string) ([]importer.Image, error) {
-	r := run.New(ctx, false, flagVerbose)
+func bakeImages(r *run.Runner, file string) ([]importer.Image, error) {
 	args := []string{"buildx", "bake", "--print"}
 	if file != "" {
 		args = append(args, "--file", file)

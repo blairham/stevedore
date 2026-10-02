@@ -507,16 +507,23 @@ func Release(o Options) error {
 	result.Images = append(result.Images, built...)
 	sort.Slice(result.Images, func(i, j int) bool { return result.Images[i].ID < result.Images[j].ID })
 
+	return finishRelease(o, p, r, result, fpPath, state, depDiffSections)
+}
+
+// finishRelease is everything after the builds: it records the new
+// fingerprints, advances the release markers, notifies, writes the changelog,
+// publishes and emits the summary. A marker that cannot advance does not stop
+// the rest; it is reported once the release is otherwise done.
+func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result, fpPath string, state fingerprint.State, depDiffSections []string) error {
 	if !o.DryRun {
-		if err = state.Save(fpPath); err != nil {
+		if err := state.Save(fpPath); err != nil {
 			return fmt.Errorf("save fingerprint state: %w", err)
 		}
 	}
 
 	markerErrs := advanceMarkers(o, p, result.Images)
 
-	err = notifyWebhook(o, p, r, result.Images)
-	if err != nil {
+	if err := notifyWebhook(o, p, r, result.Images); err != nil {
 		return err
 	}
 

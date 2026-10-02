@@ -49,26 +49,7 @@ func ScanDockerfiles(dir, projectName string) ([]Image, error) {
 		if err != nil {
 			return err
 		}
-		relDir := filepath.Dir(rel)
-		baseID := projectName
-		if relDir != "." {
-			baseID = filepath.Base(relDir)
-		}
-		if baseID == "" {
-			baseID = "app"
-		}
-		// Disambiguate duplicate ids (e.g. several root-level *.Dockerfile).
-		id := baseID
-		if n := seenID[baseID]; n > 0 {
-			id = fmt.Sprintf("%s-%d", baseID, n+1)
-		}
-		seenID[baseID]++
-
-		ctx := relDir
-		if ctx == "" {
-			ctx = "."
-		}
-		imgs = append(imgs, Image{ID: id, Dockerfile: filepath.ToSlash(rel), Context: filepath.ToSlash(ctx)})
+		imgs = append(imgs, dockerfileImage(rel, projectName, seenID))
 		return nil
 	})
 	if err != nil {
@@ -76,6 +57,31 @@ func ScanDockerfiles(dir, projectName string) ([]Image, error) {
 	}
 	sort.Slice(imgs, func(i, j int) bool { return imgs[i].Dockerfile < imgs[j].Dockerfile })
 	return imgs, nil
+}
+
+// dockerfileImage turns the Dockerfile at rel (relative to the scan root) into
+// an Image, counting ids in seenID so that duplicates are disambiguated.
+func dockerfileImage(rel, projectName string, seenID map[string]int) Image {
+	relDir := filepath.Dir(rel)
+	baseID := projectName
+	if relDir != "." {
+		baseID = filepath.Base(relDir)
+	}
+	if baseID == "" {
+		baseID = "app"
+	}
+	// Disambiguate duplicate ids (e.g. several root-level *.Dockerfile).
+	id := baseID
+	if n := seenID[baseID]; n > 0 {
+		id = fmt.Sprintf("%s-%d", baseID, n+1)
+	}
+	seenID[baseID]++
+
+	ctx := relDir
+	if ctx == "" {
+		ctx = "."
+	}
+	return Image{ID: id, Dockerfile: filepath.ToSlash(rel), Context: filepath.ToSlash(ctx)}
 }
 
 func isDockerfile(name string) bool {

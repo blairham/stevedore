@@ -63,7 +63,7 @@ func FromServicesDir(dir string, m ServiceMapping) ([]Image, error) {
 	sort.Strings(names)
 	var imgs []Image
 	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, name)))
 		if err != nil {
 			return nil, err
 		}

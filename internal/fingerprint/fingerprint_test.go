@@ -113,7 +113,7 @@ func TestStateRoundTrip(t *testing.T) {
 
 	s["app"] = "abc123"
 	s["web"] = "def456"
-	if err := s.Save(path); err != nil {
+	if err = s.Save(path); err != nil {
 		t.Fatal(err)
 	}
 

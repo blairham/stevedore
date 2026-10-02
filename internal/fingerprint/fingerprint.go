@@ -78,7 +78,37 @@ func Compute(dir string, img config.Image, distDir string, scopedPaths []string)
 // hashMatching folds every file under root whose repo-relative path matches one
 // of patterns into h, in deterministic order.
 func hashMatching(h io.Writer, root string, patterns []string, distDir string) error {
-	var files []string
+	rels, err := walkFiles(root, distDir, func(rel string) bool {
+		return changed.Match(patterns, filepath.ToSlash(rel))
+	})
+	if err != nil {
+		return err
+	}
+	return hashFiles(h, "path:", root, rels)
+}
+
+// hashTree folds every file under root (except skipped dirs and the dist dir)
+// into h as (relpath, content) pairs, walked in a deterministic order.
+func hashTree(h io.Writer, root, distDir string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("stat context %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return hashFile(h, "ctx:"+filepath.Base(root), root)
+	}
+	rels, err := walkFiles(root, distDir, func(string) bool { return true })
+	if err != nil {
+		return err
+	}
+	return hashFiles(h, "ctx:", root, rels)
+}
+
+// walkFiles returns the root-relative paths of the files under root that keep
+// accepts, sorted. Skipped dirs and the dist dir (when it lives under root) are
+// not descended into, and symlinks are not followed.
+func walkFiles(root, distDir string, keep func(rel string) bool) ([]string, error) {
+	var rels []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -95,73 +125,23 @@ func hashMatching(h io.Writer, root string, patterns []string, distDir string) e
 		if d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
-		}
-		if changed.Match(patterns, filepath.ToSlash(rel)) {
-			files = append(files, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		rel, err := filepath.Rel(root, f)
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		if err := hashFile(h, "path:"+filepath.ToSlash(rel), f); err != nil {
-			return err
+		if keep(rel) {
+			rels = append(rels, rel)
 		}
-	}
-	return nil
+		return nil
+	})
+	sort.Strings(rels)
+	return rels, err
 }
 
-// hashTree folds every file under root (except skipped dirs and the dist dir)
-// into h as (relpath, content) pairs, walked in a deterministic order.
-func hashTree(h io.Writer, root, distDir string) error {
-	info, err := os.Stat(root)
-	if err != nil {
-		return fmt.Errorf("stat context %s: %w", root, err)
-	}
-	if !info.IsDir() {
-		return hashFile(h, "ctx:"+filepath.Base(root), root)
-	}
-
-	var files []string
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			// Skip the dist dir when it lives inside the context.
-			if abs, absErr := filepath.Abs(path); absErr == nil && abs == distDir {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil // don't follow symlinks
-		}
-		files = append(files, path)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		rel, err := filepath.Rel(root, f)
-		if err != nil {
-			return err
-		}
-		if err := hashFile(h, "ctx:"+filepath.ToSlash(rel), f); err != nil {
+// hashFiles hashes each root-relative file under label+its slash path.
+func hashFiles(h io.Writer, label, root string, rels []string) error {
+	for _, rel := range rels {
+		if err := hashFile(h, label+filepath.ToSlash(rel), filepath.Join(root, rel)); err != nil {
 			return err
 		}
 	}
