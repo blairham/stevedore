@@ -103,13 +103,16 @@ in the first hour costs the whole launch.
 - [ ] `go install github.com/blairham/stevedore@latest` works
 - [ ] `docker run --rm ghcr.io/blairham/stevedore --version` works — i.e. the
       `:latest` tag actually exists (it did not, for ten releases; see #20)
-- [ ] `uses: blairham/stevedore@v1` resolves (see #21)
+- [x] `uses: blairham/stevedore@v1` resolves (see #21) — `v1` → v1.0.3
 - [ ] Every command in the README quick start, run in order, in a scratch repo
 - [ ] `stevedore doctor` on a machine missing every optional tool gives useful
       install hints rather than a stack trace
-- [ ] The Action is listed on the GitHub Marketplace
+- [x] The Action is listed on the GitHub Marketplace — as "Stevedore Release"
+      (a GitHub user owns the bare name), https://github.com/marketplace/actions/stevedore-release
 - [ ] Issue templates render, and Discussions is enabled and has a first post
-- [ ] The repo has topics, a description and a social preview image
+- [ ] The repo has topics, a description and a social preview image — topics
+      and description are set; upload `assets/social-preview.png` (1280×640) at
+      Settings → General → Social preview
 
 ## Where, and in what order
 
