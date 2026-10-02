@@ -35,12 +35,12 @@ jobs:
     name: Pre-commit
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       with:
         # `--new-from-merge-base` needs the base branch's history to find the
         # common ancestor; a shallow clone has none of it.
         fetch-depth: 0
-    - uses: actions/setup-go@v6
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
       with:
         go-version-file: go.mod
         check-latest: true
@@ -83,7 +83,7 @@ jobs:
       # asks the same hook the question it can answer on a runner.
       env:
         SKIP: golangci-lint
-      uses: blairham/go-pre-commit@v4.6.6
+      uses: blairham/go-pre-commit@5788df636d2726ba06d337393503a7fe6b3451c2 # v4.6.7
       with:
         extra_args: --from-ref ${{ steps.range.outputs.base }} --to-ref ${{ steps.range.outputs.head }}
     - name: Lint what this change introduces
@@ -91,7 +91,7 @@ jobs:
       # told not to fix (`--fix=false` in the hook's args): a linter that
       # repairs its own findings exits 0 and reports nothing, which is a green
       # check over unchanged, still-broken committed code.
-      uses: blairham/go-pre-commit@v4.6.6
+      uses: blairham/go-pre-commit@5788df636d2726ba06d337393503a7fe6b3451c2 # v4.6.7
       with:
         extra_args: --from-ref ${{ steps.range.outputs.base }} --to-ref ${{ steps.range.outputs.head }} --hook-stage manual golangci-lint-new
 
@@ -109,7 +109,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       with:
         fetch-depth: 0 # the diff needs the base commit, not just HEAD
     - id: filter
@@ -151,9 +151,9 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       if: needs.changes.outputs.code == 'true'
-    - uses: actions/setup-go@v6
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
       if: needs.changes.outputs.code == 'true'
       with:
         go-version-file: go.mod
@@ -164,6 +164,26 @@ jobs:
     - run: go build ./...
       if: needs.changes.outputs.code == 'true'
 
+  # The image is released by the dogfood job on a tag, so a Dockerfile that
+  # stopped building would first fail after the tag was public. Build only, for
+  # both release platforms; nothing is pushed. No `if:` on the job: one that
+  # `needs` a skipped job is itself skipped.
+  image:
+    name: Build image
+    needs: [changes, test]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      if: needs.changes.outputs.code == 'true'
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      if: needs.changes.outputs.code == 'true'
+    - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      if: needs.changes.outputs.code == 'true'
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: false
+        tags: stevedore:ci
 
   action-smoke:
     # Exercises the composite action end to end against the CURRENT checkout:
@@ -172,11 +192,11 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         if: needs.changes.outputs.code == 'true'
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
@@ -201,9 +221,9 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         if: needs.changes.outputs.code == 'true'
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
