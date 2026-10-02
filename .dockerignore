@@ -1,0 +1,8 @@
+.git
+dist
+examples
+assets
+*.test
+*.out
+cosign.key
+cosign.pub

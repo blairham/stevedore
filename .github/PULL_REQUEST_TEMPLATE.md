@@ -1,6 +1,6 @@
 <!--
 Explain the why. The diff already says what.
-`make check` before pushing — it is the same thing CI runs.
+`pre-commit install` once; the commit hook lints, and CI is the gate.
 -->
 
 ## What this changes

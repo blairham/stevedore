@@ -16,8 +16,13 @@
   skip gracefully when the tool (or the docker socket) is absent.
 
 - **Slash commands** (`.claude/commands/`):
-  - `/check` — run the pre-PR gate (`make check` = lint + race tests) and report
-    failures concisely. Optionally scope it: `/check lint` or `/check test`.
+  - `/check` — run `make check` (vet + race tests + build) and report
+    failures concisely. Optionally scope it: `/check vet` or `/check test`.
+
+- **Agents** (`.claude/agents/`):
+  - `signing-path-reviewer` — reviews changes to `internal/signer`,
+    `internal/verifier`, `internal/pipeline` stage order and `action.yml`
+    against the gate-before-sign and credential-handling rules. Reports only.
 
 - **Demoing a release locally** is safe without a registry: `stevedore release
   --snapshot --dry-run` prints every command it would run, and `stevedore build`

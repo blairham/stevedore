@@ -35,65 +35,65 @@ jobs:
     name: Pre-commit
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      with:
-        # `--new-from-merge-base` needs the base branch's history to find the
-        # common ancestor; a shallow clone has none of it.
-        fetch-depth: 0
-    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-      with:
-        go-version-file: go.mod
-        check-latest: true
-        cache: true # go-mod-tidy-repo resolves the whole graph; uncached it is slow and flaky
-    - name: Resolve the diff this change introduces
-      # Everything below runs against this range and nothing else — no
-      # `--all-files` anywhere in CI. A branch create or a force-push sends an
-      # all-zero `before`, and an unresolvable ref makes both pre-commit and
-      # golangci-lint report nothing while exiting 0, which is the silent pass
-      # this whole job exists to prevent. So: fall back to the merge base with
-      # main, then verify every ref actually resolves and fail loudly if not.
-      id: range
-      env:
-        BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      run: |
-        set -euo pipefail
-        base="$BASE"
-        if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
-           || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-          echo "No usable base ref ('${base:-empty}') — falling back to the merge base with main"
-          base="$(git merge-base origin/main "$HEAD_SHA")"
-        fi
-        git rev-parse --verify "${base}^{commit}" >/dev/null
-        git rev-parse --verify "${HEAD_SHA}^{commit}" >/dev/null
-        # The manual hook below diffs against origin/main; if that is missing
-        # it reports `0 issues` and exits 0 rather than erroring.
-        git rev-parse --verify origin/main >/dev/null
-        echo "base=$base" >> "$GITHUB_OUTPUT"
-        echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-        echo "Linting ${base}..${HEAD_SHA}"
-    - name: Run pre-commit hooks
-      # Scoped to this change's diff, never `--all-files`: CI's job is to
-      # report what this change did, not to replay the repository's backlog.
-      #
-      # `golangci-lint` is skipped because it is `--new-from-rev HEAD`, which
-      # compares the working tree against HEAD and so reports nothing at all on
-      # a clean checkout. Diff-scoping this run cannot rescue it — the hook is
-      # `pass_filenames: false`, so it never sees the file list. The step below
-      # asks the same hook the question it can answer on a runner.
-      env:
-        SKIP: golangci-lint
-      uses: blairham/go-pre-commit@5788df636d2726ba06d337393503a7fe6b3451c2 # v4.6.7
-      with:
-        extra_args: --from-ref ${{ steps.range.outputs.base }} --to-ref ${{ steps.range.outputs.head }}
-    - name: Lint what this change introduces
-      # Same config, same pin, same hook — asked the narrower question, and
-      # told not to fix (`--fix=false` in the hook's args): a linter that
-      # repairs its own findings exits 0 and reports nothing, which is a green
-      # check over unchanged, still-broken committed code.
-      uses: blairham/go-pre-commit@5788df636d2726ba06d337393503a7fe6b3451c2 # v4.6.7
-      with:
-        extra_args: --from-ref ${{ steps.range.outputs.base }} --to-ref ${{ steps.range.outputs.head }} --hook-stage manual golangci-lint-new
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          # `--new-from-merge-base` needs the base branch's history to find the
+          # common ancestor; a shallow clone has none of it.
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true # go-mod-tidy-repo resolves the whole graph; uncached it is slow and flaky
+      - name: Resolve the diff this change introduces
+        # Everything below runs against this range and nothing else — no
+        # `--all-files` anywhere in CI. A branch create or a force-push sends an
+        # all-zero `before`, and an unresolvable ref makes both pre-commit and
+        # golangci-lint report nothing while exiting 0, which is the silent pass
+        # this whole job exists to prevent. So: fall back to the merge base with
+        # main, then verify every ref actually resolves and fail loudly if not.
+        id: range
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          base="$BASE"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "No usable base ref ('${base:-empty}') — falling back to the merge base with main"
+            base="$(git merge-base origin/main "$HEAD_SHA")"
+          fi
+          git rev-parse --verify "${base}^{commit}" >/dev/null
+          git rev-parse --verify "${HEAD_SHA}^{commit}" >/dev/null
+          # The manual hook below diffs against origin/main; if that is missing
+          # it reports `0 issues` and exits 0 rather than erroring.
+          git rev-parse --verify origin/main >/dev/null
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "Linting ${base}..${HEAD_SHA}"
+      - name: Run pre-commit hooks
+        # Scoped to this change's diff, never `--all-files`: CI's job is to
+        # report what this change did, not to replay the repository's backlog.
+        #
+        # `golangci-lint` is skipped because it is `--new-from-rev HEAD`, which
+        # compares the working tree against HEAD and so reports nothing at all on
+        # a clean checkout. Diff-scoping this run cannot rescue it — the hook is
+        # `pass_filenames: false`, so it never sees the file list. The step below
+        # asks the same hook the question it can answer on a runner.
+        env:
+          SKIP: golangci-lint
+        uses: blairham/go-pre-commit@5788df636d2726ba06d337393503a7fe6b3451c2 # v4.6.7
+        with:
+          extra_args: --from-ref ${{ steps.range.outputs.base }} --to-ref ${{ steps.range.outputs.head }}
+      - name: Lint what this change introduces
+        # Same config, same pin, same hook — asked the narrower question, and
+        # told not to fix (`--fix=false` in the hook's args): a linter that
+        # repairs its own findings exits 0 and reports nothing, which is a green
+        # check over unchanged, still-broken committed code.
+        uses: blairham/go-pre-commit@5788df636d2726ba06d337393503a7fe6b3451c2 # v4.6.7
+        with:
+          extra_args: --from-ref ${{ steps.range.outputs.base }} --to-ref ${{ steps.range.outputs.head }} --hook-stage manual golangci-lint-new
 
   # Gating happens inside the jobs, never with a workflow-level `paths:`
   # filter: a required check that never runs reports as *pending forever*
@@ -109,60 +109,60 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      with:
-        fetch-depth: 0 # the diff needs the base commit, not just HEAD
-    - id: filter
-      name: Is any of this code?
-      env:
-        # On a merge to main there is no pull request; `before` is the commit
-        # main pointed at, which makes the diff the merge itself.
-        BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-      run: |
-        code=false
-        if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-          # A merge runs everything. Not because the merge itself changed code
-          # — it may be pure prose — but because this is the first time this
-          # tree is tested *as main*, and what it protects against is an
-          # earlier merge that broke something nobody has run since.
-          echo "push to $GITHUB_REF_NAME — running everything"
-          code=true
-        elif ! git cat-file -e "$BASE" 2>/dev/null; then
-          # No usable base commit — a force push, or a shallow fetch that did
-          # not reach it. `git diff` would fail here and print nothing, and an
-          # empty diff is indistinguishable from "only prose changed", so this
-          # would silently skip every test. The safe answer is to run them.
-          echo "base commit $BASE is not present — running everything"
-          code=true
-        else
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            case "$f" in
-              docs/*|*.md|LICENSE|LICENSE.*|*.png|*.jpg|*.gif|*.svg) ;; # prose
-              *) code=true; break ;;
-            esac
-          done <<<"$(git diff --name-only "$BASE"...HEAD)"
-        fi
-        echo "code=$code" >> "$GITHUB_OUTPUT"
-        echo "changed files are $([ "$code" = true ] && echo 'code — full run' || echo 'prose only — skipping the code jobs')"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0 # the diff needs the base commit, not just HEAD
+      - id: filter
+        name: Is any of this code?
+        env:
+          # On a merge to main there is no pull request; `before` is the commit
+          # main pointed at, which makes the diff the merge itself.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          code=false
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            # A merge runs everything. Not because the merge itself changed code
+            # — it may be pure prose — but because this is the first time this
+            # tree is tested *as main*, and what it protects against is an
+            # earlier merge that broke something nobody has run since.
+            echo "push to $GITHUB_REF_NAME — running everything"
+            code=true
+          elif ! git cat-file -e "$BASE" 2>/dev/null; then
+            # No usable base commit — a force push, or a shallow fetch that did
+            # not reach it. `git diff` would fail here and print nothing, and an
+            # empty diff is indistinguishable from "only prose changed", so this
+            # would silently skip every test. The safe answer is to run them.
+            echo "base commit $BASE is not present — running everything"
+            code=true
+          else
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              case "$f" in
+                docs/*|*.md|LICENSE|LICENSE.*|*.png|*.jpg|*.gif|*.svg) ;; # prose
+                *) code=true; break ;;
+              esac
+            done <<<"$(git diff --name-only "$BASE"...HEAD)"
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "changed files are $([ "$code" = true ] && echo 'code — full run' || echo 'prose only — skipping the code jobs')"
 
   test:
     name: Build and test
     needs: changes
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      if: needs.changes.outputs.code == 'true'
-    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-      if: needs.changes.outputs.code == 'true'
-      with:
-        go-version-file: go.mod
-        check-latest: true
-        cache: true
-    - run: go test -race ./...
-      if: needs.changes.outputs.code == 'true'
-    - run: go build ./...
-      if: needs.changes.outputs.code == 'true'
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        if: needs.changes.outputs.code == 'true'
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: needs.changes.outputs.code == 'true'
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - run: go test -race ./...
+        if: needs.changes.outputs.code == 'true'
+      - run: go build ./...
+        if: needs.changes.outputs.code == 'true'
 
   # The image is released by the dogfood job on a tag, so a Dockerfile that
   # stopped building would first fail after the tag was public. Build only, for
@@ -173,17 +173,17 @@ jobs:
     needs: [changes, test]
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      if: needs.changes.outputs.code == 'true'
-    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      if: needs.changes.outputs.code == 'true'
-    - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-      if: needs.changes.outputs.code == 'true'
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: false
-        tags: stevedore:ci
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        if: needs.changes.outputs.code == 'true'
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: needs.changes.outputs.code == 'true'
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        if: needs.changes.outputs.code == 'true'
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: stevedore:ci
 
   action-smoke:
     # Exercises the composite action end to end against the CURRENT checkout:

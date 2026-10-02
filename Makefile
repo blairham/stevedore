@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help build test fmt vet lint check tidy install
+.PHONY: help build test fmt vet check tidy install
 
 help: ## Display this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -18,12 +18,9 @@ fmt: ## Format the code
 vet: ## Run go vet
 	go vet ./...
 
-lint: ## Static checks: gofumpt (check) + go vet + golangci-lint
-	@test -z "$$(go tool gofumpt -l .)" || (echo "gofumpt needed in:"; go tool gofumpt -l .; exit 1)
-	go vet ./...
-	go tool golangci-lint run --timeout=10m
-
-check: lint test ## Lint + test (mirror CI locally, run before a PR)
+# There is no lint target: golangci-lint runs as a pre-commit hook and in CI.
+check: vet test ## What CI runs (minus lint, which is the commit hook's job)
+	go build ./...
 
 tidy: ## go mod tidy
 	go mod tidy
