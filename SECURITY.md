@@ -92,6 +92,6 @@ sha256sum --check --ignore-missing checksums.txt
 
 A release re-run by hand (the workflow's `workflow_dispatch` input) is signed
 by the ref it was dispatched from, usually `refs/heads/main`, rather than by
-the tag; the release notes say so when that happens.
+the tag, so use `@refs/heads/main` in `--certificate-identity` for that release.
 
 The macOS builds are additionally Developer ID signed and notarized.
