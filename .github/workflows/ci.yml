@@ -93,6 +93,10 @@ jobs:
         # check over unchanged, still-broken committed code.
         uses: blairham/go-pre-commit@5788df636d2726ba06d337393503a7fe6b3451c2 # v4.6.7
         with:
+          # The step above already restored ~/.cache/pre-commit. Restoring the
+          # same key again untars over Go's read-only module files and tar
+          # reports every one of them as `Cannot open: File exists`.
+          cache: 'false'
           extra_args: --from-ref ${{ steps.range.outputs.base }} --to-ref ${{ steps.range.outputs.head }} --hook-stage manual golangci-lint-new
 
   # Gating happens inside the jobs, never with a workflow-level `paths:`
