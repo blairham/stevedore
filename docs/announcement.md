@@ -110,9 +110,8 @@ in the first hour costs the whole launch.
 - [x] The Action is listed on the GitHub Marketplace — as "Stevedore Release"
       (a GitHub user owns the bare name), https://github.com/marketplace/actions/stevedore-release
 - [ ] Issue templates render, and Discussions is enabled and has a first post
-- [ ] The repo has topics, a description and a social preview image — topics
-      and description are set; upload `assets/social-preview.png` (1280×640) at
-      Settings → General → Social preview
+- [x] The repo has topics, a description and a social preview image — the
+      preview is `assets/social-preview.png` (1280×640)
 
 ## Where, and in what order
 
