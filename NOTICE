@@ -1,0 +1,14 @@
+stevedore — release Docker/OCI images the way GoReleaser releases binaries
+Copyright 2026 Blair Hamilton
+
+This product is licensed under the Apache License, Version 2.0.
+You may obtain a copy of the License in the LICENSE file, or at
+http://www.apache.org/licenses/LICENSE-2.0
+
+stevedore orchestrates external tools — docker buildx, git, cosign, syft,
+grype, trivy, crane, aws and gh — by running them as separate programs. It
+contains no code from any of them, and none is bundled in its binary or its
+container image; each is installed separately under its own license.
+
+Releases up to and including v1.0.1 were published under the MIT License, and
+remain available under those terms.

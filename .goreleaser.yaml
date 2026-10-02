@@ -74,7 +74,7 @@ brews:
     directory: Formula
     homepage: "https://github.com/blairham/stevedore"
     description: "Release Docker/OCI images the way goreleaser releases binaries"
-    license: "MIT"
+    license: "Apache-2.0"
     install: |
       bin.install "stevedore"
     test: |

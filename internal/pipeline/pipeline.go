@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pipeline orchestrates the build/push/sign/sbom/changelog stages.
 package pipeline
 

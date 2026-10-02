@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package jsonschema generates a JSON Schema (draft-07) from a Go struct,
 // keyed by its yaml tags, so editors can validate and autocomplete the config.
 package jsonschema

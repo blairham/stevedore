@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package versioner derives the release version string from a configurable
 // source: git tags, an existing registry's tags, a static value, an environment
 // variable, or the output of a command.

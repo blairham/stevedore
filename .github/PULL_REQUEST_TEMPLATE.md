@@ -22,4 +22,6 @@ against: a real repo, a dry-run plan, a detached-HEAD checkout.
 
 ---
 
+- [ ] I have signed the CLA (see CLA.md)
+
 Closes #

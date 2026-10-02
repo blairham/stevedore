@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package scanner runs a vulnerability scanner (grype or trivy) against a built
 // image and, when configured, gates the release on a severity threshold.
 package scanner

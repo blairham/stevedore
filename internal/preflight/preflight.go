@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package preflight verifies the external tools stevedore shells out to
 // (docker/buildx, git, cosign, syft) are present before a pipeline runs, so a
 // missing dependency fails fast with an install hint instead of halfway through

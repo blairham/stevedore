@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package verifier checks the supply-chain artifacts attached to a pushed
 // image: the cosign signature, the SBOM attestation, and the SLSA provenance.
 package verifier

@@ -26,6 +26,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 LABEL org.opencontainers.image.title="stevedore" \
       org.opencontainers.image.description="Release Docker/OCI images the way GoReleaser releases binaries" \
-      org.opencontainers.image.source="https://github.com/blairham/stevedore"
+      org.opencontainers.image.source="https://github.com/blairham/stevedore" \
+      org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=build /out/stevedore /usr/bin/stevedore
 ENTRYPOINT ["/usr/bin/stevedore"]

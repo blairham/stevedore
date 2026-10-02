@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package projgraph resolves a project's transitive source dependencies so that
 // change detection can scope each image to exactly the directories it is built
 // from — even when many images share one Dockerfile and build context.

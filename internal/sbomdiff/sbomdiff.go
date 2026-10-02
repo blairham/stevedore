@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package sbomdiff compares two SBOMs (SPDX or CycloneDX JSON) and renders the
 // added, removed, and upgraded packages as a Markdown section for the changelog.
 package sbomdiff

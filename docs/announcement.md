@@ -37,8 +37,12 @@ they have been marketed at. Say the mechanism instead: *the scan and smoke-test
 gates run before the signature, so a failing image is never signed.* A mechanism
 can be checked; an adjective invites someone to disprove it.
 
-**State the counterparty risk before anyone asks.** MIT, no CLA, no account, no
-telemetry, no hosted service anywhere in the path, single maintainer. Say
+**State the counterparty risk before anyone asks.** Apache-2.0, no account, no
+telemetry, no hosted service anywhere in the path, single maintainer. There is a
+CLA, and this audience will ask why: it grants a license, it does not assign
+copyright, and it exists so the project can be relicensed as one work if it ever
+has to be. Say that plainly rather than letting a CLA read as a rug-pull setup —
+the license on what you already run cannot be taken back. Say
 "single maintainer" yourself — someone else will, and it lands very differently
 when it looks like a disclosure rather than a discovery. Then give the actual
 mitigation, which is real: the config is a YAML file describing docker commands,

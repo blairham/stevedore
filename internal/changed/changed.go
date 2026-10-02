@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package changed decides which images a change set touches, using per-image
 // dependency globs plus shared globs — the granularity a "one Dockerfile, many
 // images" monorepo needs so unchanged services are skipped.
