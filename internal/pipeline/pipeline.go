@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -1176,6 +1177,19 @@ func allRefs(plans []ImagePlan) []string {
 	return refs
 }
 
+// localPlatform picks the one platform a local --load build uses: the host's
+// architecture when the image is built for it, so an Apple Silicon machine
+// does not emulate amd64 for its inner loop, and otherwise the first listed.
+func localPlatform(platforms []string, goarch string) string {
+	for _, p := range platforms {
+		goos, arch, _ := strings.Cut(p, "/")
+		if goos == "linux" && (arch == goarch || strings.HasPrefix(arch, goarch+"/")) {
+			return p
+		}
+	}
+	return platforms[0]
+}
+
 // Build runs a local build (single platform, --load) without publishing.
 func Build(o Options) error {
 	p, err := Prepare(o)
@@ -1193,7 +1207,7 @@ func Build(o Options) error {
 		// A local --load build cannot handle a manifest list, so pick one platform.
 		spec := toSpec(plan, o.Dir, false, true, config.Provenance{})
 		if len(spec.Platforms) > 1 {
-			spec.Platforms = spec.Platforms[:1]
+			spec.Platforms = []string{localPlatform(spec.Platforms, runtime.GOARCH)}
 		}
 		fmt.Fprintf(progress, "==> building %s (local, %s)\n", plan.Image.ID, strings.Join(spec.Platforms, ","))
 		for _, ref := range spec.Refs {

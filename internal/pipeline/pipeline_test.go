@@ -179,3 +179,22 @@ func TestResolveVersion_OnlyPinnedAnchorSkipsRegistry(t *testing.T) {
 		t.Errorf("version = %q, want the pinned 2.0.0", ver)
 	}
 }
+
+func TestLocalPlatform(t *testing.T) {
+	for _, tc := range []struct {
+		platforms []string
+		goarch    string
+		want      string
+	}{
+		{[]string{"linux/amd64", "linux/arm64"}, "arm64", "linux/arm64"},
+		{[]string{"linux/amd64", "linux/arm64"}, "amd64", "linux/amd64"},
+		{[]string{"linux/amd64", "linux/arm/v7"}, "arm", "linux/arm/v7"},
+		{[]string{"linux/amd64", "linux/arm64"}, "arm", "linux/amd64"}, // arm is not arm64
+		{[]string{"linux/amd64", "linux/arm64"}, "riscv64", "linux/amd64"},
+		{[]string{"linux/amd64", "windows/arm64"}, "arm64", "linux/amd64"},
+	} {
+		if got := localPlatform(tc.platforms, tc.goarch); got != tc.want {
+			t.Errorf("localPlatform(%v, %s) = %s, want %s", tc.platforms, tc.goarch, got, tc.want)
+		}
+	}
+}
