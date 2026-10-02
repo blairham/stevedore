@@ -137,5 +137,8 @@ publishes the CLI binary + Homebrew formula + GitHub release. See
 - **Linter is golangci-lint v2**, `go tool`-pinned, config in `.golangci.yml`.
   It runs **only** as the pre-commit hook and in CI — there is no `lint` make
   target, and it is never run by hand. `run.concurrency` bounds its footprint.
+  The linter set matches localiam's, minus govet's `fieldalignment`, and the
+  tree is clean against all of it: a finding is a real finding, so fix it
+  rather than adding a disable. A `//nolint` names the rule and the reason.
 - Add/extend table tests for pure logic you touch.
 - Don't commit, push, tag, or create releases unless explicitly asked.

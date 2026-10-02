@@ -26,23 +26,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # TEMPORARY (#9): whole-tree inventory under the widened config. Removed
-  # before merge.
-  lint-inventory:
-    name: Lint inventory (temporary)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: |
-          go tool golangci-lint run --fix=false --output.json.path=lint.json --output.text.path=stdout ./... || true
-          jq -r '.Issues[].FromLinter' lint.json | sort | uniq -c | sort -rn
-          jq -r '.Issues | length' lint.json
-
   # Runs for every commit that reaches GitHub — every push to a pull request,
   # draft or not, and every push to main. It is the only job that looks at
   # *every* file rather than at Go: trailing whitespace, licence headers,
