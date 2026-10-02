@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package fingerprint computes a content hash of an image's build inputs so a
 // monorepo release can skip rebuilding images whose inputs are unchanged.
 package fingerprint

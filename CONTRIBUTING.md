@@ -57,6 +57,18 @@ will be flagged as an error inside a user's editor.
 - External tools are stubbed through `internal/run`; tests do not shell out to
   docker.
 
+## The Contributor License Agreement
+
+Contributions require a signed CLA; the text is in [`CLA.md`](CLA.md).
+
+**Why.** The project may need to offer different licensing terms in future.
+That is only possible if one party can license the whole work, and copyright
+in a contribution stays with its author unless licensed onward.
+
+The CLA does **not** take your copyright. You keep it; you grant a license
+broad enough to include sublicensing, and you affirm the work is your own —
+including that no employer holds rights to it.
+
 ## Commits and PRs
 
 - Conventional-commit prefixes (`fix:`, `feat:`, `ci:`, `docs:`, `chore:`). The
@@ -65,6 +77,9 @@ will be flagged as an error inside a user's editor.
 - Explain the **why** in the commit message. The diff already says what.
 - One change per PR.
 - Put `Closes #N` in the PR body so the issue actually closes.
+- Commits must be signed.
+- Every `.go` file carries the two-line SPDX header (`Apache-2.0`); the
+  pre-commit hook fails without it.
 
 ## Compatibility
 

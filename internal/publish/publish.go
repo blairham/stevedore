@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package publish handles post-build release steps: creating a GitHub release
 // and announcing to chat webhooks (Slack, Discord).
 package publish

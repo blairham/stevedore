@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Package importer converts an existing docker-bake, GoReleaser, or
 // per-service manifest setup into a stevedore config, so teams can adopt
 // stevedore without hand-writing one.

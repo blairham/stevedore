@@ -30,6 +30,10 @@ repos:
   - repo: https://github.com/blairham/pre-commit-hooks
     rev: v0.4.0
     hooks:
+      # Every .go file carries the two-line SPDX header; a file without one
+      # has no stated license once it is copied out of the repo.
+      - id: check-license-headers
+        args: [--license, Apache-2.0]
       - id: check-go-version-sync
       - id: check-conflict-markers
       # Known-vulnerable dependencies fail the commit, not the release.

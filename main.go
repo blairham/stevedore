@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Blair Hamilton
+// SPDX-License-Identifier: Apache-2.0
+
 // Command stevedore releases Docker/OCI images from a declarative config,
 // the way goreleaser releases binaries.
 package main
