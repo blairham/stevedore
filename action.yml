@@ -103,24 +103,38 @@ runs:
 
     - name: Set up buildx
       if: ${{ inputs.setup-buildx == 'true' }}
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
     - name: Install cosign
       if: ${{ inputs.install-cosign == 'true' }}
-      uses: sigstore/cosign-installer@v3
+      uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
 
     - name: Install syft
       if: ${{ inputs.install-syft == 'true' }}
-      uses: anchore/sbom-action/download-syft@v0
+      uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
 
+    # Through anchore's own pinned action rather than `curl … | sh` of the
+    # install script on grype's `main`, which ran whatever that branch held on
+    # the day — inside a workflow that holds signing and push credentials.
     - name: Install grype
+      id: grype
+      if: ${{ inputs.install-grype == 'true' }}
+      uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+
+    # download-grype reports where it put the binary but does not add it to
+    # PATH, and stevedore finds its tools on PATH.
+    - name: Put grype on PATH
       if: ${{ inputs.install-grype == 'true' }}
       shell: bash
-      run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+      env:
+        GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
+      run: |
+        echo "$(dirname "$GRYPE_CMD")" >> "$GITHUB_PATH"
+        "$GRYPE_CMD" version
 
     - name: Set up Go (for crane)
       if: ${{ inputs.install-crane == 'true' }}
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
       with:
         go-version: "stable"
 
@@ -128,7 +142,7 @@ runs:
       if: ${{ inputs.install-crane == 'true' }}
       shell: bash
       run: |
-        go install github.com/google/go-containerregistry/cmd/crane@latest
+        go install github.com/google/go-containerregistry/cmd/crane@v0.22.1
         echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
     - name: Preflight

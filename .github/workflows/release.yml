@@ -2,35 +2,74 @@ name: release
 
 # On a version tag: stevedore releases its own multi-arch image (signed + SBOM +
 # provenance) by dogfooding itself, while GoReleaser publishes the CLI binary,
-# the GitHub release, and the Homebrew cask. Two tools, two artifact kinds.
+# the GitHub release, and the Homebrew formula. Two tools, two artifact kinds.
 on:
   push:
     tags: ["v*"]
+  # Re-run a release for a tag that already exists — after a failed publish,
+  # say — without moving or re-creating the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.2). Must already exist."
+        required: true
+        type: string
 
+# Read-only by default; each job asks for exactly what it writes.
 permissions:
-  contents: write # create the GitHub release / upload assets
-  packages: write # push to ghcr.io
-  id-token: write # keyless cosign signing via OIDC
+  contents: read
 
 jobs:
-  image:
+  # A release that publishes before its tests run ships whatever the tag points
+  # at. Both artifact jobs wait on this one.
+  test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: go test -race ./...
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+      id-token: write # keyless cosign signing via OIDC
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0 # tags + history for versioning and changelog
 
-      - uses: actions/setup-go@v6
+      # The toolchain go.mod pins, not "stable": the released binary must be
+      # the one CI tested, not whatever Go shipped this morning.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "stable"
-      - uses: docker/setup-buildx-action@v4
-      - uses: sigstore/cosign-installer@v3
-      - uses: anchore/sbom-action/download-syft@v0
+          go-version-file: go.mod
+          check-latest: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      # Pinned action, not `curl … | sh` of grype's `main` — this job holds
+      # push and signing credentials.
       - name: Install grype
-        run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+      - name: Put grype on PATH
+        env:
+          GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
+        run: |
+          echo "$(dirname "$GRYPE_CMD")" >> "$GITHUB_PATH"
+          "$GRYPE_CMD" version
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -43,23 +82,28 @@ jobs:
         run: stevedore release
 
   # GoReleaser publishes the CLI binary, checksums, the GitHub release, and the
-  # Homebrew cask (to blairham/homebrew-tap).
+  # Homebrew formula (to blairham/homebrew-tap).
   binary:
+    needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # the GitHub release and its assets
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: "stable"
+          go-version-file: go.mod
+          check-latest: true
           cache: false # replaced by the release-scoped cache below
       # Release-scoped Go cache: setup-go's built-in cache is exact-match on
       # go.sum and usually saved by CI test jobs (host-platform builds only);
       # this one falls back on a restore-keys prefix and is saved at job end —
       # after goreleaser — so it warms every cross-compiled GOOS/GOARCH target.
       - name: Restore release Go cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/go/pkg/mod
@@ -67,13 +111,13 @@ jobs:
           key: go-release-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}
           restore-keys: |
             go-release-${{ runner.os }}-
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # A PAT with contents:write on blairham/homebrew-tap, so the cask can
+          # A PAT with contents:write on blairham/homebrew-tap, so the formula can
           # be committed to that separate repo.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           # Apple Developer ID signing + notarization of the darwin binaries.
@@ -97,13 +141,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0 # the tag list, to decide whether this is the newest
 
       - name: Repoint moving tags
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           # A prerelease never moves a floating pointer: `@v1` has to mean the
