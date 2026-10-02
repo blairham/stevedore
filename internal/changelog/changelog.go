@@ -21,13 +21,16 @@ type group struct {
 	types []string
 }
 
+// otherGroup is the catch-all section for commits no prefix claims.
+const otherGroup = "Other"
+
 var groups = []group{
 	{"Features", []string{"feat"}},
 	{"Bug Fixes", []string{"fix"}},
 	{"Performance", []string{"perf"}},
 	{"Refactors", []string{"refactor"}},
 	{"Documentation", []string{"docs"}},
-	{"Other", nil}, // catch-all
+	{otherGroup, nil}, // catch-all
 }
 
 var conventional = regexp.MustCompile(`^(\w+)(\([^)]*\))?(!)?:\s*(.+)$`)
@@ -102,7 +105,7 @@ func classify(c gitinfo.Commit) (string, string) {
 		short = short[:7]
 	}
 	if m == nil {
-		return "Other", fmt.Sprintf("%s (%s)", c.Subject, short)
+		return otherGroup, fmt.Sprintf("%s (%s)", c.Subject, short)
 	}
 	typ, scope, bang, desc := m[1], m[2], m[3], m[4]
 	line := desc
@@ -120,7 +123,7 @@ func classify(c gitinfo.Commit) (string, string) {
 			}
 		}
 	}
-	return "Other", line
+	return otherGroup, line
 }
 
 func matchesAny(res []*regexp.Regexp, s string) bool {

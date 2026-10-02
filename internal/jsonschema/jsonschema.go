@@ -18,23 +18,26 @@ func Generate(v any, title string) map[string]any {
 	return s
 }
 
+// typeKey is JSON Schema's "type" keyword, which every node carries.
+const typeKey = "type"
+
 func schemaFor(t reflect.Type) map[string]any {
 	switch t.Kind() {
 	case reflect.Pointer:
 		return schemaFor(t.Elem())
 	case reflect.String:
-		return map[string]any{"type": "string"}
+		return map[string]any{typeKey: "string"}
 	case reflect.Bool:
-		return map[string]any{"type": "boolean"}
+		return map[string]any{typeKey: "boolean"}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return map[string]any{"type": "integer"}
+		return map[string]any{typeKey: "integer"}
 	case reflect.Float32, reflect.Float64:
-		return map[string]any{"type": "number"}
+		return map[string]any{typeKey: "number"}
 	case reflect.Slice, reflect.Array:
-		return map[string]any{"type": "array", "items": schemaFor(t.Elem())}
+		return map[string]any{typeKey: "array", "items": schemaFor(t.Elem())}
 	case reflect.Map:
-		return map[string]any{"type": "object", "additionalProperties": schemaFor(t.Elem())}
+		return map[string]any{typeKey: "object", "additionalProperties": schemaFor(t.Elem())}
 	case reflect.Struct:
 		return structSchema(t)
 	default:
@@ -56,7 +59,7 @@ func structSchema(t reflect.Type) map[string]any {
 		props[name] = schemaFor(f.Type)
 	}
 	return map[string]any{
-		"type":                 "object",
+		typeKey:                "object",
 		"properties":           props,
 		"additionalProperties": false,
 	}

@@ -27,15 +27,17 @@ func newRepo(t *testing.T, dir string, args ...string) *gitRepo {
 	return r
 }
 
-func (r *gitRepo) git(args ...string) string {
+// git runs one git command against the fixture. The user's global and system
+// config are kept out: a `tag.gpgSign = true` there turns `git tag v1.0.0`
+// into a signed tag that needs a message, and the fixture fails to build.
+func (r *gitRepo) git(args ...string) {
 	r.t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(r.t.Context(), "git", args...)
 	cmd.Dir = r.dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
 		r.t.Fatalf("git %v: %v: %s", args, err, out)
 	}
-	return string(out)
 }
 
 func (r *gitRepo) commit(name string) {

@@ -66,7 +66,7 @@ func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report
 		return nil, fmt.Errorf("%s scan of %s: %w", cfg.Scanner, ref, err)
 	}
 	if raw != "" {
-		if werr := os.WriteFile(raw, []byte(out), 0o600); werr != nil {
+		if werr := os.WriteFile(raw, []byte(out), 0o644); werr != nil { //nolint:gosec // G306: dist/ is read by non-owners (see pipeline.mkdirDist)
 			return nil, fmt.Errorf("write scan report: %w", werr)
 		}
 	}

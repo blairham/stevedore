@@ -219,12 +219,11 @@ func Load(path string) (State, error) {
 	return s, nil
 }
 
-// Save writes the state to path as indented JSON, readable only by its owner:
-// it is a build cache, not an artifact.
+// Save writes the state to path as indented JSON.
 func (s State) Save(path string) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o600)
+	return os.WriteFile(path, append(data, '\n'), 0o644) //nolint:gosec // G306: it lives in dist/, read by non-owners (see pipeline.mkdirDist)
 }
