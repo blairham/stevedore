@@ -49,14 +49,53 @@ func RefExists(ctx context.Context, dir, ref string) bool {
 	return cmd.Run() == nil
 }
 
-// FetchMarkers best-effort fetches the marker ref namespace from origin so
-// change detection sees the latest per-image baselines (important on a fresh CI
-// checkout). Errors are non-fatal.
-func FetchMarkers(ctx context.Context, dir, prefix string) {
-	spec := prefix + "*:" + prefix + "*"
+// FetchMarkers fetches the marker ref namespace from origin so change
+// detection sees the latest per-image baselines (important on a fresh CI
+// checkout). The refspec is forced: origin is the baseline, and a marker reset
+// there by hand is a non-fast-forward that an unforced fetch rejects, leaving a
+// stale local marker in charge. A failed fetch is an error — swallowing it left
+// no markers locally, so every image read "never released" and rebuilt. With
+// no origin remote there is nothing to fetch.
+func FetchMarkers(ctx context.Context, dir, prefix string) error {
+	if !hasOrigin(ctx, dir) {
+		return nil
+	}
+	spec := "+" + prefix + "*:" + prefix + "*"
 	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", spec)
 	cmd.Dir = dir
-	_ = cmd.Run()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("fetch release markers %s*: %w: %s", prefix, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// MarkerBase returns the commit change detection should diff from for ref.
+// That is the marker itself, unless it has diverged from HEAD (a release from a
+// branch that was never merged): diffing from the stray commit reports that
+// branch's own files as changed on every later release, so the base is then
+// the merge base and diverged is true. The marker still has to be reset by
+// hand — AdvanceMarker refuses to move it — but until then the plan stays
+// scoped to what main actually changed.
+func MarkerBase(ctx context.Context, dir, ref string) (base string, diverged bool, err error) {
+	marker, err := revParse(ctx, dir, ref)
+	if err != nil {
+		return "", false, err
+	}
+	head, err := revParse(ctx, dir, "HEAD")
+	if err != nil {
+		return "", false, err
+	}
+	cmd := exec.CommandContext(ctx, "git", "merge-base", marker, head)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false, fmt.Errorf("merge-base %s HEAD: %w", ref, err)
+	}
+	mb := strings.TrimSpace(string(out))
+	if mb == marker || mb == head {
+		return marker, false, nil
+	}
+	return mb, true, nil
 }
 
 // ErrMarkerAhead means origin's marker already points at a descendant of HEAD,
@@ -66,8 +105,8 @@ var ErrMarkerAhead = errors.New("origin marker is already ahead of HEAD")
 
 // ErrMarkerDiverged means origin's marker points at a commit that is neither an
 // ancestor nor a descendant of HEAD, e.g. one released from a branch that was
-// never merged. Advancing it would discard that history, so it needs a human,
-// and change detection keeps diffing from the stray commit until then.
+// never merged. Advancing it would discard that history, so it needs a human;
+// until then change detection diffs from the merge base (see MarkerBase).
 var ErrMarkerDiverged = errors.New("origin marker has diverged from HEAD")
 
 // AdvanceMarker points ref at HEAD and, when an origin remote exists, pushes it
