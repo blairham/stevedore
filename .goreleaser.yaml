@@ -38,6 +38,21 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# Keyless cosign signature over checksums.txt, from the release workflow's own
+# GitHub OIDC identity: no key to store or leak, and the certificate names the
+# exact workflow and tag that produced the release. Signing checksums.txt
+# covers every archive, since it lists each one's digest. See SECURITY.md for
+# how to verify. (The image is signed separately, by the dogfood release.)
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+
 # A formula, not a cask. stevedore is a CLI binary with no bundle, no installer
 # and no service; `brew test` is worth keeping, and formulae work on Homebrew
 # for Linux exactly as they do on macOS.
@@ -79,12 +94,12 @@ notarize:
         key: "{{.Env.MACOS_NOTARY_KEY}}"
         wait: true
 
+# GoReleaser owns the GitHub release (binaries, checksums, notes). stevedore's
+# own release.github is disabled so the two don't collide.
 release:
   github:
     owner: blairham
     name: stevedore
-  # GoReleaser owns the GitHub release (binaries, checksums, notes). stevedore's
-  # own release.github is disabled so the two don't collide.
 
 changelog:
   use: github

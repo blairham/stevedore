@@ -56,23 +56,42 @@ did not ask for:
 
 ## Verifying what you downloaded
 
-Every stevedore release is signed with cosign (keyless, GitHub OIDC) and carries
-an SBOM attestation and SLSA provenance. stevedore verifies its own artifacts
-with the same command it gives you for yours:
+Every stevedore image is signed with cosign keyless signing (GitHub OIDC) and
+carries an SBOM attestation and SLSA provenance. The signature is tied to the
+workflow that built the release, not to a key someone could leak, so verify
+against that workflow — not just "anything in this repository".
+
+**Images.** stevedore verifies its own image with the same command it gives you
+for yours:
 
 ```sh
 stevedore verify ghcr.io/blairham/stevedore:1.0.0 \
-  --certificate-identity "https://github.com/blairham/stevedore/.*" \
-  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+  --certificate-identity '^https://github\.com/blairham/stevedore/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 Or with cosign directly, if you would rather not use the tool you are checking:
 
 ```sh
 cosign verify ghcr.io/blairham/stevedore:1.0.0 \
-  --certificate-identity-regexp "https://github.com/blairham/stevedore/.*" \
-  --certificate-oidc-issuer-regexp "https://token.actions.githubusercontent.com"
+  --certificate-identity-regexp '^https://github\.com/blairham/stevedore/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Binaries from the GitHub release have a `checksums.txt` alongside them; the macOS
-builds are Developer ID signed and notarized.
+**Binaries.** Releases after `v1.0.1` sign `checksums.txt`, which lists the
+digest of every archive. Verify the signature, then the archives against it:
+
+```sh
+VERSION=v1.0.2
+cosign verify-blob \
+  --certificate-identity "https://github.com/blairham/stevedore/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --bundle checksums.txt.sigstore.json checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+```
+
+A release re-run by hand (the workflow's `workflow_dispatch` input) is signed
+by the ref it was dispatched from, usually `refs/heads/main`, rather than by
+the tag, so use `@refs/heads/main` in `--certificate-identity` for that release.
+
+The macOS builds are additionally Developer ID signed and notarized.
