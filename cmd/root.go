@@ -7,6 +7,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -17,11 +19,24 @@ import (
 // Build-time version, overridden via -ldflags "-X .../cmd.version=...".
 var version = "dev"
 
-// SetVersion lets main inject the build version.
+// SetVersion lets main inject the build version. A binary from `go install`
+// has no -ldflags, so main passes its "dev" default; the module version the go
+// command stamped into the binary is used instead when there is one.
 func SetVersion(v string) {
-	if v != "" {
-		version = v
+	version = resolveVersion(v, debug.ReadBuildInfo)
+}
+
+func resolveVersion(v string, buildInfo func() (*debug.BuildInfo, bool)) string {
+	if v != "" && v != "dev" {
+		return v
 	}
+	if info, ok := buildInfo(); ok {
+		// "(devel)" is what a build from a local checkout reports.
+		if mv := info.Main.Version; mv != "" && mv != "(devel)" {
+			return strings.TrimPrefix(mv, "v")
+		}
+	}
+	return "dev"
 }
 
 var (

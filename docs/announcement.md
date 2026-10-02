@@ -100,16 +100,25 @@ Nothing gets posted until every one of these is true. A broken copy-paste path
 in the first hour costs the whole launch.
 
 - [ ] `brew install blairham/tap/stevedore` works from a clean machine
-- [ ] `go install github.com/blairham/stevedore@latest` works
-- [ ] `docker run --rm ghcr.io/blairham/stevedore --version` works — i.e. the
-      `:latest` tag actually exists (it did not, for ten releases; see #20)
+- [ ] `go install github.com/blairham/stevedore@latest` works — it installs
+      v1.0.4, but `--version` says `dev` there; fixed on main, re-check after
+      the next release
+- [x] `docker run --rm ghcr.io/blairham/stevedore --version` works — i.e. the
+      `:latest` tag actually exists (it did not, for ten releases; see #20) —
+      `:latest` reports 1.0.4
 - [x] `uses: blairham/stevedore@v1` resolves (see #21) — `v1` → v1.0.3
-- [ ] Every command in the README quick start, run in order, in a scratch repo
-- [ ] `stevedore doctor` on a machine missing every optional tool gives useful
-      install hints rather than a stack trace
+- [x] Every command in the README quick start, run in order, in a scratch repo
+      — against a local registry, with sign and SBOM skipped (keyless signing
+      needs a browser). It failed at step 6 until `init` learned to ignore
+      dist/
+- [x] `stevedore doctor` on a machine missing every optional tool gives useful
+      install hints rather than a stack trace — measured with an empty PATH
 - [x] The Action is listed on the GitHub Marketplace — as "Stevedore Release"
       (a GitHub user owns the bare name), https://github.com/marketplace/actions/stevedore-release
 - [ ] Issue templates render, and Discussions is enabled and has a first post
+      — both forms pass GitHub's form rules (labels exist, field types valid);
+      Discussions is still off, which also breaks the template chooser's
+      "Question or idea" link
 - [x] The repo has topics, a description and a social preview image — the
       preview is `assets/social-preview.png` (1280×640)
 

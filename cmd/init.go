@@ -58,6 +58,13 @@ func newInitCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("wrote %s — %s\n", path, summary)
+			added, err := ignoreDist(flagDir)
+			if err != nil {
+				return err
+			}
+			if added {
+				fmt.Println("added dist/ to .gitignore — release refuses a dirty tree, and dist/ is written on every run")
+			}
 			fmt.Println("review the repositories/tags, then run `stevedore check`")
 			return nil
 		},
@@ -120,6 +127,37 @@ func scaffoldContent(r *run.Runner, from, file, name string, mapFields, mapBuild
 	default:
 		return "", "", fmt.Errorf("unknown --from %q (want dockerfiles, goreleaser, bake, or services)", from)
 	}
+}
+
+// ignoreDist makes sure dir's .gitignore covers dist/, creating the file if
+// needed, and reports whether it changed anything. Every run writes to dist/ —
+// a --dry-run included — so without this the quick start's own preview leaves
+// the tree dirty and the real release that follows refuses to run.
+func ignoreDist(dir string) (bool, error) {
+	path := filepath.Join(dir, ".gitignore")
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		switch strings.TrimSpace(line) {
+		case "dist", "dist/", "/dist", "/dist/":
+			return false, nil
+		}
+	}
+	prefix := ""
+	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+		prefix = "\n"
+	}
+	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // G302: .gitignore is committed, like the config
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	if _, err := f.WriteString(prefix + "dist/\n"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // serviceMapping applies --map / --map-build-arg overrides on top of the
