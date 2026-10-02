@@ -99,7 +99,8 @@ Keep this section current; it is what stops the post from overclaiming.
 Nothing gets posted until every one of these is true. A broken copy-paste path
 in the first hour costs the whole launch.
 
-- [ ] `brew install blairham/tap/stevedore` works from a clean machine
+- [x] `brew install blairham/tap/stevedore` works from a clean machine —
+      installed from the tap (1.0.4) and runs; the tap now carries 1.0.5
 - [x] `go install github.com/blairham/stevedore@latest` works — installs
       v1.0.5, and `--version` reports 1.0.5 (it said `dev` before #24)
 - [x] `docker run --rm ghcr.io/blairham/stevedore --version` works — i.e. the
