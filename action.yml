@@ -1,4 +1,4 @@
-name: "Stevedore"
+name: "Stevedore Release"
 description: "Build, scan, sign, and release Docker/OCI images with stevedore — installs every tool it needs."
 author: "blairham"
 branding:
