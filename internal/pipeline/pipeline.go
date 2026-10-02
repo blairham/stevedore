@@ -5,6 +5,7 @@
 package pipeline
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -44,6 +45,9 @@ var progress io.Writer = os.Stdout
 
 // Options controls a pipeline invocation.
 type Options struct {
+	// Context bounds every external command the invocation starts. Nil means
+	// context.Background().
+	Context       context.Context
 	ConfigPath    string
 	Dir           string // repository root
 	Snapshot      bool
@@ -84,6 +88,13 @@ type Options struct {
 	Now              time.Time
 }
 
+func (o Options) context() context.Context {
+	if o.Context != nil {
+		return o.Context
+	}
+	return context.Background()
+}
+
 // ImagePlan is a fully-resolved plan for one image.
 type ImagePlan struct {
 	Image     config.Image
@@ -118,7 +129,7 @@ func Prepare(o Options) (*Prepared, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	gi, err := gitinfo.Gather(o.Dir)
+	gi, err := gitinfo.Gather(o.context(), o.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +191,7 @@ func imageVersionResolver(cfg *config.Config, gi *gitinfo.Info, o Options, ctx *
 		}
 		vcfg.Repo = rendered
 	}
-	r := run.New(o.DryRun, o.Verbose)
+	r := run.New(o.context(), o.DryRun, o.Verbose)
 	list := tagLister(cfg, r)
 	warned := false
 	return func(repo string) (string, error) {
@@ -460,11 +471,11 @@ func Release(o Options) error {
 			// carries the sign/scan/sbom/publish requirements.
 			opts = preflight.Opts{}
 		}
-		if err := checkTools(p.Config, opts); err != nil {
-			return err
+		if toolErr := checkTools(o.context(), p.Config, opts); toolErr != nil {
+			return toolErr
 		}
 	}
-	r := run.New(o.DryRun, o.Verbose)
+	r := run.New(o.context(), o.DryRun, o.Verbose)
 
 	if err := os.MkdirAll(filepath.Join(o.Dir, p.Config.Dist), 0o755); err != nil {
 		return fmt.Errorf("create dist dir: %w", err)
@@ -576,7 +587,7 @@ func Release(o Options) error {
 				continue
 			}
 			ref := changed.MarkerRef(cd.MarkerPrefix, im.ID)
-			err := changed.AdvanceMarker(o.Dir, ref)
+			err := changed.AdvanceMarker(o.context(), o.Dir, ref)
 			switch {
 			case err == nil:
 				fmt.Fprintf(progress, "==> advanced release marker %s\n", ref)
@@ -619,7 +630,7 @@ func Release(o Options) error {
 
 	changelogPath := ""
 	if !o.SkipChangelog && p.Config.Changelog.Enabled {
-		notes, err := changelog.Generate(p.Config.Changelog, p.Git, o.Dir)
+		notes, err := changelog.Generate(o.context(), p.Config.Changelog, p.Git, o.Dir)
 		if err != nil {
 			return err
 		}
@@ -1007,11 +1018,11 @@ func Build(o Options) error {
 	}
 	if !o.DryRun {
 		// Local builds only need the build toolchain, never cosign/syft.
-		if err := checkTools(p.Config, preflight.Opts{}); err != nil {
+		if err := checkTools(o.context(), p.Config, preflight.Opts{}); err != nil {
 			return err
 		}
 	}
-	r := run.New(o.DryRun, o.Verbose)
+	r := run.New(o.context(), o.DryRun, o.Verbose)
 	for _, plan := range p.Plans {
 		// A local --load build cannot handle a manifest list, so pick one platform.
 		spec := toSpec(plan, o.Dir, false, true, config.Provenance{})
@@ -1054,7 +1065,7 @@ func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance)
 // crane/command hooks are read-only queries, so they run even in dry-run mode to
 // give `check` and dry-runs an accurate preview.
 func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, error) {
-	r := run.New(o.DryRun, o.Verbose)
+	r := run.New(o.context(), o.DryRun, o.Verbose)
 
 	// Anchor the release-level version on the first *selected* image so a
 	// matrix job (`release --only ...`) never queries a repository outside its
@@ -1184,8 +1195,8 @@ func splitLines(s string) []string {
 
 // checkTools verifies the external tools this run needs are on PATH, failing
 // early with install hints rather than partway through the pipeline.
-func checkTools(cfg *config.Config, o preflight.Opts) error {
-	return preflight.Verify(preflight.Check(preflight.Requirements(cfg, o)))
+func checkTools(ctx context.Context, cfg *config.Config, o preflight.Opts) error {
+	return preflight.Verify(preflight.Check(ctx, preflight.Requirements(cfg, o)))
 }
 
 func guardReleasable(gi *gitinfo.Info, strategy string) error {

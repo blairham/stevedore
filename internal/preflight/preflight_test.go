@@ -95,7 +95,7 @@ func TestCheckReportsPresence(t *testing.T) {
 		{Label: "go", Exe: "go", Probe: []string{"version"}, Required: true},
 		{Label: "nope", Exe: "stevedore-nonexistent-xyz", Required: true},
 	}
-	results := Check(reqs)
+	results := Check(t.Context(), reqs)
 	m := map[string]Result{}
 	for _, r := range results {
 		m[r.Label] = r

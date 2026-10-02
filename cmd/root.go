@@ -5,6 +5,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -77,12 +78,13 @@ func resolveConfigPath() (string, error) {
 	return p, nil
 }
 
-func baseOptions() (pipeline.Options, error) {
+func baseOptions(ctx context.Context) (pipeline.Options, error) {
 	cfgPath, err := resolveConfigPath()
 	if err != nil {
 		return pipeline.Options{}, err
 	}
 	return pipeline.Options{
+		Context:    ctx,
 		ConfigPath: cfgPath,
 		Dir:        flagDir,
 		DryRun:     flagDryRun,
@@ -94,8 +96,8 @@ func newCheckCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
 		Short: "Validate the config and print the resolved release plan",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			o, err := baseOptions()
+		RunE: func(c *cobra.Command, _ []string) error {
+			o, err := baseOptions(c.Context())
 			if err != nil {
 				return err
 			}

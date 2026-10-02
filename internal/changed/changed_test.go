@@ -48,7 +48,7 @@ func TestAdvanceMarkerOutcomes(t *testing.T) {
 
 	t.Run("no marker on origin: created", func(t *testing.T) {
 		clone, _, git := markerRepos(t)
-		if err := AdvanceMarker(clone, ref); err != nil {
+		if err := AdvanceMarker(t.Context(), clone, ref); err != nil {
 			t.Fatal(err)
 		}
 		if got, want := git(clone, "ls-remote", "origin", ref), git(clone, "rev-parse", "HEAD"); !strings.HasPrefix(got, want) {
@@ -62,7 +62,7 @@ func TestAdvanceMarkerOutcomes(t *testing.T) {
 		git(seed, "commit", "-q", "--allow-empty", "-m", "c2")
 		git(seed, "push", "-q", "origin", "main")
 		git(clone, "pull", "-q")
-		if err := AdvanceMarker(clone, ref); err != nil {
+		if err := AdvanceMarker(t.Context(), clone, ref); err != nil {
 			t.Fatal(err)
 		}
 		if got, want := git(clone, "ls-remote", "origin", ref), git(clone, "rev-parse", "HEAD"); !strings.HasPrefix(got, want) {
@@ -75,7 +75,7 @@ func TestAdvanceMarkerOutcomes(t *testing.T) {
 		git(seed, "commit", "-q", "--allow-empty", "-m", "c2")
 		git(seed, "push", "-q", "origin", "main", "HEAD:"+ref)
 		ahead := git(seed, "rev-parse", "HEAD")
-		err := AdvanceMarker(clone, ref)
+		err := AdvanceMarker(t.Context(), clone, ref)
 		if !errors.Is(err, ErrMarkerAhead) {
 			t.Fatalf("err = %v, want ErrMarkerAhead", err)
 		}
@@ -98,7 +98,7 @@ func TestAdvanceMarkerOutcomes(t *testing.T) {
 		git(seed, "commit", "-q", "--allow-empty", "-m", "c2")
 		git(seed, "push", "-q", "origin", "main")
 		git(clone, "pull", "-q")
-		err := AdvanceMarker(clone, ref)
+		err := AdvanceMarker(t.Context(), clone, ref)
 		if !errors.Is(err, ErrMarkerDiverged) {
 			t.Fatalf("err = %v, want ErrMarkerDiverged", err)
 		}
@@ -132,18 +132,18 @@ func TestRefExistsAndAdvance(t *testing.T) {
 	git("commit", "-qm", "init")
 
 	ref := MarkerRef("refs/releases/image/", "svc")
-	if RefExists(dir, ref) {
+	if RefExists(t.Context(), dir, ref) {
 		t.Fatal("marker should not exist yet")
 	}
 	// No origin remote: AdvanceMarker just sets the ref locally.
-	if err := AdvanceMarker(dir, ref); err != nil {
+	if err := AdvanceMarker(t.Context(), dir, ref); err != nil {
 		t.Fatal(err)
 	}
-	if !RefExists(dir, ref) {
+	if !RefExists(t.Context(), dir, ref) {
 		t.Fatal("marker should exist after AdvanceMarker")
 	}
 	// The marker points at HEAD, so nothing changed since it.
-	files, err := FilesSince(dir, ref)
+	files, err := FilesSince(t.Context(), dir, ref)
 	if err != nil {
 		t.Fatal(err)
 	}

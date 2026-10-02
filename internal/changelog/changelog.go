@@ -5,6 +5,7 @@
 package changelog
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
@@ -32,11 +33,11 @@ var groups = []group{
 var conventional = regexp.MustCompile(`^(\w+)(\([^)]*\))?(!)?:\s*(.+)$`)
 
 // Generate renders a Markdown changelog for commits since the previous tag.
-func Generate(cfg config.Changelog, gi *gitinfo.Info, dir string) (string, error) {
+func Generate(ctx context.Context, cfg config.Changelog, gi *gitinfo.Info, dir string) (string, error) {
 	if !cfg.Enabled {
 		return "", nil
 	}
-	commits, err := gitinfo.CommitsSince(dir, gi.PreviousTag)
+	commits, err := gitinfo.CommitsSince(ctx, dir, gi.PreviousTag)
 	if err != nil {
 		return "", fmt.Errorf("read commit history: %w", err)
 	}

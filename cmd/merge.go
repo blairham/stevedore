@@ -33,8 +33,8 @@ func newMergeCmd() *cobra.Command {
 			"artifact: scan, smoke test, sign, SBOM, changelog, GitHub release,\n" +
 			"announce, notify.\n" +
 			"In CI, upload dist/digests/ from every leg and download it before merging.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			o, err := baseOptions()
+		RunE: func(c *cobra.Command, _ []string) error {
+			o, err := baseOptions(c.Context())
 			if err != nil {
 				return err
 			}

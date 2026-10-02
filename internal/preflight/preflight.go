@@ -8,6 +8,7 @@
 package preflight
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -158,14 +159,14 @@ func scannerRequirement(scanner string, needed bool) Requirement {
 }
 
 // Check probes each requirement on PATH and records its version.
-func Check(reqs []Requirement) []Result {
+func Check(ctx context.Context, reqs []Requirement) []Result {
 	results := make([]Result, 0, len(reqs))
 	for _, r := range reqs {
 		res := Result{Requirement: r}
 		if path, err := exec.LookPath(r.Exe); err == nil {
 			res.Found = true
 			res.Path = path
-			res.Version = probeVersion(r.Exe, r.Probe)
+			res.Version = probeVersion(ctx, r.Exe, r.Probe)
 		}
 		results = append(results, res)
 	}
@@ -196,8 +197,8 @@ func Verify(results []Result) error {
 // probeVersion runs the tool's version probe and returns a concise version
 // string, or "" if the probe fails. Multi-line output (e.g. grype's) is reduced
 // to the first line that actually carries a version number.
-func probeVersion(exe string, args []string) string {
-	out, err := exec.Command(exe, args...).Output()
+func probeVersion(ctx context.Context, exe string, args []string) string {
+	out, err := exec.CommandContext(ctx, exe, args...).Output()
 	if err != nil {
 		return ""
 	}

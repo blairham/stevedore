@@ -19,14 +19,14 @@ func newDoctorCmd() *cobra.Command {
 		Long: "doctor probes for docker, buildx, git, cosign, and syft, reports the\n" +
 			"version of each, and prints an install hint for anything missing that your\n" +
 			"config requires. It reads the config to know which optional tools matter.",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(c *cobra.Command, _ []string) error {
 			cfg, err := loadConfigForDoctor()
 			if err != nil {
 				return err
 			}
 			// Consider every optional feature the config enables.
 			reqs := preflight.Requirements(cfg, preflight.Opts{Sign: true, SBOM: true, Scan: true, GitHubRelease: true})
-			results := preflight.Check(reqs)
+			results := preflight.Check(c.Context(), reqs)
 
 			missingRequired := false
 			for _, r := range results {

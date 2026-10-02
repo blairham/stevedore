@@ -52,8 +52,8 @@ func newReleaseCmd() *cobra.Command {
 		Long: "release runs the full pipeline: build every image for all platforms,\n" +
 			"push to all configured registries, sign with cosign, generate SBOMs, and\n" +
 			"write a changelog. A clean, tagged checkout is required unless --snapshot.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			o, err := baseOptions()
+		RunE: func(c *cobra.Command, _ []string) error {
+			o, err := baseOptions(c.Context())
 			if err != nil {
 				return err
 			}

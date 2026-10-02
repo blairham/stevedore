@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -41,14 +42,14 @@ func newInitCmd() *cobra.Command {
 			"--map-build-arg (e.g. --map-build-arg BUILD_PROJECT=build.project).\n\n" +
 			"Signing, SBOM, scan, and provenance are enabled by default — review before\n" +
 			"running `stevedore release`.",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(c *cobra.Command, _ []string) error {
 			path := filepath.Join(flagDir, ".stevedore.yaml")
 			if _, err := os.Stat(path); err == nil && !force {
 				return fmt.Errorf("%s already exists (use --force to overwrite)", path)
 			}
 			name := filepath.Base(mustAbs(flagDir))
 
-			content, summary, err := scaffoldContent(from, file, name, mapFields, mapBuildArgs)
+			content, summary, err := scaffoldContent(c.Context(), from, file, name, mapFields, mapBuildArgs)
 			if err != nil {
 				return err
 			}
@@ -68,7 +69,7 @@ func newInitCmd() *cobra.Command {
 	return cmd
 }
 
-func scaffoldContent(from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
+func scaffoldContent(ctx context.Context, from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
 	switch from {
 	case "", "dockerfiles":
 		imgs, err := scaffold.ScanDockerfiles(flagDir, name)
@@ -95,7 +96,7 @@ func scaffoldContent(from, file, name string, mapFields, mapBuildArgs []string) 
 		return importer.RenderYAML(name, "goreleaser ("+file+")", imgs), fmt.Sprintf("imported %d image(s) from %s", len(imgs), file), nil
 
 	case "bake":
-		imgs, err := bakeImages(file)
+		imgs, err := bakeImages(ctx, file)
 		if err != nil {
 			return "", "", err
 		}
@@ -162,8 +163,8 @@ func serviceMapping(mapFields, mapBuildArgs []string) (importer.ServiceMapping, 
 
 // bakeImages resolves a bake target set via `docker buildx bake --print` and
 // imports the resulting targets.
-func bakeImages(file string) ([]importer.Image, error) {
-	r := run.New(false, flagVerbose)
+func bakeImages(ctx context.Context, file string) ([]importer.Image, error) {
+	r := run.New(ctx, false, flagVerbose)
 	args := []string{"buildx", "bake", "--print"}
 	if file != "" {
 		args = append(args, "--file", file)

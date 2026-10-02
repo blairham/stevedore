@@ -33,7 +33,7 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 	var changedFiles []string
 	if o.ChangedSince != "" {
 		var err error
-		changedFiles, err = changed.FilesSince(o.Dir, o.ChangedSince)
+		changedFiles, err = changed.FilesSince(o.context(), o.Dir, o.ChangedSince)
 		if err != nil {
 			return nil, err
 		}
@@ -44,7 +44,7 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 	// latest markers first (important on a fresh CI checkout).
 	markerMode := cd.MarkerRefs && o.ChangedSince == "" && len(o.Only) == 0
 	if markerMode {
-		changed.FetchMarkers(o.Dir, cd.MarkerPrefix)
+		changed.FetchMarkers(o.context(), o.Dir, cd.MarkerPrefix)
 	}
 
 	var evals []imageEval
@@ -58,8 +58,8 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 			ch, reason = d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince)
 		case markerMode:
 			ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
-			if changed.RefExists(o.Dir, ref) {
-				files, err := changed.FilesSince(o.Dir, ref)
+			if changed.RefExists(o.context(), o.Dir, ref) {
+				files, err := changed.FilesSince(o.context(), o.Dir, ref)
 				if err != nil {
 					return nil, err
 				}

@@ -30,7 +30,7 @@ func newVerifyCmd() *cobra.Command {
 			"For keyless (OIDC) signatures, provide --certificate-identity and\n" +
 			"--certificate-oidc-issuer; for keyed signatures, provide --key.",
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(c *cobra.Command, args []string) error {
 			ref := args[0]
 
 			// Default the SBOM predicate type and key from config when available.
@@ -56,7 +56,7 @@ func newVerifyCmd() *cobra.Command {
 				}
 			}
 
-			r := run.New(flagDryRun, flagVerbose)
+			r := run.New(c.Context(), flagDryRun, flagVerbose)
 			checks, err := verifier.Verify(r, ref, o)
 			if err != nil {
 				return err

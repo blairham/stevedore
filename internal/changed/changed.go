@@ -7,6 +7,7 @@
 package changed
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -17,11 +18,11 @@ import (
 
 // FilesSince returns the repo-relative paths that differ between ref and the
 // current working tree. On a clean checkout this is the ref..HEAD change set.
-func FilesSince(dir, ref string) ([]string, error) {
+func FilesSince(ctx context.Context, dir, ref string) ([]string, error) {
 	if ref == "" {
 		return nil, fmt.Errorf("changed-since requires a git ref")
 	}
-	cmd := exec.Command("git", "diff", "--name-only", ref)
+	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", ref)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -42,8 +43,8 @@ func MarkerRef(prefix, id string) string {
 }
 
 // RefExists reports whether a git ref resolves in the repository at dir.
-func RefExists(dir, ref string) bool {
-	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref)
+func RefExists(ctx context.Context, dir, ref string) bool {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", ref)
 	cmd.Dir = dir
 	return cmd.Run() == nil
 }
@@ -51,9 +52,9 @@ func RefExists(dir, ref string) bool {
 // FetchMarkers best-effort fetches the marker ref namespace from origin so
 // change detection sees the latest per-image baselines (important on a fresh CI
 // checkout). Errors are non-fatal.
-func FetchMarkers(dir, prefix string) {
+func FetchMarkers(ctx context.Context, dir, prefix string) {
 	spec := prefix + "*:" + prefix + "*"
-	cmd := exec.Command("git", "fetch", "--quiet", "origin", spec)
+	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", spec)
 	cmd.Dir = dir
 	_ = cmd.Run()
 }
@@ -74,24 +75,24 @@ var ErrMarkerDiverged = errors.New("origin marker has diverged from HEAD")
 // origin's current marker is fetched and compared with HEAD first, so a marker
 // that is ahead returns ErrMarkerAhead and one that has diverged returns
 // ErrMarkerDiverged, both without touching origin.
-func AdvanceMarker(dir, ref string) error {
-	if hasOrigin(dir) {
-		if err := checkFastForward(dir, ref); err != nil {
+func AdvanceMarker(ctx context.Context, dir, ref string) error {
+	if hasOrigin(ctx, dir) {
+		if err := checkFastForward(ctx, dir, ref); err != nil {
 			return err
 		}
 	}
-	up := exec.Command("git", "update-ref", ref, "HEAD")
+	up := exec.CommandContext(ctx, "git", "update-ref", ref, "HEAD")
 	up.Dir = dir
 	if out, err := up.CombinedOutput(); err != nil {
-		return fmt.Errorf("update-ref %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("update-ref %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
 	}
-	if !hasOrigin(dir) {
+	if !hasOrigin(ctx, dir) {
 		return nil
 	}
-	push := exec.Command("git", "push", "--quiet", "origin", ref)
+	push := exec.CommandContext(ctx, "git", "push", "--quiet", "origin", ref)
 	push.Dir = dir
 	if out, err := push.CombinedOutput(); err != nil {
-		return fmt.Errorf("push %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("push %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -100,8 +101,8 @@ func AdvanceMarker(dir, ref string) error {
 // it. A CI checkout fetches only heads and tags, so origin's marker object is
 // fetched here first; without it git rejects the push as `(fetch first)`
 // whatever the ancestry.
-func checkFastForward(dir, ref string) error {
-	ls := exec.Command("git", "ls-remote", "origin", ref)
+func checkFastForward(ctx context.Context, dir, ref string) error {
+	ls := exec.CommandContext(ctx, "git", "ls-remote", "origin", ref)
 	ls.Dir = dir
 	out, err := ls.Output()
 	if err != nil {
@@ -112,22 +113,23 @@ func checkFastForward(dir, ref string) error {
 		return nil
 	}
 	remote := fields[0]
-	fetch := exec.Command("git", "fetch", "--quiet", "origin", ref)
+	fetch := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", ref)
 	fetch.Dir = dir
-	if out, err := fetch.CombinedOutput(); err != nil {
-		return fmt.Errorf("fetch %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
+	if fout, ferr := fetch.CombinedOutput(); ferr != nil {
+		return fmt.Errorf("fetch %s: %w: %s", ref, ferr, strings.TrimSpace(string(fout)))
 	}
-	head, err := revParse(dir, "HEAD")
+	head, err := revParse(ctx, dir, "HEAD")
 	if err != nil {
 		return err
 	}
 	if remote == head {
 		return nil
 	}
-	if ok, err := isAncestor(dir, remote, head); err != nil || ok {
+	fastForward, err := isAncestor(ctx, dir, remote, head)
+	if err != nil || fastForward {
 		return err
 	}
-	behind, err := isAncestor(dir, head, remote)
+	behind, err := isAncestor(ctx, dir, head, remote)
 	if err != nil {
 		return err
 	}
@@ -137,8 +139,8 @@ func checkFastForward(dir, ref string) error {
 	return fmt.Errorf("%s at %s, HEAD %s: %w", ref, short(remote), short(head), ErrMarkerDiverged)
 }
 
-func revParse(dir, rev string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--verify", rev+"^{commit}")
+func revParse(ctx context.Context, dir, rev string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", rev+"^{commit}")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -150,8 +152,8 @@ func revParse(dir, rev string) (string, error) {
 // isAncestor reports whether a is an ancestor of b. git exits 1 for "no" and
 // anything else for a real failure (a missing object in a shallow clone, say),
 // which is returned rather than read as "no".
-func isAncestor(dir, a, b string) (bool, error) {
-	cmd := exec.Command("git", "merge-base", "--is-ancestor", a, b)
+func isAncestor(ctx context.Context, dir, a, b string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", a, b)
 	cmd.Dir = dir
 	err := cmd.Run()
 	if err == nil {
@@ -171,8 +173,8 @@ func short(sha string) string {
 	return sha
 }
 
-func hasOrigin(dir string) bool {
-	cmd := exec.Command("git", "remote")
+func hasOrigin(ctx context.Context, dir string) bool {
+	cmd := exec.CommandContext(ctx, "git", "remote")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return err == nil && strings.Contains(string(out), "origin")

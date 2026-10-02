@@ -83,7 +83,7 @@ func TestOnBranchDetachedHEAD(t *testing.T) {
 	ci := &gitRepo{t: t, dir: clone}
 	ci.git("checkout", "-q", "v1.0.0") // what a tag-triggered workflow does
 
-	info, err := Gather(clone)
+	info, err := Gather(t.Context(), clone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestOnBranchAttached(t *testing.T) {
 	r := newRepo(t, dir, "-b", "main")
 	r.commit("a")
 
-	info, err := Gather(dir)
+	info, err := Gather(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestOnBranchAttached(t *testing.T) {
 	// on an attached HEAD git's answer is the user's intent, and reachability
 	// must not override it into moving a floating tag.
 	r.git("checkout", "-q", "-b", "side")
-	side, err := Gather(dir)
+	side, err := Gather(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestOnBranchShallowClone(t *testing.T) {
 	if err != nil {
 		t.Skipf("shallow clone unsupported here: %v: %s", err, out)
 	}
-	info, err := Gather(clone)
+	info, err := Gather(t.Context(), clone)
 	if err != nil {
 		t.Fatal(err)
 	}
