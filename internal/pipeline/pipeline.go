@@ -4,6 +4,7 @@ package pipeline
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -558,16 +559,29 @@ func Release(o Options) error {
 	// `release --only <id>` keep every image's baseline current.
 	// Split legs never advance markers: "released" means the merged manifest
 	// list was published, which is the merge run's outcome.
+	//
+	// A marker that cannot advance FAILS the run, but only after the
+	// notifications and publishing below: the images are already out, and CD
+	// still has to hear about them. It used to be a warning, which let one
+	// diverged marker turn every later release into a silent full rebuild
+	// behind a green job. A marker already ahead of HEAD (an older release
+	// re-run) is the one non-failure.
+	var markerErrs []error
 	if cd.MarkerRefs && !o.DryRun && !o.NoPush && !o.Snapshot && !split {
 		for _, im := range result.Images {
 			if im.Skipped {
 				continue
 			}
 			ref := changed.MarkerRef(cd.MarkerPrefix, im.ID)
-			if err := changed.AdvanceMarker(o.Dir, ref); err != nil {
-				fmt.Fprintf(progress, "warning: advance release marker %s: %v\n", ref, err)
-			} else {
+			err := changed.AdvanceMarker(o.Dir, ref)
+			switch {
+			case err == nil:
 				fmt.Fprintf(progress, "==> advanced release marker %s\n", ref)
+			case errors.Is(err, changed.ErrMarkerAhead):
+				fmt.Fprintf(progress, "==> left release marker %s: %v\n", ref, err)
+			default:
+				fmt.Fprintf(progress, "error: advance release marker %s: %v\n", ref, err)
+				markerErrs = append(markerErrs, fmt.Errorf("advance release marker %s: %w", ref, err))
 			}
 		}
 	}
@@ -627,6 +641,10 @@ func Release(o Options) error {
 		return err
 	}
 
+	if len(markerErrs) > 0 {
+		return fmt.Errorf("images published, but %d release marker(s) could not advance: %w",
+			len(markerErrs), errors.Join(markerErrs...))
+	}
 	if split {
 		fmt.Fprintln(progress, "==> split build complete — assemble with `stevedore merge`")
 	} else {

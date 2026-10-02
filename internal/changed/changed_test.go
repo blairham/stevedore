@@ -1,11 +1,109 @@
 package changed
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// markerRepos builds a bare origin plus a CI-shaped clone of it: main only,
+// with no refs outside heads/tags fetched. It returns the clone dir and a git
+// runner that takes the dir to run in.
+func markerRepos(t *testing.T) (string, string, func(dir string, args ...string) string) {
+	t.Helper()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	seed := filepath.Join(root, "seed")
+	clone := filepath.Join(root, "clone")
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t.co",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t.co")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(root, "init", "-q", "--bare", "-b", "main", origin)
+	git(root, "init", "-q", "-b", "main", seed)
+	git(seed, "commit", "-q", "--allow-empty", "-m", "c1")
+	git(seed, "remote", "add", "origin", origin)
+	git(seed, "push", "-q", "origin", "main")
+	git(root, "clone", "-q", origin, clone)
+	return clone, seed, git
+}
+
+func TestAdvanceMarkerOutcomes(t *testing.T) {
+	const ref = "refs/releases/image/svc"
+
+	t.Run("no marker on origin: created", func(t *testing.T) {
+		clone, _, git := markerRepos(t)
+		if err := AdvanceMarker(clone, ref); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := git(clone, "ls-remote", "origin", ref), git(clone, "rev-parse", "HEAD"); !strings.HasPrefix(got, want) {
+			t.Errorf("origin marker = %q, want %s", got, want)
+		}
+	})
+
+	t.Run("marker behind HEAD: fast-forwarded", func(t *testing.T) {
+		clone, seed, git := markerRepos(t)
+		git(seed, "push", "-q", "origin", "HEAD:"+ref)
+		git(seed, "commit", "-q", "--allow-empty", "-m", "c2")
+		git(seed, "push", "-q", "origin", "main")
+		git(clone, "pull", "-q")
+		if err := AdvanceMarker(clone, ref); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := git(clone, "ls-remote", "origin", ref), git(clone, "rev-parse", "HEAD"); !strings.HasPrefix(got, want) {
+			t.Errorf("origin marker = %q, want %s", got, want)
+		}
+	})
+
+	t.Run("marker ahead of HEAD: left alone", func(t *testing.T) {
+		clone, seed, git := markerRepos(t)
+		git(seed, "commit", "-q", "--allow-empty", "-m", "c2")
+		git(seed, "push", "-q", "origin", "main", "HEAD:"+ref)
+		ahead := git(seed, "rev-parse", "HEAD")
+		err := AdvanceMarker(clone, ref)
+		if !errors.Is(err, ErrMarkerAhead) {
+			t.Fatalf("err = %v, want ErrMarkerAhead", err)
+		}
+		if got := git(clone, "ls-remote", "origin", ref); !strings.HasPrefix(got, ahead) {
+			t.Errorf("origin marker moved: %q, want %s", got, ahead)
+		}
+	})
+
+	// The 2026-09-11 trading state: a release from a branch that was never
+	// merged and was then deleted, so origin's marker is reachable from no
+	// branch and the CI clone has never seen the object.
+	t.Run("marker on an unmerged, deleted branch: diverged", func(t *testing.T) {
+		clone, seed, git := markerRepos(t)
+		git(seed, "checkout", "-q", "-b", "feature")
+		git(seed, "commit", "-q", "--allow-empty", "-m", "unmerged")
+		orphan := git(seed, "rev-parse", "HEAD")
+		git(seed, "push", "-q", "origin", "HEAD:"+ref)
+		// main moves on past the fork point; the branch is never merged.
+		git(seed, "checkout", "-q", "main")
+		git(seed, "commit", "-q", "--allow-empty", "-m", "c2")
+		git(seed, "push", "-q", "origin", "main")
+		git(clone, "pull", "-q")
+		err := AdvanceMarker(clone, ref)
+		if !errors.Is(err, ErrMarkerDiverged) {
+			t.Fatalf("err = %v, want ErrMarkerDiverged", err)
+		}
+		if got := git(clone, "ls-remote", "origin", ref); !strings.HasPrefix(got, orphan) {
+			t.Errorf("origin marker moved: %q, want %s", got, orphan)
+		}
+	})
+}
 
 func TestMarkerRef(t *testing.T) {
 	if got := MarkerRef("refs/releases/image/", "checkout"); got != "refs/releases/image/checkout" {
