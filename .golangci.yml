@@ -27,7 +27,7 @@ linters:
   enable:
     # Core linters (enabled by default)
     - errcheck # Check for unchecked errors
-    - govet # Suspicious constructs, incl. shadow + fieldalignment (see settings)
+    - govet # Suspicious constructs, incl. shadow (see settings)
     - ineffassign # Detect ineffectual assignments
     - staticcheck # The staticcheck rule set
     - unused # Check for unused constants, variables, functions and types
@@ -157,9 +157,12 @@ linters:
         - fmt.Fprintln
 
     govet:
+      # localiam's set minus fieldalignment. Its fixes reorder struct fields by
+      # size, and here field order is documentation: config.Config's order is
+      # the order `stevedore schema` emits and the order the YAML reference
+      # reads in. The bytes it saves are a handful per process.
       enable:
         - atomicalign
-        - fieldalignment
         - nilness
         - reflectvaluecompare
         - shadow
