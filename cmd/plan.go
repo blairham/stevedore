@@ -30,8 +30,8 @@ func newPlanCmd() *cobra.Command {
 			"With --split-platforms each entry covers one platform of its build group\n" +
 			"(plus a native `runner` hint): legs add `--split <entry.platform>` and a\n" +
 			"final job runs `stevedore merge` to assemble the manifest lists.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			o, err := baseOptions()
+		RunE: func(c *cobra.Command, _ []string) error {
+			o, err := baseOptions(c.Context())
 			if err != nil {
 				return err
 			}

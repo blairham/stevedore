@@ -54,22 +54,26 @@ func TestTypeMapping(t *testing.T) {
 		Labels  map[string]string `yaml:"labels"`
 		Nested  inner             `yaml:"nested"`
 	}
-	s := Generate(sample{}, "x")
-	props := s["properties"].(map[string]any)
-	if props["enabled"].(map[string]any)["type"] != "boolean" {
-		t.Error("bool mapping")
+	props := object(t, Generate(sample{}, "x"), "properties")
+	for field, want := range map[string]string{
+		"enabled": "boolean",
+		"count":   "integer",
+		"tags":    "array",
+		"labels":  "object",
+		"nested":  "object",
+	} {
+		if got := object(t, props, field)["type"]; got != want {
+			t.Errorf("%s: type %v, want %s", field, got, want)
+		}
 	}
-	if props["count"].(map[string]any)["type"] != "integer" {
-		t.Error("int mapping")
+}
+
+// object returns m[key] as a JSON object, failing the test if it is not one.
+func object(t *testing.T, m map[string]any, key string) map[string]any {
+	t.Helper()
+	v, ok := m[key].(map[string]any)
+	if !ok {
+		t.Fatalf("%s is %T, want an object", key, m[key])
 	}
-	if props["tags"].(map[string]any)["type"] != "array" {
-		t.Error("slice mapping")
-	}
-	if props["labels"].(map[string]any)["type"] != "object" {
-		t.Error("map mapping")
-	}
-	nested := props["nested"].(map[string]any)
-	if nested["type"] != "object" {
-		t.Error("nested struct mapping")
-	}
+	return v
 }

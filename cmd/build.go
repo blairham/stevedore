@@ -16,8 +16,8 @@ func newBuildCmd() *cobra.Command {
 		Short: "Build images locally (single platform, loaded into the docker daemon)",
 		Long: "build is the inner-loop command: it builds each image for one platform and\n" +
 			"loads it into the local docker daemon without pushing. Use --push to publish.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			o, err := baseOptions()
+		RunE: func(c *cobra.Command, _ []string) error {
+			o, err := baseOptions(c.Context())
 			if err != nil {
 				return err
 			}

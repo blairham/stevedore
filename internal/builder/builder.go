@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -59,7 +60,28 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	}
 	defer cleanup()
 
+	if err := r.Run("docker", buildxArgs(s, metaFile)...); err != nil {
+		return "", err
+	}
+	if !s.Push || r.DryRun || metaFile == "" {
+		return "", nil
+	}
+	return readDigest(metaFile)
+}
+
+// buildxArgs renders the full `docker buildx build` argument list for s.
+func buildxArgs(s Spec, metaFile string) []string {
 	args := []string{"buildx", "build"}
+	args = append(args, inputArgs(s)...)
+	args = append(args, outputArgs(s, metaFile)...)
+	args = append(args, s.ExtraFlags...)
+	return append(args, s.Context)
+}
+
+// inputArgs are the flags that decide what is built: platforms, Dockerfile,
+// target, tags, build args, labels, secrets and cache sources.
+func inputArgs(s Spec) []string {
+	var args []string
 	if len(s.Platforms) > 0 {
 		args = append(args, "--platform", strings.Join(s.Platforms, ","))
 	}
@@ -68,13 +90,9 @@ func Build(r *run.Runner, s Spec) (string, error) {
 		args = append(args, "--target", s.Target)
 	}
 	if !s.PushByDigest {
-		for _, ref := range s.Refs {
-			args = append(args, "--tag", ref)
-		}
+		args = appendEach(args, "--tag", s.Refs)
 	}
-	for _, ba := range s.BuildArgs {
-		args = append(args, "--build-arg", ba)
-	}
+	args = appendEach(args, "--build-arg", s.BuildArgs)
 	for _, k := range sortedKeys(s.Labels) {
 		args = append(args, "--label", k+"="+s.Labels[k])
 	}
@@ -86,16 +104,14 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	// Empty entries (e.g. a {{ index .Env "STEVEDORE_CACHE_TO" }} template rendering to
 	// "" outside CI) are skipped, so configs can gate caching on environment
 	// presence without breaking local builds.
-	for _, c := range s.CacheFrom {
-		if c != "" {
-			args = append(args, "--cache-from", c)
-		}
-	}
-	for _, c := range s.CacheTo {
-		if c != "" {
-			args = append(args, "--cache-to", c)
-		}
-	}
+	args = appendEach(args, "--cache-from", nonEmpty(s.CacheFrom))
+	return appendEach(args, "--cache-to", nonEmpty(s.CacheTo))
+}
+
+// outputArgs are the flags that decide where the result goes: a push (by tag
+// or by digest, with its metadata file and provenance), a --load, or nothing.
+func outputArgs(s Spec, metaFile string) []string {
+	var args []string
 	switch {
 	case s.Push:
 		if s.PushByDigest {
@@ -124,16 +140,25 @@ func Build(r *run.Runner, s Spec) (string, error) {
 		// Neither push nor load: build to validate only (no output). This is the
 		// --no-push case — it proves every platform builds without publishing.
 	}
-	args = append(args, s.ExtraFlags...)
-	args = append(args, s.Context)
+	return args
+}
 
-	if err := r.Run("docker", args...); err != nil {
-		return "", err
+// appendEach appends flag and value for every value.
+func appendEach(args []string, flag string, values []string) []string {
+	for _, v := range values {
+		args = append(args, flag, v)
 	}
-	if !s.Push || r.DryRun || metaFile == "" {
-		return "", nil
+	return args
+}
+
+func nonEmpty(values []string) []string {
+	var out []string
+	for _, v := range values {
+		if v != "" {
+			out = append(out, v)
+		}
 	}
-	return readDigest(metaFile)
+	return out
 }
 
 // secretArg renders a --secret value from an env- or file-backed secret. The
@@ -158,7 +183,7 @@ func secretArg(s config.Secret) (string, bool) {
 }
 
 func readDigest(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return "", fmt.Errorf("read build metadata: %w", err)
 	}

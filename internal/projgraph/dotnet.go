@@ -41,7 +41,7 @@ func DotnetDeps(repoRoot, projectRel string) ([]string, error) {
 		}
 		dirs[filepath.ToSlash(relDir)] = true
 
-		data, err := os.ReadFile(projAbs)
+		data, err := os.ReadFile(projAbs) //nolint:gosec // G703: a ProjectReference in the repo's own project files
 		if err != nil {
 			return fmt.Errorf("read project %s: %w", projAbs, err)
 		}

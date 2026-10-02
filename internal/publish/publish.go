@@ -7,10 +7,13 @@ package publish
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"time"
 
@@ -58,12 +61,11 @@ type Message struct {
 // skipping the notification.
 func Announce(r *run.Runner, cfg config.Announce, msg Message) error {
 	targets := []struct {
-		name string
+		name string // also the payload kind renderPayload builds
 		w    config.Webhook
-		kind string
 	}{
-		{"slack", cfg.Slack, "slack"},
-		{"discord", cfg.Discord, "discord"},
+		{"slack", cfg.Slack},
+		{"discord", cfg.Discord},
 	}
 	for _, t := range targets {
 		if !t.w.Enabled {
@@ -73,7 +75,10 @@ func Announce(r *run.Runner, cfg config.Announce, msg Message) error {
 		if url == "" {
 			return fmt.Errorf("announce.%s.enabled but %s is empty", t.name, t.w.WebhookEnv)
 		}
-		payload, err := renderPayload(t.kind, msg.Body)
+		if err := checkWebhookURL(t.w.WebhookEnv, url); err != nil {
+			return fmt.Errorf("announce.%s: %w", t.name, err)
+		}
+		payload, err := renderPayload(t.name, msg.Body)
 		if err != nil {
 			return err
 		}
@@ -83,7 +88,7 @@ func Announce(r *run.Runner, cfg config.Announce, msg Message) error {
 		if r.DryRun {
 			continue
 		}
-		if err := post(url, payload); err != nil {
+		if err := post(r.Context(), url, payload); err != nil {
 			return fmt.Errorf("announce %s: %w", t.name, err)
 		}
 	}
@@ -100,21 +105,59 @@ func renderPayload(kind, text string) ([]byte, error) {
 	return json.Marshal(map[string]string{key: text})
 }
 
-func post(url string, payload []byte) error {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+func post(ctx context.Context, url string, payload []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload)) //nolint:gosec // G704: the operator's own webhook, checked by checkWebhookURL
 	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return send(req)
+}
+
+// send performs a webhook request and turns a non-2xx response into an error
+// carrying the start of the response body.
+func send(req *http.Request) error {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req) //nolint:gosec // G704: as above
+	if err != nil {
+		// net/http quotes the whole URL in its errors, and webhook URLs are
+		// credentials; report the redacted form.
+		var uerr *neturl.Error
+		if errors.As(err, &uerr) {
+			uerr.URL = redact(uerr.URL)
+		}
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("webhook returned %s: %s", resp.Status, string(body))
+		return fmt.Errorf("webhook returned %s: %s", resp.Status, bodyPrefix(resp.Body))
 	}
 	return nil
 }
 
+// bodyPrefix returns up to 512 bytes of an error response for the message. A
+// body that fails to read is reported as such: the status already says what
+// went wrong.
+func bodyPrefix(body io.Reader) string {
+	b, err := io.ReadAll(io.LimitReader(body, 512))
+	if err != nil {
+		return fmt.Sprintf("(reading body: %v)", err)
+	}
+	return string(b)
+}
+
 // redact hides all but the scheme+host of a webhook URL for log output.
+// checkWebhookURL rejects a webhook URL that is not absolute http(s), so a
+// mis-set variable fails here rather than as a request to somewhere odd. The
+// error names the variable, never the URL: webhook URLs are credentials.
+func checkWebhookURL(env, raw string) error {
+	u, err := neturl.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return fmt.Errorf("%s is not an absolute http(s) URL", env)
+	}
+	return nil
+}
+
 func redact(url string) string {
 	for i := 0; i < len(url); i++ {
 		if url[i] == '/' && i > 0 && url[i-1] == '/' {

@@ -5,6 +5,7 @@
 package gitinfo
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"slices"
@@ -40,31 +41,29 @@ type Info struct {
 }
 
 // Gather collects git state for the repository at dir.
-func Gather(dir string) (*Info, error) {
-	if _, err := run(dir, "rev-parse", "--git-dir"); err != nil {
+func Gather(ctx context.Context, dir string) (*Info, error) {
+	if _, err := run(ctx, dir, "rev-parse", "--git-dir"); err != nil {
 		return nil, fmt.Errorf("not a git repository: %w", err)
 	}
 	info := &Info{}
 
-	info.Commit, _ = run(dir, "rev-parse", "HEAD")
-	info.ShortCommit, _ = run(dir, "rev-parse", "--short", "HEAD")
-	info.Branch, _ = run(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	info.Commit = output(ctx, dir, "rev-parse", "HEAD")
+	info.ShortCommit = output(ctx, dir, "rev-parse", "--short", "HEAD")
+	info.Branch = output(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
 	info.Detached = info.Branch == "HEAD"
-	info.Branches = branchesContaining(dir)
-
-	status, _ := run(dir, "status", "--porcelain")
-	info.Dirty = status != ""
+	info.Branches = branchesContaining(ctx, dir)
+	info.Dirty = output(ctx, dir, "status", "--porcelain") != ""
 
 	// Exact tag on HEAD, if any.
-	if tag, err := run(dir, "describe", "--tags", "--exact-match"); err == nil {
+	if tag, err := run(ctx, dir, "describe", "--tags", "--exact-match"); err == nil {
 		info.Tag = tag
-	} else if tag, err := run(dir, "describe", "--tags", "--abbrev=0"); err == nil {
+	} else if tag, err := run(ctx, dir, "describe", "--tags", "--abbrev=0"); err == nil {
 		// Most recent tag reachable from HEAD (not necessarily on HEAD).
 		info.Tag = tag
 	}
 
 	if info.Tag != "" {
-		if prev, err := run(dir, "describe", "--tags", "--abbrev=0", info.Tag+"^"); err == nil {
+		if prev, err := run(ctx, dir, "describe", "--tags", "--abbrev=0", info.Tag+"^"); err == nil {
 			info.PreviousTag = prev
 		}
 	}
@@ -83,8 +82,8 @@ func Gather(dir string) (*Info, error) {
 // it in config, and on a fresh CI checkout the only ref that exists is the
 // remote-tracking one. A shallow clone has no such refs at all and returns
 // nothing here, which callers must treat as "unknown", not as "no".
-func branchesContaining(dir string) []string {
-	out, err := run(dir, "for-each-ref", "--format=%(refname)", "--contains", "HEAD", "refs/heads", "refs/remotes")
+func branchesContaining(ctx context.Context, dir string) []string {
+	out, err := run(ctx, dir, "for-each-ref", "--format=%(refname)", "--contains", "HEAD", "refs/heads", "refs/remotes")
 	if err != nil || out == "" {
 		return nil
 	}
@@ -158,12 +157,12 @@ func deriveVersion(i *Info) string {
 
 // CommitsSince returns commit subjects (and bodies) reachable from HEAD but not
 // from ref. If ref is empty, all commits are returned. Newest first.
-func CommitsSince(dir, ref string) ([]Commit, error) {
+func CommitsSince(ctx context.Context, dir, ref string) ([]Commit, error) {
 	args := []string{"log", "--no-merges", "--pretty=format:%H%x1f%s%x1f%an%x1e"}
 	if ref != "" {
 		args = append(args, ref+"..HEAD")
 	}
-	out, err := run(dir, args...)
+	out, err := run(ctx, dir, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -193,8 +192,18 @@ type Commit struct {
 	Author  string
 }
 
-func run(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+// output is run for the best-effort fields of Info: a repository with no
+// commits yet has no HEAD to describe, and that is "" rather than a failure.
+func output(ctx context.Context, dir string, args ...string) string {
+	out, err := run(ctx, dir, args...)
+	if err != nil {
+		return ""
+	}
+	return out
+}
+
+func run(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {

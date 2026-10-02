@@ -14,9 +14,6 @@ import (
 
 // parsePins parses repeated --pin-version id=version flags into a map.
 func parsePins(pins []string) (map[string]string, error) {
-	if len(pins) == 0 {
-		return nil, nil
-	}
 	out := make(map[string]string, len(pins))
 	for _, p := range pins {
 		id, ver, ok := strings.Cut(p, "=")
@@ -52,8 +49,8 @@ func newReleaseCmd() *cobra.Command {
 		Long: "release runs the full pipeline: build every image for all platforms,\n" +
 			"push to all configured registries, sign with cosign, generate SBOMs, and\n" +
 			"write a changelog. A clean, tagged checkout is required unless --snapshot.",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			o, err := baseOptions()
+		RunE: func(c *cobra.Command, _ []string) error {
+			o, err := baseOptions(c.Context())
 			if err != nil {
 				return err
 			}

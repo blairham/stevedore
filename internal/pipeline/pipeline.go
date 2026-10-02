@@ -5,6 +5,7 @@
 package pipeline
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -44,6 +45,9 @@ var progress io.Writer = os.Stdout
 
 // Options controls a pipeline invocation.
 type Options struct {
+	// Context bounds every external command the invocation starts. Nil means
+	// context.Background().
+	Context       context.Context
 	ConfigPath    string
 	Dir           string // repository root
 	Snapshot      bool
@@ -84,6 +88,13 @@ type Options struct {
 	Now              time.Time
 }
 
+func (o Options) context() context.Context {
+	if o.Context != nil {
+		return o.Context
+	}
+	return context.Background()
+}
+
 // ImagePlan is a fully-resolved plan for one image.
 type ImagePlan struct {
 	Image     config.Image
@@ -111,24 +122,17 @@ type Prepared struct {
 
 // Prepare loads config, gathers git state, and resolves image plans.
 func Prepare(o Options) (*Prepared, error) {
-	cfg, err := config.Load(o.ConfigPath)
+	cfg, err := loadConfig(o)
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	gi, err := gitinfo.Gather(o.Dir)
+	gi, err := gitinfo.Gather(o.context(), o.Dir)
 	if err != nil {
 		return nil, err
 	}
 	now := o.Now
 	if now.IsZero() {
 		now = time.Now()
-	}
-
-	if err := validateImageIDs(cfg, o); err != nil {
-		return nil, err
 	}
 
 	// Resolve the release version via the configured strategy (git, registry,
@@ -143,9 +147,12 @@ func Prepare(o Options) (*Prepared, error) {
 
 	// Under the registry strategy each image is versioned from its own repo;
 	// versionFor is nil for other strategies (one version for all images).
-	versionFor, err := imageVersionResolver(cfg, gi, o, ctx)
-	if err != nil {
-		return nil, err
+	var versionFor func(string) (string, error)
+	if isRegistryStrategy(cfg.Versioning.Strategy) {
+		versionFor, err = imageVersionResolver(cfg, gi, o, ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	plans, err := resolvePlans(cfg, ctx, o.Snapshot, versionFor, o.PinVersions, o.Only)
 	if err != nil {
@@ -163,15 +170,28 @@ func Prepare(o Options) (*Prepared, error) {
 	return &Prepared{Config: cfg, Git: gi, Ctx: ctx, Plans: plans}, nil
 }
 
+// loadConfig loads and validates the config, including the image IDs that
+// --only and --pin-version refer to.
+func loadConfig(o Options) (*config.Config, error) {
+	cfg, err := config.Load(o.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateImageIDs(cfg, o); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
 // imageVersionResolver returns a per-image version resolver for the registry
 // strategy: each image's version comes from its own repository (highest semver +
-// bump). It returns nil for the other strategies, where one version applies to
-// every image. When versioning.repo is pinned, all images resolve from that one
-// repo (i.e. a unified version).
+// bump). The other strategies apply one version to every image and need none,
+// so Prepare only calls this under the registry strategy. When versioning.repo
+// is pinned, all images resolve from that one repo (i.e. a unified version).
 func imageVersionResolver(cfg *config.Config, gi *gitinfo.Info, o Options, ctx *tmpl.Context) (func(string) (string, error), error) {
-	if !isRegistryStrategy(cfg.Versioning.Strategy) {
-		return nil, nil
-	}
 	vcfg := cfg.Versioning
 	if vcfg.Repo != "" {
 		rendered, err := tmpl.Render(vcfg.Repo, ctx)
@@ -180,7 +200,7 @@ func imageVersionResolver(cfg *config.Config, gi *gitinfo.Info, o Options, ctx *
 		}
 		vcfg.Repo = rendered
 	}
-	r := run.New(o.DryRun, o.Verbose)
+	r := run.New(o.context(), o.DryRun, o.Verbose)
 	list := tagLister(cfg, r)
 	warned := false
 	return func(repo string) (string, error) {
@@ -296,94 +316,120 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 	var plans []ImagePlan
 	// Floating tags withheld this run, reported once at the end rather than
 	// once per image x repository.
-	withheld := map[string]bool{}
-	var withheldOrder []string
-	defer func() { warnWithheldFloating(withheldOrder, cfg.DefaultBranch, ctx) }()
+	withheld := &withheldTags{seen: map[string]bool{}}
+	defer func() { warnWithheldFloating(withheld.order, cfg.DefaultBranch, ctx) }()
 	for _, img := range cfg.Images {
 		if len(selected) > 0 && !selected[img.ID] {
 			continue
 		}
-		// Repositories are rendered with the release context (they key on .Env,
-		// not .Version), and drive per-image version resolution.
-		repos, err := tmpl.RenderAll(img.Repositories, ctx)
+		plan, err := resolvePlan(img, ctx, snapshot, versionFor, pins, withheld)
 		if err != nil {
-			return nil, fmt.Errorf("image %s repositories: %w", img.ID, err)
+			return nil, err
 		}
-
-		// Determine this image's version. A pin (from the plan) wins outright;
-		// under per-image registry versioning it comes from the image's own
-		// repo; otherwise it's the release version.
-		imgCtx := ctx
-		imgVersion := ctx.Version
-		if pin, ok := pins[img.ID]; ok {
-			imgVersion = pin
-			imgCtx = ctx.WithVersion(pin)
-		} else if versionFor != nil && len(repos) > 0 {
-			v, err := versionFor(repos[0])
-			if err != nil {
-				return nil, fmt.Errorf("image %s version: %w", img.ID, err)
-			}
-			imgVersion = v
-			imgCtx = ctx.WithVersion(v)
-		}
-
-		tags, err := tmpl.RenderAll(img.Tags, imgCtx)
-		if err != nil {
-			return nil, fmt.Errorf("image %s tags: %w", img.ID, err)
-		}
-		buildArgs, err := tmpl.RenderAll(img.BuildArgs, imgCtx)
-		if err != nil {
-			return nil, fmt.Errorf("image %s build_args: %w", img.ID, err)
-		}
-		cacheFrom, err := tmpl.RenderAll(img.CacheFrom, imgCtx)
-		if err != nil {
-			return nil, fmt.Errorf("image %s cache_from: %w", img.ID, err)
-		}
-		cacheTo, err := tmpl.RenderAll(img.CacheTo, imgCtx)
-		if err != nil {
-			return nil, fmt.Errorf("image %s cache_to: %w", img.ID, err)
-		}
-		labels := map[string]string{}
-		for k, v := range img.Labels {
-			rv, err := tmpl.Render(v, imgCtx)
-			if err != nil {
-				return nil, fmt.Errorf("image %s label %s: %w", img.ID, k, err)
-			}
-			labels[k] = rv
-		}
-
-		var refs []string
-		for _, repo := range repos {
-			for _, tag := range tags {
-				if isFloating(tag) && (snapshot || !imgCtx.IsDefault) {
-					// A snapshot withholding "latest" is the point of a
-					// snapshot; off the default branch it is a decision the
-					// user needs to see, because the alternative is finding
-					// out from the registry weeks later.
-					if !snapshot && !withheld[tag] {
-						withheld[tag] = true
-						withheldOrder = append(withheldOrder, tag)
-					}
-					continue
-				}
-				refs = append(refs, repo+":"+tag)
-			}
-		}
-		if len(refs) == 0 {
-			return nil, fmt.Errorf("image %s: no publishable references after tag resolution", img.ID)
-		}
-		plans = append(plans, ImagePlan{
-			Image:     img,
-			Repos:     repos,
-			Refs:      refs,
-			BuildArgs: buildArgs,
-			Labels:    labels,
-			CacheFrom: cacheFrom,
-			CacheTo:   cacheTo,
-			Version:   imgVersion,
-		})
+		plans = append(plans, plan)
 	}
 	return plans, nil
+}
+
+// withheldTags collects the floating tags a run declined to publish, in the
+// order first seen.
+type withheldTags struct {
+	seen  map[string]bool
+	order []string
+}
+
+func (w *withheldTags) add(tag string) {
+	if !w.seen[tag] {
+		w.seen[tag] = true
+		w.order = append(w.order, tag)
+	}
+}
+
+// resolvePlan renders one image's plan; see resolvePlans.
+func resolvePlan(img config.Image, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error), pins map[string]string, withheld *withheldTags) (ImagePlan, error) {
+	// Repositories are rendered with the release context (they key on .Env,
+	// not .Version), and drive per-image version resolution.
+	repos, err := tmpl.RenderAll(img.Repositories, ctx)
+	if err != nil {
+		return ImagePlan{}, fmt.Errorf("image %s repositories: %w", img.ID, err)
+	}
+	imgVersion, imgCtx, err := imageVersion(img.ID, repos, ctx, versionFor, pins)
+	if err != nil {
+		return ImagePlan{}, err
+	}
+	plan := ImagePlan{Image: img, Repos: repos, Version: imgVersion}
+
+	var tags []string
+	fields := []struct {
+		name string
+		in   []string
+		out  *[]string
+	}{
+		{"tags", img.Tags, &tags},
+		{"build_args", img.BuildArgs, &plan.BuildArgs},
+		{"cache_from", img.CacheFrom, &plan.CacheFrom},
+		{"cache_to", img.CacheTo, &plan.CacheTo},
+	}
+	for _, f := range fields {
+		if *f.out, err = tmpl.RenderAll(f.in, imgCtx); err != nil {
+			return ImagePlan{}, fmt.Errorf("image %s %s: %w", img.ID, f.name, err)
+		}
+	}
+	plan.Labels = map[string]string{}
+	for k, v := range img.Labels {
+		rv, err := tmpl.Render(v, imgCtx)
+		if err != nil {
+			return ImagePlan{}, fmt.Errorf("image %s label %s: %w", img.ID, k, err)
+		}
+		plan.Labels[k] = rv
+	}
+
+	plan.Refs = publishedRefs(repos, tags, snapshot || !imgCtx.IsDefault, func(tag string) {
+		// A snapshot withholding "latest" is the point of a snapshot; off
+		// the default branch it is a decision the user needs to see, because
+		// the alternative is finding out from the registry weeks later.
+		if !snapshot {
+			withheld.add(tag)
+		}
+	})
+	if len(plan.Refs) == 0 {
+		return ImagePlan{}, fmt.Errorf("image %s: no publishable references after tag resolution", img.ID)
+	}
+	return plan, nil
+}
+
+// imageVersion determines an image's version and the template context that
+// carries it. A pin (from the plan) wins outright; under per-image registry
+// versioning it comes from the image's own repo; otherwise it's the release
+// version.
+func imageVersion(id string, repos []string, ctx *tmpl.Context, versionFor func(string) (string, error), pins map[string]string) (string, *tmpl.Context, error) {
+	if pin, ok := pins[id]; ok {
+		return pin, ctx.WithVersion(pin), nil
+	}
+	if versionFor != nil && len(repos) > 0 {
+		v, err := versionFor(repos[0])
+		if err != nil {
+			return "", nil, fmt.Errorf("image %s version: %w", id, err)
+		}
+		return v, ctx.WithVersion(v), nil
+	}
+	return ctx.Version, ctx, nil
+}
+
+// publishedRefs is the repo:tag product, minus floating tags when
+// withholdFloating is set; each withheld tag is passed to onWithheld.
+func publishedRefs(repos, tags []string, withholdFloating bool, onWithheld func(string)) []string {
+	var refs []string
+	for _, repo := range repos {
+		for _, tag := range tags {
+			if withholdFloating && isFloating(tag) {
+				onWithheld(tag)
+				continue
+			}
+			refs = append(refs, repo+":"+tag)
+		}
+	}
+	return refs
 }
 
 // warnWithheldFloating explains, once per run, why floating tags are not being
@@ -420,10 +466,133 @@ func isFloating(tag string) bool {
 // every stage that needs a pushed artifact (sign, SBOM, scan, provenance,
 // GitHub release, announce).
 func Release(o Options) error {
-	split := len(o.SplitPlatforms) > 0
-	if split {
+	o, err := releaseOptions(o)
+	if err != nil {
+		return err
+	}
+	if o.OutputJSON {
+		// Keep stdout clean for the JSON document.
+		progress = os.Stderr
+		defer func() { progress = os.Stdout }()
+	}
+	p, err := Prepare(o)
+	if err != nil {
+		return err
+	}
+	err = preflightRelease(o, p)
+	if err != nil {
+		return err
+	}
+	r := run.New(o.context(), o.DryRun, o.Verbose)
+
+	fpPath, state, err := loadReleaseState(o, p)
+	if err != nil {
+		return err
+	}
+
+	// Pre-pass: change detection + fingerprints, then group identical build
+	// specs (shared with the plan command).
+	evals, err := evaluateImages(o, p, state)
+	if err != nil {
+		return err
+	}
+	toBuild, skipped := groupPlans(o.Dir, evals)
+	result := summary.Result{Project: p.Config.ProjectName, Snapshot: o.Snapshot}
+	result.Images = reportGroups(toBuild, skipped)
+
+	built, depDiffSections, err := buildGroups(o, p, r, toBuild, state)
+	if err != nil {
+		return err
+	}
+	result.Images = append(result.Images, built...)
+	sort.Slice(result.Images, func(i, j int) bool { return result.Images[i].ID < result.Images[j].ID })
+
+	return finishRelease(o, p, r, result, fpPath, state, depDiffSections)
+}
+
+// finishRelease is everything after the builds: it records the new
+// fingerprints, advances the release markers, notifies, writes the changelog,
+// publishes and emits the summary. A marker that cannot advance does not stop
+// the rest; it is reported once the release is otherwise done.
+func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result, fpPath string, state fingerprint.State, depDiffSections []string) error {
+	if !o.DryRun {
+		if err := state.Save(fpPath); err != nil {
+			return fmt.Errorf("save fingerprint state: %w", err)
+		}
+	}
+
+	markerErrs := advanceMarkers(o, p, result.Images)
+
+	if err := notifyWebhook(o, p, r, result.Images); err != nil {
+		return err
+	}
+
+	changelogPath, err := writeChangelog(o, p, depDiffSections)
+	if err != nil {
+		return err
+	}
+
+	// Publishing (GitHub release + announce) runs only for real releases.
+	if !o.NoPush && !o.Snapshot && !o.SkipPublish {
+		if err := publishRelease(r, p, changelogPath); err != nil {
+			return err
+		}
+	}
+
+	if err := emitSummary(o, p, result); err != nil {
+		return err
+	}
+
+	if len(markerErrs) > 0 {
+		return fmt.Errorf("images published, but %d release marker(s) could not advance: %w",
+			len(markerErrs), errors.Join(markerErrs...))
+	}
+	if len(o.SplitPlatforms) > 0 {
+		fmt.Fprintln(progress, "==> split build complete — assemble with `stevedore merge`")
+	} else {
+		fmt.Fprintln(progress, "==> release complete")
+	}
+	return nil
+}
+
+// reportGroups announces the skipped images and the shared builds, and returns
+// the skipped images' summary entries.
+func reportGroups(toBuild [][]imageEval, skipped []imageEval) []summary.Image {
+	images := make([]summary.Image, 0, len(skipped))
+	for _, m := range skipped {
+		fmt.Fprintf(progress, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
+		images = append(images, summary.Image{ID: m.plan.Image.ID, Skipped: true, Reason: m.reason})
+	}
+	for _, grp := range toBuild {
+		if len(grp) > 1 {
+			fmt.Fprintf(progress, "==> %d images share one build: %s\n", len(grp), strings.Join(evalIDs(grp), ", "))
+		}
+	}
+	return images
+}
+
+// loadReleaseState creates dist/ and loads the fingerprint state from it.
+// Fingerprint state drives --only-changed. It is maintained on every release
+// so the next --only-changed run has a baseline to compare against.
+func loadReleaseState(o Options, p *Prepared) (string, fingerprint.State, error) {
+	if err := mkdirDist(filepath.Join(o.Dir, p.Config.Dist)); err != nil {
+		return "", nil, fmt.Errorf("create dist dir: %w", err)
+	}
+	fpPath := filepath.Join(o.Dir, p.Config.Dist, "fingerprints.json")
+	state, err := fingerprint.Load(fpPath)
+	if err != nil {
+		return "", nil, err
+	}
+	return fpPath, state, nil
+}
+
+// releaseOptions applies the option implications of a release run: a split
+// leg cannot be --no-push and leaves the tail to the merge run, and --no-push
+// tolerates an unresolvable version.
+func releaseOptions(o Options) (Options, error) {
+	if len(o.SplitPlatforms) > 0 {
 		if o.NoPush {
-			return fmt.Errorf("--split pushes per-arch images by digest; drop --no-push")
+			return o, fmt.Errorf("--split pushes per-arch images by digest; drop --no-push")
 		}
 		// A split leg only builds and pushes by digest; everything that
 		// operates on the final tagged manifest list belongs to the merge run.
@@ -436,69 +605,35 @@ func Release(o Options) error {
 		// resolved (e.g. registry/ECR unreachable in CI) shouldn't fail the run.
 		o.SoftVersion = true
 	}
-	if o.OutputJSON {
-		// Keep stdout clean for the JSON document.
-		progress = os.Stderr
-		defer func() { progress = os.Stdout }()
-	}
-	p, err := Prepare(o)
-	if err != nil {
-		return err
-	}
-	result := summary.Result{Project: p.Config.ProjectName, Snapshot: o.Snapshot}
+	return o, nil
+}
+
+// preflightRelease refuses an unreleasable tree and checks that the tools this
+// run needs are installed.
+func preflightRelease(o Options, p *Prepared) error {
 	if !o.Snapshot {
 		if err := guardReleasable(p.Git, p.Config.Versioning.Strategy); err != nil {
 			return err
 		}
 	}
-	if !o.DryRun {
-		ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && p.Config.Release.GitHub.Enabled
-		// --no-push builds only; none of the push-dependent tools are required.
-		opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease}
-		if split {
-			// A split leg needs only the build toolchain — the merge run
-			// carries the sign/scan/sbom/publish requirements.
-			opts = preflight.Opts{}
-		}
-		if err := checkTools(p.Config, opts); err != nil {
-			return err
-		}
+	if o.DryRun {
+		return nil
 	}
-	r := run.New(o.DryRun, o.Verbose)
+	ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && p.Config.Release.GitHub.Enabled
+	// --no-push builds only; none of the push-dependent tools are required.
+	opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease}
+	if len(o.SplitPlatforms) > 0 {
+		// A split leg needs only the build toolchain — the merge run
+		// carries the sign/scan/sbom/publish requirements.
+		opts = preflight.Opts{}
+	}
+	return checkTools(o.context(), p.Config, opts)
+}
 
-	if err := os.MkdirAll(filepath.Join(o.Dir, p.Config.Dist), 0o755); err != nil {
-		return fmt.Errorf("create dist dir: %w", err)
-	}
-
-	// Fingerprint state drives --only-changed. It is maintained on every release
-	// so the next --only-changed run has a baseline to compare against.
-	fpPath := filepath.Join(o.Dir, p.Config.Dist, "fingerprints.json")
-	state, err := fingerprint.Load(fpPath)
-	if err != nil {
-		return err
-	}
-
-	var depDiffSections []string
-	cd := p.Config.ChangeDetection
-
-	// Pre-pass: change detection + fingerprints, then group identical build
-	// specs (shared with the plan command).
-	evals, err := evaluateImages(o, p, state)
-	if err != nil {
-		return err
-	}
-	toBuild, skipped := groupPlans(o.Dir, evals)
-	for _, m := range skipped {
-		fmt.Fprintf(progress, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
-		result.Images = append(result.Images, summary.Image{ID: m.plan.Image.ID, Skipped: true, Reason: m.reason})
-	}
-	for _, grp := range toBuild {
-		if len(grp) > 1 {
-			fmt.Fprintf(progress, "==> %d images share one build: %s\n", len(grp), strings.Join(evalIDs(grp), ", "))
-		}
-	}
-
-	// Build each group, up to o.Parallel groups at a time.
+// buildGroups builds each group, up to o.Parallel groups at a time, recording
+// each built member's fingerprint in state. It returns the built images'
+// summaries and dependency-diff sections; the first failure stops dispatch.
+func buildGroups(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, state fingerprint.State) ([]summary.Image, []string, error) {
 	workers := max(o.Parallel, 1)
 	if len(toBuild) > 0 {
 		workers = min(workers, len(toBuild))
@@ -511,6 +646,8 @@ func Release(o Options) error {
 		firstErr error
 		wg       sync.WaitGroup
 		sem      = make(chan struct{}, workers)
+		images   []summary.Image
+		depDiffs []string
 	)
 	for _, grp := range toBuild {
 		mu.Lock()
@@ -533,127 +670,129 @@ func Release(o Options) error {
 				}
 				return
 			}
-			result.Images = append(result.Images, irs...)
+			images = append(images, irs...)
 			for _, m := range grp {
 				state[m.plan.Image.ID] = m.fp
 			}
 			if dep != "" {
-				depDiffSections = append(depDiffSections, dep)
+				depDiffs = append(depDiffs, dep)
 			}
 		}(grp)
 	}
 	wg.Wait()
 	if firstErr != nil {
-		return firstErr
+		return nil, nil, firstErr
 	}
-	sort.Slice(result.Images, func(i, j int) bool { return result.Images[i].ID < result.Images[j].ID })
+	return images, depDiffs, nil
+}
 
-	if !o.DryRun {
-		if err := state.Save(fpPath); err != nil {
-			return fmt.Errorf("save fingerprint state: %w", err)
-		}
+// advanceMarkers advances each built image's release marker to HEAD (and
+// pushes it) so the next run's change detection diffs against this release.
+// Only on a real push of a real release — but regardless of how THIS run
+// selected its images (marker diff, --changed-since, or --only): the marker
+// records "last released", not "last marker-diffed", so matrix jobs running
+// `release --only <id>` keep every image's baseline current.
+// Split legs never advance markers: "released" means the merged manifest
+// list was published, which is the merge run's outcome.
+//
+// A marker that cannot advance FAILS the run, but only after the
+// notifications and publishing that follow: the images are already out, and
+// CD still has to hear about them. It used to be a warning, which let one
+// diverged marker turn every later release into a silent full rebuild
+// behind a green job. A marker already ahead of HEAD (an older release
+// re-run) is the one non-failure. The failures are returned for Release to
+// report last.
+func advanceMarkers(o Options, p *Prepared, images []summary.Image) []error {
+	cd := p.Config.ChangeDetection
+	if !cd.MarkerRefs || o.DryRun || o.NoPush || o.Snapshot || len(o.SplitPlatforms) > 0 {
+		return nil
 	}
-
-	// Advance each built image's release marker to HEAD (and push it) so the
-	// next run's change detection diffs against this release. Only on a real
-	// push of a real release — but regardless of how THIS run selected its
-	// images (marker diff, --changed-since, or --only): the marker records
-	// "last released", not "last marker-diffed", so matrix jobs running
-	// `release --only <id>` keep every image's baseline current.
-	// Split legs never advance markers: "released" means the merged manifest
-	// list was published, which is the merge run's outcome.
-	//
-	// A marker that cannot advance FAILS the run, but only after the
-	// notifications and publishing below: the images are already out, and CD
-	// still has to hear about them. It used to be a warning, which let one
-	// diverged marker turn every later release into a silent full rebuild
-	// behind a green job. A marker already ahead of HEAD (an older release
-	// re-run) is the one non-failure.
 	var markerErrs []error
-	if cd.MarkerRefs && !o.DryRun && !o.NoPush && !o.Snapshot && !split {
-		for _, im := range result.Images {
-			if im.Skipped {
-				continue
-			}
-			ref := changed.MarkerRef(cd.MarkerPrefix, im.ID)
-			err := changed.AdvanceMarker(o.Dir, ref)
-			switch {
-			case err == nil:
-				fmt.Fprintf(progress, "==> advanced release marker %s\n", ref)
-			case errors.Is(err, changed.ErrMarkerAhead):
-				fmt.Fprintf(progress, "==> left release marker %s: %v\n", ref, err)
-			default:
-				fmt.Fprintf(progress, "error: advance release marker %s: %v\n", ref, err)
-				markerErrs = append(markerErrs, fmt.Errorf("advance release marker %s: %w", ref, err))
-			}
+	for _, im := range images {
+		if im.Skipped {
+			continue
+		}
+		ref := changed.MarkerRef(cd.MarkerPrefix, im.ID)
+		err := changed.AdvanceMarker(o.context(), o.Dir, ref)
+		switch {
+		case err == nil:
+			fmt.Fprintf(progress, "==> advanced release marker %s\n", ref)
+		case errors.Is(err, changed.ErrMarkerAhead):
+			fmt.Fprintf(progress, "==> left release marker %s: %v\n", ref, err)
+		default:
+			fmt.Fprintf(progress, "error: advance release marker %s: %v\n", ref, err)
+			markerErrs = append(markerErrs, fmt.Errorf("advance release marker %s: %w", ref, err))
 		}
 	}
+	return markerErrs
+}
 
-	// Machine-readable post-push notifications fire once per pushed image so a
-	// CD system can react to the new digests. Unlike announce they also fire on
-	// snapshots (the payload carries the snapshot flag) — but never on split
-	// legs, where the merged manifest list hasn't been published yet.
-	if p.Config.Notify.Webhook.Enabled && !o.NoPush && !o.SkipPublish {
-		var notes []publish.Notification
-		for _, im := range result.Images {
-			if im.Skipped {
-				continue
-			}
-			notes = append(notes, publish.Notification{
-				Project:      p.Config.ProjectName,
-				Snapshot:     o.Snapshot,
-				Image:        im.ID,
-				Version:      im.Version,
-				Digest:       im.Digest,
-				Repositories: im.Repositories,
-				Refs:         im.Refs,
-			})
-		}
-		if err := publish.Notify(r, p.Config.Notify.Webhook, notes); err != nil {
-			return err
-		}
-		if len(notes) > 0 {
-			fmt.Fprintf(progress, "==> notified webhook of %d pushed image(s)\n", len(notes))
-		}
+// notifyWebhook fires the machine-readable post-push notifications, once per
+// pushed image, so a CD system can react to the new digests. Unlike announce
+// they also fire on snapshots (the payload carries the snapshot flag) — but
+// never on split legs, where the merged manifest list hasn't been published
+// yet.
+func notifyWebhook(o Options, p *Prepared, r *run.Runner, images []summary.Image) error {
+	if !p.Config.Notify.Webhook.Enabled || o.NoPush || o.SkipPublish {
+		return nil
 	}
-
-	changelogPath := ""
-	if !o.SkipChangelog && p.Config.Changelog.Enabled {
-		notes, err := changelog.Generate(p.Config.Changelog, p.Git, o.Dir)
-		if err != nil {
-			return err
+	var notes []publish.Notification
+	for _, im := range images {
+		if im.Skipped {
+			continue
 		}
-		if len(depDiffSections) > 0 {
-			notes += "\n## Dependency changes\n\n" + strings.Join(depDiffSections, "")
-		}
-		changelogPath = filepath.Join(o.Dir, p.Config.Dist, "CHANGELOG.md")
-		if err := os.WriteFile(changelogPath, []byte(notes), 0o644); err != nil {
-			return fmt.Errorf("write changelog: %w", err)
-		}
-		fmt.Fprintf(progress, "==> changelog written to %s\n", changelogPath)
+		notes = append(notes, publish.Notification{
+			Project:      p.Config.ProjectName,
+			Snapshot:     o.Snapshot,
+			Image:        im.ID,
+			Version:      im.Version,
+			Digest:       im.Digest,
+			Repositories: im.Repositories,
+			Refs:         im.Refs,
+		})
 	}
-
-	// Publishing (GitHub release + announce) runs only for real releases.
-	if !o.NoPush && !o.Snapshot && !o.SkipPublish {
-		if err := publishRelease(r, p, changelogPath); err != nil {
-			return err
-		}
-	}
-
-	if err := emitSummary(o, p, result); err != nil {
+	if err := publish.Notify(r, p.Config.Notify.Webhook, notes); err != nil {
 		return err
 	}
-
-	if len(markerErrs) > 0 {
-		return fmt.Errorf("images published, but %d release marker(s) could not advance: %w",
-			len(markerErrs), errors.Join(markerErrs...))
-	}
-	if split {
-		fmt.Fprintln(progress, "==> split build complete — assemble with `stevedore merge`")
-	} else {
-		fmt.Fprintln(progress, "==> release complete")
+	if len(notes) > 0 {
+		fmt.Fprintf(progress, "==> notified webhook of %d pushed image(s)\n", len(notes))
 	}
 	return nil
+}
+
+// writeChangelog writes dist/CHANGELOG.md, with the dependency-diff sections
+// appended, and returns its path — or "" when the changelog is off.
+func writeChangelog(o Options, p *Prepared, depDiffSections []string) (string, error) {
+	if o.SkipChangelog || !p.Config.Changelog.Enabled {
+		return "", nil
+	}
+	notes, err := changelog.Generate(o.context(), p.Config.Changelog, p.Git, o.Dir)
+	if err != nil {
+		return "", err
+	}
+	if len(depDiffSections) > 0 {
+		notes += "\n## Dependency changes\n\n" + strings.Join(depDiffSections, "")
+	}
+	path := filepath.Join(o.Dir, p.Config.Dist, "CHANGELOG.md")
+	if err := writeDistFile(path, []byte(notes)); err != nil {
+		return "", fmt.Errorf("write changelog: %w", err)
+	}
+	fmt.Fprintf(progress, "==> changelog written to %s\n", path)
+	return path, nil
+}
+
+// mkdirDist and writeDistFile create dist/ and the files under it. They keep
+// the conventional 0755/0644 rather than gosec's 0750/0600 on purpose: the
+// image runs as root, so `docker run -v "$PWD:/src"` leaves dist/ owned by
+// root, and owner-only modes would make the release's outputs (changelog,
+// summary, split digests) unreadable to the host user and to the CI step that
+// uploads them. Nothing written there is secret.
+func mkdirDist(dir string) error {
+	return os.MkdirAll(dir, 0o755) //nolint:gosec // see above: dist/ must be readable by non-owners
+}
+
+func writeDistFile(path string, data []byte) error {
+	return os.WriteFile(path, data, 0o644) //nolint:gosec // see mkdirDist
 }
 
 // Merge is the second half of a split release: it stitches the per-arch
@@ -680,7 +819,7 @@ func emitSummary(o Options, p *Prepared, result summary.Result) error {
 	}
 	if !o.DryRun {
 		out := filepath.Join(o.Dir, p.Config.Dist, "release-summary.json")
-		if err := os.WriteFile(out, append(data, '\n'), 0o644); err != nil {
+		if err := writeDistFile(out, append(data, '\n')); err != nil {
 			return fmt.Errorf("write release summary: %w", err)
 		}
 		fmt.Fprintf(progress, "==> summary written to %s\n", out)
@@ -737,7 +876,7 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string) error {
 // and returns "", rather than failing the release.
 func dependencyDiff(r *run.Runner, p *Prepared, plan ImagePlan, currentPath string) string {
 	format := p.Config.SBOM.Format
-	curData, err := os.ReadFile(currentPath)
+	curData, err := os.ReadFile(filepath.Clean(currentPath))
 	if err != nil {
 		fmt.Fprintf(progress, "    (dependency diff skipped: %v)\n", err)
 		return ""
@@ -794,35 +933,63 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 		plans[i] = m.plan
 	}
 	rep := plans[0]
+	refs, repos := unionRefsRepos(plans)
+	irs := groupSummaries(o, p, grp)
 
-	// Union of every member's refs and repos (deduped, order-stable).
-	var refs, repos []string
-	seenRef, seenRepo := map[string]bool{}, map[string]bool{}
-	for _, plan := range plans {
-		for _, ref := range plan.Refs {
-			if !seenRef[ref] {
-				seenRef[ref] = true
-				refs = append(refs, ref)
-			}
-		}
-		for _, repo := range plan.Repos {
-			if !seenRepo[repo] {
-				seenRepo[repo] = true
-				repos = append(repos, repo)
-			}
-		}
+	label := rep.Image.ID
+	if len(plans) > 1 {
+		label = fmt.Sprintf("%s (+%d)", rep.Image.ID, len(plans)-1)
 	}
 
+	// Split leg: build the given platform(s) natively, push untagged by
+	// digest, record the digest for the merge run, and stop — every stage
+	// below operates on the tagged manifest list the merge run creates.
+	if len(o.SplitPlatforms) > 0 {
+		return irs, "", buildSplitLeg(o, p, r, grp, label, repos, irs)
+	}
+
+	digest, err := buildOrMerge(o, p, r, rep, label, refs, repos)
+	if err != nil {
+		return irs, "", err
+	}
+	digest = dryRunDigest(digest, o.DryRun)
+	for i := range irs {
+		irs[i].Digest = digest
+	}
+
+	// With --no-push there is no published artifact, so every stage that
+	// operates on the pushed digest is skipped.
+	if o.NoPush {
+		return irs, "", nil
+	}
+	depSection, err := postBuild(o, p, r, rep, repos, digest, irs)
+	return irs, depSection, err
+}
+
+// unionRefsRepos returns the union of every plan's refs and repos (deduped,
+// order-stable).
+func unionRefsRepos(plans []ImagePlan) (refs, repos []string) {
+	for _, plan := range plans {
+		refs = append(refs, plan.Refs...)
+		repos = append(repos, plan.Repos...)
+	}
+	return dedupeStrings(refs), dedupeStrings(repos)
+}
+
+// groupSummaries returns the summary entry for each group member, recording
+// which stages this run will apply to it.
+func groupSummaries(o Options, p *Prepared, grp []imageEval) []summary.Image {
 	split := len(o.SplitPlatforms) > 0
-	irs := make([]summary.Image, len(plans))
-	for i, plan := range plans {
+	irs := make([]summary.Image, len(grp))
+	for i, m := range grp {
+		plan := m.plan
 		irs[i] = summary.Image{
 			ID:           plan.Image.ID,
 			Version:      plan.Version,
 			Refs:         plan.Refs,
 			Repositories: plan.Repos,
 			Pushed:       !o.NoPush && !o.DryRun,
-			Reason:       grp[i].reason,
+			Reason:       m.reason,
 			Signed:       !split && !o.NoPush && !o.SkipSign && p.Config.Sign.Cosign.Enabled,
 			SBOM:         !split && !o.NoPush && !o.SkipSBOM && p.Config.SBOM.Enabled,
 			Provenance:   !o.NoPush && p.Config.Provenance.Enabled,
@@ -833,127 +1000,137 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 			irs[i].Refs = nil
 		}
 	}
+	return irs
+}
 
-	label := rep.Image.ID
-	if len(plans) > 1 {
-		label = fmt.Sprintf("%s (+%d)", rep.Image.ID, len(plans)-1)
+// dryRunDigest stands in for the digest a dry run never learns.
+func dryRunDigest(digest string, dryRun bool) string {
+	if digest == "" && dryRun {
+		return "sha256:<digest-resolved-at-build-time>"
 	}
+	return digest
+}
 
-	// Split leg: build the given platform(s) natively, push untagged by
-	// digest, record the digest for the merge run, and stop — every stage
-	// below operates on the tagged manifest list the merge run creates.
-	if split {
-		fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(o.SplitPlatforms, ","))
-		spec := toSpec(rep, o.Dir, true, false, p.Config.Provenance)
-		spec.Platforms = o.SplitPlatforms
-		spec.PushByDigest = true
-		spec.Refs = repos // untagged: bare repo names
-		digest, err := builder.Build(r, spec)
-		if err != nil {
-			return irs, "", err
-		}
-		if digest == "" && o.DryRun {
-			digest = "sha256:<digest-resolved-at-build-time>"
-		}
-		for i := range irs {
-			irs[i].Digest = digest
-		}
-		if !o.DryRun {
-			if err := writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), o.SplitPlatforms, digest); err != nil {
-				return irs, "", err
-			}
-		}
-		return irs, "", nil
-	}
-
-	var digest string
-	var err error
-	if o.FromDigests {
-		// Merge mode: the split legs already built and pushed per-arch images
-		// by digest; assemble them into one tagged manifest list per repo.
-		fmt.Fprintf(progress, "==> merging %s\n", label)
-		for _, ref := range refs {
-			fmt.Fprintf(progress, "    - %s\n", ref)
-		}
-		digest, err = mergeGroup(r, o, rep, p.Config.Dist, repos, refs)
-	} else {
-		fmt.Fprintf(progress, "==> building %s\n", label)
-		for _, ref := range refs {
-			fmt.Fprintf(progress, "    - %s\n", ref)
-		}
-		spec := toSpec(rep, o.Dir, !o.NoPush, false, p.Config.Provenance)
-		spec.Refs = refs // push the one build to every member's tags
-		digest, err = builder.Build(r, spec)
-	}
+// buildSplitLeg builds the leg's platform(s), pushes them untagged by digest,
+// and records the digest under dist/digests/ for the merge run.
+func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label string, repos []string, irs []summary.Image) error {
+	fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(o.SplitPlatforms, ","))
+	spec := toSpec(grp[0].plan, o.Dir, true, false, p.Config.Provenance)
+	spec.Platforms = o.SplitPlatforms
+	spec.PushByDigest = true
+	spec.Refs = repos // untagged: bare repo names
+	digest, err := builder.Build(r, spec)
 	if err != nil {
-		return irs, "", err
+		return err
 	}
-	if digest == "" && o.DryRun {
-		digest = "sha256:<digest-resolved-at-build-time>"
-	}
+	digest = dryRunDigest(digest, o.DryRun)
 	for i := range irs {
 		irs[i].Digest = digest
 	}
-
-	// With --no-push there is no published artifact, so every stage that
-	// operates on the pushed digest is skipped.
-	if o.NoPush {
-		return irs, "", nil
+	if o.DryRun {
+		return nil
 	}
+	return writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), o.SplitPlatforms, digest)
+}
+
+// buildOrMerge produces the group's tagged artifact and returns its digest:
+// built and pushed to every member's tags, or — in merge mode — assembled
+// from the per-arch digests the split legs already pushed.
+func buildOrMerge(o Options, p *Prepared, r *run.Runner, rep ImagePlan, label string, refs, repos []string) (string, error) {
+	verb := "building"
+	if o.FromDigests {
+		verb = "merging"
+	}
+	fmt.Fprintf(progress, "==> %s %s\n", verb, label)
+	for _, ref := range refs {
+		fmt.Fprintf(progress, "    - %s\n", ref)
+	}
+	if o.FromDigests {
+		// Merge mode: the split legs already built and pushed per-arch images
+		// by digest; assemble them into one tagged manifest list per repo.
+		return mergeGroup(r, o, rep, p.Config.Dist, repos, refs)
+	}
+	spec := toSpec(rep, o.Dir, !o.NoPush, false, p.Config.Provenance)
+	spec.Refs = refs // push the one build to every member's tags
+	return builder.Build(r, spec)
+}
+
+// postBuild runs the stages that operate on the pushed digest, gates first:
+// scan, smoke test, sign, then SBOM. It returns the dependency-diff section,
+// if one was produced.
+func postBuild(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string, irs []summary.Image) (string, error) {
+	ref := digestRef(repos[0], digest)
 
 	// Scan before signing: never sign or ship an image that fails the gate. One
 	// artifact → scan once.
 	if !o.SkipScan && p.Config.Scan.Enabled {
-		scanRef := digestRef(repos[0], digest)
-		res, err := scanner.Scan(r, p.Config.Scan, filepath.Join(o.Dir, p.Config.Dist), rep.Image.ID, scanRef)
-		if err != nil {
-			return irs, "", err
-		}
-		if res != nil && !o.DryRun {
-			for i := range irs {
-				irs[i].Vulns = res.Counts
-			}
-			fmt.Fprintf(progress, "    scan %s (%s): %s\n", rep.Image.ID, res.Scanner, res.Summary())
-			if err := res.GateError(p.Config.Scan.FailOn); err != nil {
-				return irs, "", fmt.Errorf("vulnerability gate failed: %w", err)
-			}
+		if err := scanGate(o, p, r, rep.Image.ID, ref, irs); err != nil {
+			return "", err
 		}
 	}
 
 	// Smoke test the shared artifact once.
 	if !o.SkipTest && p.Config.Test.Enabled {
-		testRef := digestRef(repos[0], digest)
 		fmt.Fprintf(progress, "    smoke test %s: docker run %s\n", rep.Image.ID, strings.Join(p.Config.Test.Cmd, " "))
-		if err := tester.Run(r, p.Config.Test, testRef); err != nil {
-			return irs, "", fmt.Errorf("smoke test gate failed: %w", err)
+		if err := tester.Run(r, p.Config.Test, ref); err != nil {
+			return "", fmt.Errorf("smoke test gate failed: %w", err)
 		}
 	}
 
 	// Sign every member repository by digest.
 	if !o.SkipSign {
 		if err := signer.Sign(r, p.Config.Sign.Cosign, repos, digest); err != nil {
-			return irs, "", err
+			return "", err
 		}
 	}
 
-	depSection := ""
-	if !o.SkipSBOM && p.Config.SBOM.Enabled {
-		ref := digestRef(repos[0], digest)
-		sbomPath, err := sbom.Generate(r, p.Config.SBOM, filepath.Join(o.Dir, p.Config.Dist), rep.Image.ID, ref)
-		if err != nil {
-			return irs, "", err
-		}
-		if p.Config.SBOM.Attest && !o.SkipSign && p.Config.Sign.Cosign.Enabled && sbomPath != "" {
-			pt := sbom.PredicateType(p.Config.SBOM.Format)
-			if err := signer.Attest(r, p.Config.Sign.Cosign, repos, digest, sbomPath, pt); err != nil {
-				return irs, "", err
-			}
-		}
-		if p.Config.Changelog.DependencyDiff && !o.DryRun && sbomPath != "" && p.Git.PreviousTag != "" {
-			depSection = dependencyDiff(r, p, rep, sbomPath)
+	if o.SkipSBOM || !p.Config.SBOM.Enabled {
+		return "", nil
+	}
+	return sbomStage(o, p, r, rep, repos, digest)
+}
+
+// scanGate scans the artifact at ref, records the counts on every member's
+// summary, and fails when the findings breach scan.fail_on.
+func scanGate(o Options, p *Prepared, r *run.Runner, id, ref string, irs []summary.Image) error {
+	res, err := scanner.Scan(r, p.Config.Scan, filepath.Join(o.Dir, p.Config.Dist), id, ref)
+	if err != nil {
+		return err
+	}
+	if res == nil || o.DryRun {
+		return nil
+	}
+	for i := range irs {
+		irs[i].Vulns = res.Counts
+	}
+	fmt.Fprintf(progress, "    scan %s (%s): %s\n", id, res.Scanner, res.Summary())
+	if err := res.GateError(p.Config.Scan.FailOn); err != nil {
+		return fmt.Errorf("vulnerability gate failed: %w", err)
+	}
+	return nil
+}
+
+// sbomStage generates the SBOM, attests it when signing is on, and returns the
+// dependency diff against the previous release when one is configured.
+func sbomStage(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string) (string, error) {
+	ref := digestRef(repos[0], digest)
+	sbomPath, err := sbom.Generate(r, p.Config.SBOM, filepath.Join(o.Dir, p.Config.Dist), rep.Image.ID, ref)
+	if err != nil {
+		return "", err
+	}
+	if sbomPath == "" {
+		return "", nil
+	}
+	if p.Config.SBOM.Attest && !o.SkipSign && p.Config.Sign.Cosign.Enabled {
+		pt := sbom.PredicateType(p.Config.SBOM.Format)
+		if err := signer.Attest(r, p.Config.Sign.Cosign, repos, digest, sbomPath, pt); err != nil {
+			return "", err
 		}
 	}
-	return irs, depSection, nil
+	if p.Config.Changelog.DependencyDiff && !o.DryRun && p.Git.PreviousTag != "" {
+		return dependencyDiff(r, p, rep, sbomPath), nil
+	}
+	return "", nil
 }
 
 // buildKey hashes the parts of an image plan that determine the built artifact,
@@ -1007,11 +1184,11 @@ func Build(o Options) error {
 	}
 	if !o.DryRun {
 		// Local builds only need the build toolchain, never cosign/syft.
-		if err := checkTools(p.Config, preflight.Opts{}); err != nil {
+		if err := checkTools(o.context(), p.Config, preflight.Opts{}); err != nil {
 			return err
 		}
 	}
-	r := run.New(o.DryRun, o.Verbose)
+	r := run.New(o.context(), o.DryRun, o.Verbose)
 	for _, plan := range p.Plans {
 		// A local --load build cannot handle a manifest list, so pick one platform.
 		spec := toSpec(plan, o.Dir, false, true, config.Provenance{})
@@ -1054,7 +1231,7 @@ func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance)
 // crane/command hooks are read-only queries, so they run even in dry-run mode to
 // give `check` and dry-runs an accurate preview.
 func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, error) {
-	r := run.New(o.DryRun, o.Verbose)
+	r := run.New(o.context(), o.DryRun, o.Verbose)
 
 	// Anchor the release-level version on the first *selected* image so a
 	// matrix job (`release --only ...`) never queries a repository outside its
@@ -1116,16 +1293,22 @@ func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, er
 // version can't be resolved (e.g. offline or unauthenticated).
 const unresolvedVersion = "0.0.0-unresolved"
 
+// The versioning strategies that list a repository's tags.
+const (
+	strategyRegistry = "registry"
+	strategyECR      = "ecr"
+)
+
 // isRegistryStrategy reports whether the strategy derives the version by listing
 // a repository's tags.
 func isRegistryStrategy(s string) bool {
-	return s == "registry" || s == "ecr"
+	return s == strategyRegistry || s == strategyECR
 }
 
 // tagLister returns the tag-listing function for the configured strategy: crane
 // for "registry", the aws CLI for "ecr".
 func tagLister(cfg *config.Config, r *run.Runner) func(string) ([]string, error) {
-	if cfg.Versioning.Strategy == "ecr" {
+	if cfg.Versioning.Strategy == strategyECR {
 		region := cfg.Versioning.Region
 		return func(repoURI string) ([]string, error) {
 			name, reg := parseECRRepo(repoURI)
@@ -1184,8 +1367,8 @@ func splitLines(s string) []string {
 
 // checkTools verifies the external tools this run needs are on PATH, failing
 // early with install hints rather than partway through the pipeline.
-func checkTools(cfg *config.Config, o preflight.Opts) error {
-	return preflight.Verify(preflight.Check(preflight.Requirements(cfg, o)))
+func checkTools(ctx context.Context, cfg *config.Config, o preflight.Opts) error {
+	return preflight.Verify(preflight.Check(ctx, preflight.Requirements(cfg, o)))
 }
 
 func guardReleasable(gi *gitinfo.Info, strategy string) error {

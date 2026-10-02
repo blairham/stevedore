@@ -78,43 +78,13 @@ func Compute(dir string, img config.Image, distDir string, scopedPaths []string)
 // hashMatching folds every file under root whose repo-relative path matches one
 // of patterns into h, in deterministic order.
 func hashMatching(h io.Writer, root string, patterns []string, distDir string) error {
-	var files []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			if abs, _ := filepath.Abs(path); abs == distDir {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
-		}
-		if changed.Match(patterns, filepath.ToSlash(rel)) {
-			files = append(files, path)
-		}
-		return nil
+	rels, err := walkFiles(root, distDir, func(rel string) bool {
+		return changed.Match(patterns, filepath.ToSlash(rel))
 	})
 	if err != nil {
 		return err
 	}
-	sort.Strings(files)
-	for _, f := range files {
-		rel, _ := filepath.Rel(root, f)
-		if err := hashFile(h, "path:"+filepath.ToSlash(rel), f); err != nil {
-			return err
-		}
-	}
-	return nil
+	return hashFiles(h, "path:", root, rels)
 }
 
 // hashTree folds every file under root (except skipped dirs and the dist dir)
@@ -127,9 +97,19 @@ func hashTree(h io.Writer, root, distDir string) error {
 	if !info.IsDir() {
 		return hashFile(h, "ctx:"+filepath.Base(root), root)
 	}
+	rels, err := walkFiles(root, distDir, func(string) bool { return true })
+	if err != nil {
+		return err
+	}
+	return hashFiles(h, "ctx:", root, rels)
+}
 
-	var files []string
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+// walkFiles returns the root-relative paths of the files under root that keep
+// accepts, sorted. Skipped dirs and the dist dir (when it lives under root) are
+// not descended into, and symlinks are not followed.
+func walkFiles(root, distDir string, keep func(rel string) bool) ([]string, error) {
+	var rels []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -137,25 +117,31 @@ func hashTree(h io.Writer, root, distDir string) error {
 			if skipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
-			// Skip the dist dir when it lives inside the context.
-			if abs, _ := filepath.Abs(path); abs == distDir {
+			if abs, absErr := filepath.Abs(path); absErr == nil && abs == distDir {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if d.Type()&os.ModeSymlink != 0 {
-			return nil // don't follow symlinks
+			return nil
 		}
-		files = append(files, path)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if keep(rel) {
+			rels = append(rels, rel)
+		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		rel, _ := filepath.Rel(root, f)
-		if err := hashFile(h, "ctx:"+filepath.ToSlash(rel), f); err != nil {
+	sort.Strings(rels)
+	return rels, err
+}
+
+// hashFiles hashes each root-relative file under label+its slash path.
+func hashFiles(h io.Writer, label, root string, rels []string) error {
+	for _, rel := range rels {
+		if err := hashFile(h, label+filepath.ToSlash(rel), filepath.Join(root, rel)); err != nil {
 			return err
 		}
 	}
@@ -166,7 +152,7 @@ func hashTree(h io.Writer, root, distDir string) error {
 // recorded as absent rather than erroring, so an optional Dockerfile path is
 // tolerated.
 func hashFile(h io.Writer, label, path string) error {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Fprintf(h, "%s=<absent>\n", label)
@@ -196,7 +182,7 @@ type State map[string]string
 // Load reads the fingerprint state from path, returning an empty state when the
 // file does not exist.
 func Load(path string) (State, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return State{}, nil
@@ -219,5 +205,5 @@ func (s State) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644)
+	return os.WriteFile(path, append(data, '\n'), 0o644) //nolint:gosec // G306: it lives in dist/, read by non-owners (see pipeline.mkdirDist)
 }

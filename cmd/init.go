@@ -41,18 +41,20 @@ func newInitCmd() *cobra.Command {
 			"--map-build-arg (e.g. --map-build-arg BUILD_PROJECT=build.project).\n\n" +
 			"Signing, SBOM, scan, and provenance are enabled by default — review before\n" +
 			"running `stevedore release`.",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(c *cobra.Command, _ []string) error {
 			path := filepath.Join(flagDir, ".stevedore.yaml")
 			if _, err := os.Stat(path); err == nil && !force {
 				return fmt.Errorf("%s already exists (use --force to overwrite)", path)
 			}
 			name := filepath.Base(mustAbs(flagDir))
 
-			content, summary, err := scaffoldContent(from, file, name, mapFields, mapBuildArgs)
+			content, summary, err := scaffoldContent(run.New(c.Context(), false, flagVerbose), from, file, name, mapFields, mapBuildArgs)
 			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			// The config is committed to the repository, so it gets the mode git
+			// would check it out with.
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // G306: see above
 				return err
 			}
 			fmt.Printf("wrote %s — %s\n", path, summary)
@@ -68,7 +70,7 @@ func newInitCmd() *cobra.Command {
 	return cmd
 }
 
-func scaffoldContent(from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
+func scaffoldContent(r *run.Runner, from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
 	switch from {
 	case "", "dockerfiles":
 		imgs, err := scaffold.ScanDockerfiles(flagDir, name)
@@ -84,7 +86,7 @@ func scaffoldContent(from, file, name string, mapFields, mapBuildArgs []string) 
 		if file == "" {
 			file = firstExisting(".goreleaser.yaml", ".goreleaser.yml")
 		}
-		data, err := os.ReadFile(filepath.Join(flagDir, file))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(flagDir, file)))
 		if err != nil {
 			return "", "", fmt.Errorf("read goreleaser config: %w", err)
 		}
@@ -95,7 +97,7 @@ func scaffoldContent(from, file, name string, mapFields, mapBuildArgs []string) 
 		return importer.RenderYAML(name, "goreleaser ("+file+")", imgs), fmt.Sprintf("imported %d image(s) from %s", len(imgs), file), nil
 
 	case "bake":
-		imgs, err := bakeImages(file)
+		imgs, err := bakeImages(r, file)
 		if err != nil {
 			return "", "", err
 		}
@@ -130,22 +132,18 @@ func serviceMapping(mapFields, mapBuildArgs []string) (importer.ServiceMapping, 
 		if !ok || field == "" || key == "" {
 			return m, fmt.Errorf("--map %q: want field=manifest_key", kv)
 		}
-		switch field {
-		case "id":
-			m.ID = key
-		case "repositories":
-			m.Repositories = key
-		case "dockerfile":
-			m.Dockerfile = key
-		case "context":
-			m.Context = key
-		case "target":
-			m.Target = key
-		case "paths":
-			m.Paths = key
-		default:
+		dst, known := map[string]*string{
+			"id":           &m.ID,
+			"repositories": &m.Repositories,
+			"dockerfile":   &m.Dockerfile,
+			"context":      &m.Context,
+			"target":       &m.Target,
+			"paths":        &m.Paths,
+		}[field]
+		if !known {
 			return m, fmt.Errorf("--map: unknown field %q (want id, repositories, dockerfile, context, target, or paths)", field)
 		}
+		*dst = key
 	}
 	if len(mapBuildArgs) > 0 {
 		m.BuildArgs = map[string]string{}
@@ -162,8 +160,7 @@ func serviceMapping(mapFields, mapBuildArgs []string) (importer.ServiceMapping, 
 
 // bakeImages resolves a bake target set via `docker buildx bake --print` and
 // imports the resulting targets.
-func bakeImages(file string) ([]importer.Image, error) {
-	r := run.New(false, flagVerbose)
+func bakeImages(r *run.Runner, file string) ([]importer.Image, error) {
 	args := []string{"buildx", "bake", "--print"}
 	if file != "" {
 		args = append(args, "--file", file)

@@ -5,15 +5,14 @@ package publish
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/run"
@@ -49,6 +48,9 @@ func Notify(r *run.Runner, cfg config.NotifyWebhook, notes []Notification) error
 	if url == "" {
 		return fmt.Errorf("notify.webhook.enabled but %s is empty", cfg.URLEnv)
 	}
+	if err := checkWebhookURL(cfg.URLEnv, url); err != nil {
+		return fmt.Errorf("notify.webhook: %w", err)
+	}
 	bearer := ""
 	if cfg.BearerEnv != "" {
 		if bearer = os.Getenv(cfg.BearerEnv); bearer == "" {
@@ -74,15 +76,15 @@ func Notify(r *run.Runner, cfg config.NotifyWebhook, notes []Notification) error
 		if r.DryRun {
 			continue
 		}
-		if err := postNotification(url, payload, bearer, hmacKey); err != nil {
+		if err := postNotification(r.Context(), url, payload, bearer, hmacKey); err != nil {
 			return fmt.Errorf("notify %s: %w", n.Image, err)
 		}
 	}
 	return nil
 }
 
-func postNotification(url string, payload []byte, bearer string, hmacKey []byte) error {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+func postNotification(ctx context.Context, url string, payload []byte, bearer string, hmacKey []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload)) //nolint:gosec // G704: the operator's own webhook, checked by checkWebhookURL
 	if err != nil {
 		return err
 	}
@@ -95,15 +97,5 @@ func postNotification(url string, payload []byte, bearer string, hmacKey []byte)
 		mac.Write(payload)
 		req.Header.Set(SignatureHeader, "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("webhook returned %s: %s", resp.Status, string(body))
-	}
-	return nil
+	return send(req)
 }

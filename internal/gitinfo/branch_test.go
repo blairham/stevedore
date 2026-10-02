@@ -27,15 +27,17 @@ func newRepo(t *testing.T, dir string, args ...string) *gitRepo {
 	return r
 }
 
-func (r *gitRepo) git(args ...string) string {
+// git runs one git command against the fixture. The user's global and system
+// config are kept out: a `tag.gpgSign = true` there turns `git tag v1.0.0`
+// into a signed tag that needs a message, and the fixture fails to build.
+func (r *gitRepo) git(args ...string) {
 	r.t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(r.t.Context(), "git", args...)
 	cmd.Dir = r.dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
 		r.t.Fatalf("git %v: %v: %s", args, err, out)
 	}
-	return string(out)
 }
 
 func (r *gitRepo) commit(name string) {
@@ -83,7 +85,7 @@ func TestOnBranchDetachedHEAD(t *testing.T) {
 	ci := &gitRepo{t: t, dir: clone}
 	ci.git("checkout", "-q", "v1.0.0") // what a tag-triggered workflow does
 
-	info, err := Gather(clone)
+	info, err := Gather(t.Context(), clone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +114,7 @@ func TestOnBranchAttached(t *testing.T) {
 	r := newRepo(t, dir, "-b", "main")
 	r.commit("a")
 
-	info, err := Gather(dir)
+	info, err := Gather(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +129,7 @@ func TestOnBranchAttached(t *testing.T) {
 	// on an attached HEAD git's answer is the user's intent, and reachability
 	// must not override it into moving a floating tag.
 	r.git("checkout", "-q", "-b", "side")
-	side, err := Gather(dir)
+	side, err := Gather(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func TestOnBranchShallowClone(t *testing.T) {
 	if err != nil {
 		t.Skipf("shallow clone unsupported here: %v: %s", err, out)
 	}
-	info, err := Gather(clone)
+	info, err := Gather(t.Context(), clone)
 	if err != nil {
 		t.Fatal(err)
 	}

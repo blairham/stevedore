@@ -63,13 +63,13 @@ func FromServicesDir(dir string, m ServiceMapping) ([]Image, error) {
 	sort.Strings(names)
 	var imgs []Image
 	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, name)))
 		if err != nil {
 			return nil, err
 		}
 		var doc map[string]any
-		if err := yaml.Unmarshal(data, &doc); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", name, err)
+		if perr := yaml.Unmarshal(data, &doc); perr != nil {
+			return nil, fmt.Errorf("parse %s: %w", name, perr)
 		}
 		fallbackID := strings.TrimSuffix(name, filepath.Ext(name))
 		img, err := serviceImage(doc, m, fallbackID)

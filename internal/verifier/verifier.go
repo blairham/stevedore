@@ -83,7 +83,7 @@ func authArgs(o Options) []string {
 
 func runCheck(r *run.Runner, name, exe string, args []string) Check {
 	if r.DryRun {
-		_ = r.Run(exe, args...)
+		r.Preview(exe, args...)
 		return Check{Name: name, OK: true, Detail: "dry-run"}
 	}
 	out, err := r.Capture(exe, args...)
@@ -98,7 +98,7 @@ func runCheck(r *run.Runner, name, exe string, args []string) Check {
 func provenanceCheck(r *run.Runner, ref string) Check {
 	const name = "provenance"
 	if r.DryRun {
-		_ = r.Run("docker", "buildx", "imagetools", "inspect", "--format", "{{ json .Provenance }}", ref)
+		r.Preview("docker", "buildx", "imagetools", "inspect", "--format", "{{ json .Provenance }}", ref)
 		return Check{Name: name, OK: true, Detail: "dry-run"}
 	}
 	out, err := r.Capture("docker", "buildx", "imagetools", "inspect", "--format", "{{ json .Provenance }}", ref)

@@ -6,8 +6,10 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -326,7 +328,7 @@ type Changelog struct {
 
 // Load reads and parses the config at path, applying defaults.
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
@@ -340,83 +342,68 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
+// ErrNoConfig is returned by Discover when dir holds none of DefaultFilenames.
+var ErrNoConfig = errors.New("no stevedore config found")
+
 // Discover finds the first existing default config file in dir.
 func Discover(dir string) (string, error) {
 	for _, name := range DefaultFilenames {
-		p := dir + string(os.PathSeparator) + name
+		p := filepath.Join(dir, name)
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("no stevedore config found (looked for %v)", DefaultFilenames)
+	return "", fmt.Errorf("%w (looked for %v)", ErrNoConfig, DefaultFilenames)
 }
 
 func (c *Config) applyDefaults() {
 	if c.Version == 0 {
 		c.Version = 1
 	}
-	if c.DefaultBranch == "" {
-		c.DefaultBranch = "main"
+	orDefault(&c.DefaultBranch, "main")
+	orDefault(&c.Dist, "dist")
+	orDefault(&c.SBOM.Generator, "syft")
+	orDefault(&c.SBOM.Format, "spdx-json")
+	orDefault(&c.Changelog.Sort, "asc")
+	if c.Provenance.Enabled {
+		orDefault(&c.Provenance.Mode, "max")
 	}
-	if c.Dist == "" {
-		c.Dist = "dist"
+	if c.ChangeDetection.MarkerRefs {
+		orDefault(&c.ChangeDetection.MarkerPrefix, "refs/releases/image/")
 	}
-	if c.SBOM.Generator == "" {
-		c.SBOM.Generator = "syft"
-	}
-	if c.SBOM.Format == "" {
-		c.SBOM.Format = "spdx-json"
-	}
-	if c.Changelog.Sort == "" {
-		c.Changelog.Sort = "asc"
-	}
-	if c.Provenance.Enabled && c.Provenance.Mode == "" {
-		c.Provenance.Mode = "max"
-	}
-	if c.ChangeDetection.MarkerRefs && c.ChangeDetection.MarkerPrefix == "" {
-		c.ChangeDetection.MarkerPrefix = "refs/releases/image/"
-	}
-	if c.Versioning.Strategy == "" {
-		c.Versioning.Strategy = "git"
-	}
-	if c.Versioning.Bump == "" {
-		c.Versioning.Bump = "patch"
-	}
-	if c.Versioning.Lister == "" {
-		c.Versioning.Lister = "crane"
-	}
-	if c.Versioning.Initial == "" {
-		c.Versioning.Initial = "0.1.0"
-	}
+	orDefault(&c.Versioning.Strategy, "git")
+	orDefault(&c.Versioning.Bump, "patch")
+	orDefault(&c.Versioning.Lister, "crane")
+	orDefault(&c.Versioning.Initial, "0.1.0")
 	if c.Scan.Enabled {
-		if c.Scan.Scanner == "" {
-			c.Scan.Scanner = "grype"
-		}
-		if c.Scan.FailOn == "" {
-			// Secure-by-default: block on criticals unless told otherwise.
-			c.Scan.FailOn = "critical"
-		}
+		orDefault(&c.Scan.Scanner, "grype")
+		// Secure-by-default: block on criticals unless told otherwise.
+		orDefault(&c.Scan.FailOn, "critical")
 	}
 	for i := range c.Images {
-		img := &c.Images[i]
-		if img.ID == "" {
-			img.ID = c.ProjectName
-			if img.ID == "" {
-				img.ID = fmt.Sprintf("image%d", i)
-			}
-		}
-		if img.Dockerfile == "" {
-			img.Dockerfile = "Dockerfile"
-		}
-		if img.Context == "" {
-			img.Context = "."
-		}
-		if len(img.Platforms) == 0 {
-			img.Platforms = []string{"linux/amd64"}
-		}
-		if len(img.Tags) == 0 {
-			img.Tags = []string{"{{ .Version }}"}
-		}
+		c.Images[i].applyDefaults(i, c.ProjectName)
+	}
+}
+
+// applyDefaults fills an image's unset fields. The i-th image with no id takes
+// the project name, or "image<i>" when there is none.
+func (img *Image) applyDefaults(i int, projectName string) {
+	orDefault(&img.ID, projectName)
+	orDefault(&img.ID, fmt.Sprintf("image%d", i))
+	orDefault(&img.Dockerfile, "Dockerfile")
+	orDefault(&img.Context, ".")
+	if len(img.Platforms) == 0 {
+		img.Platforms = []string{"linux/amd64"}
+	}
+	if len(img.Tags) == 0 {
+		img.Tags = []string{"{{ .Version }}"}
+	}
+}
+
+// orDefault sets *field to value when it is empty.
+func orDefault(field *string, value string) {
+	if *field == "" {
+		*field = value
 	}
 }
 
@@ -425,6 +412,32 @@ func (c *Config) Validate() error {
 	if c.Version != 1 {
 		return fmt.Errorf("unsupported config version %d (want 1)", c.Version)
 	}
+	if err := c.validateImages(); err != nil {
+		return err
+	}
+	if c.Sign.Cosign.Key != "" {
+		if _, err := os.Stat(c.Sign.Cosign.Key); err != nil {
+			return fmt.Errorf("sign.cosign.key %q not readable: %w", c.Sign.Cosign.Key, err)
+		}
+	}
+	if err := c.Scan.validate(); err != nil {
+		return err
+	}
+	if err := c.Provenance.validate(); err != nil {
+		return err
+	}
+	if c.Notify.Webhook.Enabled && c.Notify.Webhook.URLEnv == "" {
+		return fmt.Errorf("notify.webhook.enabled requires notify.webhook.url_env")
+	}
+	if c.Test.Enabled && c.Test.Timeout != "" {
+		if _, err := time.ParseDuration(c.Test.Timeout); err != nil {
+			return fmt.Errorf("test.timeout %q invalid: %w", c.Test.Timeout, err)
+		}
+	}
+	return c.Versioning.validate()
+}
+
+func (c *Config) validateImages() error {
 	if len(c.Images) == 0 {
 		return fmt.Errorf("no images defined")
 	}
@@ -446,37 +459,34 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
-	if c.Sign.Cosign.Key != "" {
-		if _, err := os.Stat(c.Sign.Cosign.Key); err != nil {
-			return fmt.Errorf("sign.cosign.key %q not readable: %w", c.Sign.Cosign.Key, err)
-		}
+	return nil
+}
+
+func (s Scan) validate() error {
+	if !s.Enabled {
+		return nil
 	}
-	if c.Scan.Enabled {
-		switch c.Scan.Scanner {
-		case "grype", "trivy":
-		default:
-			return fmt.Errorf("scan.scanner %q unsupported (want grype or trivy)", c.Scan.Scanner)
-		}
-		if !ValidSeverity(c.Scan.FailOn) {
-			return fmt.Errorf("scan.fail_on %q invalid (want one of: %s)", c.Scan.FailOn, strings.Join(Severities, ", "))
-		}
+	switch s.Scanner {
+	case "grype", "trivy":
+	default:
+		return fmt.Errorf("scan.scanner %q unsupported (want grype or trivy)", s.Scanner)
 	}
-	if c.Provenance.Enabled {
-		switch c.Provenance.Mode {
-		case "", "min", "max":
-		default:
-			return fmt.Errorf("provenance.mode %q invalid (want min or max)", c.Provenance.Mode)
-		}
+	if !ValidSeverity(s.FailOn) {
+		return fmt.Errorf("scan.fail_on %q invalid (want one of: %s)", s.FailOn, strings.Join(Severities, ", "))
 	}
-	if c.Notify.Webhook.Enabled && c.Notify.Webhook.URLEnv == "" {
-		return fmt.Errorf("notify.webhook.enabled requires notify.webhook.url_env")
+	return nil
+}
+
+func (p Provenance) validate() error {
+	if !p.Enabled {
+		return nil
 	}
-	if c.Test.Enabled && c.Test.Timeout != "" {
-		if _, err := time.ParseDuration(c.Test.Timeout); err != nil {
-			return fmt.Errorf("test.timeout %q invalid: %w", c.Test.Timeout, err)
-		}
+	switch p.Mode {
+	case "", "min", "max":
+		return nil
+	default:
+		return fmt.Errorf("provenance.mode %q invalid (want min or max)", p.Mode)
 	}
-	return c.Versioning.validate()
 }
 
 // validate checks the versioning strategy and its required fields.

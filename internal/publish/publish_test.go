@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/blairham/stevedore/internal/config"
@@ -90,5 +91,37 @@ func TestGitHubReleaseNeedsTag(t *testing.T) {
 func TestGitHubReleaseDisabledIsNoop(t *testing.T) {
 	if err := GitHubRelease(&run.Runner{}, config.GitHubRelease{}, "", "", "", nil); err != nil {
 		t.Errorf("disabled github release should be a no-op, got %v", err)
+	}
+}
+
+func TestAnnounceRejectsNonHTTPWebhook(t *testing.T) {
+	for _, hook := range []string{
+		"hooks.slack.com/services/T00/B00/XXXXSECRET",       // no scheme, so no host
+		"ftp://hooks.slack.com/services/T00/B00/XXXXSECRET", // a host, wrong scheme
+		"https:///services/T00/B00/XXXXSECRET",              // right scheme, no host
+	} {
+		t.Setenv("TEST_SLACK_HOOK", hook)
+		cfg := config.Announce{Slack: config.Webhook{Enabled: true, WebhookEnv: "TEST_SLACK_HOOK"}}
+		err := Announce(&run.Runner{}, cfg, Message{Body: "x"})
+		if err == nil || !strings.Contains(err.Error(), "not an absolute http(s) URL") {
+			t.Errorf("%q should be rejected before any request, got %v", hook, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("error leaks the webhook URL: %v", err)
+		}
+	}
+}
+
+func TestWebhookTransportErrorIsRedacted(t *testing.T) {
+	// Port 1 on localhost refuses the connection, so client.Do fails.
+	t.Setenv("TEST_SLACK_HOOK", "http://127.0.0.1:1/services/T00/B00/XXXXSECRET")
+	cfg := config.Announce{Slack: config.Webhook{Enabled: true, WebhookEnv: "TEST_SLACK_HOOK"}}
+	err := Announce(&run.Runner{}, cfg, Message{Body: "x"})
+	if err == nil {
+		t.Fatal("a refused connection should fail the announce")
+	}
+	if strings.Contains(err.Error(), "SECRET") {
+		t.Errorf("error leaks the webhook URL: %v", err)
 	}
 }

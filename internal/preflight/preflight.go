@@ -8,6 +8,7 @@
 package preflight
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -52,23 +53,33 @@ type Result struct {
 	Version string
 }
 
+// Tool names that serve as a label, an executable and a config value, and the
+// two shapes a version probe takes.
+const (
+	docker            = "docker"
+	crane             = "crane"
+	trivy             = "trivy"
+	subcommandVersion = "version"
+	flagVersion       = "--version"
+)
+
 // Requirements computes the tool list for cfg under the given options. docker
 // and git are always required; cosign and syft are required only when their
 // features are both enabled in config and requested for this run.
 func Requirements(cfg *config.Config, o Opts) []Requirement {
 	reqs := []Requirement{
 		{
-			Label:    "docker",
-			Exe:      "docker",
-			Probe:    []string{"version", "--format", "{{.Client.Version}}"},
+			Label:    docker,
+			Exe:      docker,
+			Probe:    []string{subcommandVersion, "--format", "{{.Client.Version}}"},
 			Reason:   "build and push images",
 			Install:  "https://docs.docker.com/get-docker/",
 			Required: true,
 		},
 		{
 			Label:    "docker buildx",
-			Exe:      "docker",
-			Probe:    []string{"buildx", "version"},
+			Exe:      docker,
+			Probe:    []string{"buildx", subcommandVersion},
 			Reason:   "multi-arch builds via BuildKit",
 			Install:  "https://github.com/docker/buildx#installing",
 			Required: true,
@@ -76,7 +87,7 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 		{
 			Label:    "git",
 			Exe:      "git",
-			Probe:    []string{"--version"},
+			Probe:    []string{flagVersion},
 			Reason:   "derive version, tags, and changelog",
 			Install:  "https://git-scm.com/downloads",
 			Required: true,
@@ -84,7 +95,7 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 		{
 			Label:    "cosign",
 			Exe:      "cosign",
-			Probe:    []string{"version"},
+			Probe:    []string{subcommandVersion},
 			Reason:   "sign images and attach SBOM attestations",
 			Install:  "brew install cosign  •  https://docs.sigstore.dev/cosign/system_config/installation/",
 			Required: o.Sign && cfg.Sign.Cosign.Enabled,
@@ -92,7 +103,7 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 		{
 			Label:    "syft",
 			Exe:      "syft",
-			Probe:    []string{"version"},
+			Probe:    []string{subcommandVersion},
 			Reason:   "generate SBOMs",
 			Install:  "brew install syft  •  https://github.com/anchore/syft#installation",
 			Required: o.SBOM && cfg.SBOM.Enabled,
@@ -105,17 +116,17 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 		reqs = append(reqs, Requirement{
 			Label:    "gh",
 			Exe:      "gh",
-			Probe:    []string{"--version"},
+			Probe:    []string{flagVersion},
 			Reason:   "create GitHub releases",
 			Install:  "brew install gh  •  https://github.com/cli/cli#installation",
 			Required: o.GitHubRelease,
 		})
 	}
-	if cfg.Versioning.Strategy == "registry" && cfg.Versioning.Lister == "crane" {
+	if cfg.Versioning.Strategy == "registry" && cfg.Versioning.Lister == crane {
 		reqs = append(reqs, Requirement{
-			Label:    "crane",
-			Exe:      "crane",
-			Probe:    []string{"version"},
+			Label:    crane,
+			Exe:      crane,
+			Probe:    []string{subcommandVersion},
 			Reason:   "list registry tags to derive the next version",
 			Install:  "brew install crane  •  https://github.com/google/go-containerregistry/tree/main/cmd/crane#installation",
 			Required: true,
@@ -125,7 +136,7 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 		reqs = append(reqs, Requirement{
 			Label:    "aws",
 			Exe:      "aws",
-			Probe:    []string{"--version"},
+			Probe:    []string{flagVersion},
 			Reason:   "list ECR tags to derive the next version",
 			Install:  "brew install awscli  •  https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
 			Required: true,
@@ -137,11 +148,11 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 // scannerRequirement returns the requirement for the configured vulnerability
 // scanner.
 func scannerRequirement(scanner string, needed bool) Requirement {
-	if scanner == "trivy" {
+	if scanner == trivy {
 		return Requirement{
-			Label:    "trivy",
-			Exe:      "trivy",
-			Probe:    []string{"--version"},
+			Label:    trivy,
+			Exe:      trivy,
+			Probe:    []string{flagVersion},
 			Reason:   "scan images for vulnerabilities",
 			Install:  "brew install trivy  •  https://aquasecurity.github.io/trivy/latest/getting-started/installation/",
 			Required: needed,
@@ -150,7 +161,7 @@ func scannerRequirement(scanner string, needed bool) Requirement {
 	return Requirement{
 		Label:    "grype",
 		Exe:      "grype",
-		Probe:    []string{"version"},
+		Probe:    []string{subcommandVersion},
 		Reason:   "scan images for vulnerabilities",
 		Install:  "brew install grype  •  https://github.com/anchore/grype#installation",
 		Required: needed,
@@ -158,14 +169,14 @@ func scannerRequirement(scanner string, needed bool) Requirement {
 }
 
 // Check probes each requirement on PATH and records its version.
-func Check(reqs []Requirement) []Result {
+func Check(ctx context.Context, reqs []Requirement) []Result {
 	results := make([]Result, 0, len(reqs))
 	for _, r := range reqs {
 		res := Result{Requirement: r}
 		if path, err := exec.LookPath(r.Exe); err == nil {
 			res.Found = true
 			res.Path = path
-			res.Version = probeVersion(r.Exe, r.Probe)
+			res.Version = probeVersion(ctx, r.Exe, r.Probe)
 		}
 		results = append(results, res)
 	}
@@ -196,8 +207,8 @@ func Verify(results []Result) error {
 // probeVersion runs the tool's version probe and returns a concise version
 // string, or "" if the probe fails. Multi-line output (e.g. grype's) is reduced
 // to the first line that actually carries a version number.
-func probeVersion(exe string, args []string) string {
-	out, err := exec.Command(exe, args...).Output()
+func probeVersion(ctx context.Context, exe string, args []string) string {
+	out, err := exec.CommandContext(ctx, exe, args...).Output()
 	if err != nil {
 		return ""
 	}
