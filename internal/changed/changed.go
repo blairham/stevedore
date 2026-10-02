@@ -4,6 +4,7 @@
 package changed
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -54,9 +55,28 @@ func FetchMarkers(dir, prefix string) {
 	_ = cmd.Run()
 }
 
+// ErrMarkerAhead means origin's marker already points at a descendant of HEAD,
+// i.e. a newer commit has been released (typically a re-run of an older
+// release). The marker is left alone; this is not a failure.
+var ErrMarkerAhead = errors.New("origin marker is already ahead of HEAD")
+
+// ErrMarkerDiverged means origin's marker points at a commit that is neither an
+// ancestor nor a descendant of HEAD, e.g. one released from a branch that was
+// never merged. Advancing it would discard that history, so it needs a human,
+// and change detection keeps diffing from the stray commit until then.
+var ErrMarkerDiverged = errors.New("origin marker has diverged from HEAD")
+
 // AdvanceMarker points ref at HEAD and, when an origin remote exists, pushes it
-// so the baseline persists across CI runs.
+// so the baseline persists across CI runs. The push only ever fast-forwards:
+// origin's current marker is fetched and compared with HEAD first, so a marker
+// that is ahead returns ErrMarkerAhead and one that has diverged returns
+// ErrMarkerDiverged, both without touching origin.
 func AdvanceMarker(dir, ref string) error {
+	if hasOrigin(dir) {
+		if err := checkFastForward(dir, ref); err != nil {
+			return err
+		}
+	}
 	up := exec.Command("git", "update-ref", ref, "HEAD")
 	up.Dir = dir
 	if out, err := up.CombinedOutput(); err != nil {
@@ -71,6 +91,81 @@ func AdvanceMarker(dir, ref string) error {
 		return fmt.Errorf("push %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// checkFastForward returns nil when origin has no ref or HEAD descends from
+// it. A CI checkout fetches only heads and tags, so origin's marker object is
+// fetched here first; without it git rejects the push as `(fetch first)`
+// whatever the ancestry.
+func checkFastForward(dir, ref string) error {
+	ls := exec.Command("git", "ls-remote", "origin", ref)
+	ls.Dir = dir
+	out, err := ls.Output()
+	if err != nil {
+		return fmt.Errorf("ls-remote %s: %w", ref, err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return nil
+	}
+	remote := fields[0]
+	fetch := exec.Command("git", "fetch", "--quiet", "origin", ref)
+	fetch.Dir = dir
+	if out, err := fetch.CombinedOutput(); err != nil {
+		return fmt.Errorf("fetch %s: %v: %s", ref, err, strings.TrimSpace(string(out)))
+	}
+	head, err := revParse(dir, "HEAD")
+	if err != nil {
+		return err
+	}
+	if remote == head {
+		return nil
+	}
+	if ok, err := isAncestor(dir, remote, head); err != nil || ok {
+		return err
+	}
+	behind, err := isAncestor(dir, head, remote)
+	if err != nil {
+		return err
+	}
+	if behind {
+		return fmt.Errorf("%s at %s: %w", ref, short(remote), ErrMarkerAhead)
+	}
+	return fmt.Errorf("%s at %s, HEAD %s: %w", ref, short(remote), short(head), ErrMarkerDiverged)
+}
+
+func revParse(dir, rev string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--verify", rev+"^{commit}")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("rev-parse %s: %w", rev, err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// isAncestor reports whether a is an ancestor of b. git exits 1 for "no" and
+// anything else for a real failure (a missing object in a shallow clone, say),
+// which is returned rather than read as "no".
+func isAncestor(dir, a, b string) (bool, error) {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", a, b)
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("merge-base --is-ancestor %s %s: %w", short(a), short(b), err)
+}
+
+func short(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
 }
 
 func hasOrigin(dir string) bool {

@@ -16,6 +16,19 @@ last release — even across independent releases and fresh checkouts. After a
 successful push, stevedore advances `refs/releases/image/<id>` to `HEAD` and pushes
 it, so the baseline lives in git (no state file to persist).
 
+The marker only ever fast-forwards. stevedore fetches origin's marker and compares it
+with `HEAD` first:
+
+- **Behind `HEAD`:** advanced.
+- **Ahead of `HEAD`:** left alone, since a newer commit was already released (an older
+  release re-run).
+- **Diverged:** for example, released from a branch that was never merged. The release
+  **fails**, after the images are pushed and notifications have fired. Until the marker
+  is reset, every image diffs from that stray commit and rebuilds on every release, so
+  this needs a human. Reset it to the last commit actually released with a lease, e.g.
+  `git push --force-with-lease=refs/releases/image/<id>:<stray> origin <sha>:refs/releases/image/<id>`.
+  To prevent it, only release from your default branch.
+
 ```sh
 stevedore release --changed-since origin/main
 # ==> building api
