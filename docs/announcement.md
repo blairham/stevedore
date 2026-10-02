@@ -114,10 +114,8 @@ in the first hour costs the whole launch.
       install hints rather than a stack trace — measured with an empty PATH
 - [x] The Action is listed on the GitHub Marketplace — as "Stevedore Release"
       (a GitHub user owns the bare name), https://github.com/marketplace/actions/stevedore-release
-- [ ] Issue templates render, and Discussions is enabled and has a first post
-      — both forms pass GitHub's form rules (labels exist, field types valid);
-      Discussions is still off, which also breaks the template chooser's
-      "Question or idea" link
+- [x] Issue templates render — both forms pass GitHub's form rules (labels
+      exist, field types valid). No Discussions: questions are blank issues
 - [x] The repo has topics, a description and a social preview image — the
       preview is `assets/social-preview.png` (1280×640)
 
