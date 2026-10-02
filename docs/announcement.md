@@ -100,9 +100,8 @@ Nothing gets posted until every one of these is true. A broken copy-paste path
 in the first hour costs the whole launch.
 
 - [ ] `brew install blairham/tap/stevedore` works from a clean machine
-- [ ] `go install github.com/blairham/stevedore@latest` works — it installs
-      v1.0.4, but `--version` says `dev` there; fixed on main, re-check after
-      the next release
+- [x] `go install github.com/blairham/stevedore@latest` works — installs
+      v1.0.5, and `--version` reports 1.0.5 (it said `dev` before #24)
 - [x] `docker run --rm ghcr.io/blairham/stevedore --version` works — i.e. the
       `:latest` tag actually exists (it did not, for ten releases; see #20) —
       `:latest` reports 1.0.4
