@@ -42,11 +42,11 @@ func writeSplitDigest(dir, dist string, ids, platforms []string, digest string) 
 	name := platformFile(platforms)
 	for _, id := range ids {
 		d := splitDigestDir(dir, dist, id)
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := mkdirDist(d); err != nil {
 			return fmt.Errorf("create digest dir: %w", err)
 		}
 		path := filepath.Join(d, name)
-		if err := os.WriteFile(path, []byte(digest+"\n"), 0o644); err != nil {
+		if err := writeDistFile(path, []byte(digest+"\n")); err != nil {
 			return fmt.Errorf("write split digest: %w", err)
 		}
 		fmt.Fprintf(progress, "    digest recorded: %s\n", path)
@@ -72,7 +72,7 @@ func readSplitDigests(dir, dist, id string) (digests []string, covered map[strin
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(d, name))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(d, name)))
 		if err != nil {
 			return nil, nil, fmt.Errorf("read split digest: %w", err)
 		}

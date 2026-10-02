@@ -28,7 +28,8 @@ func TestIsFloating(t *testing.T) {
 	}
 }
 
-func newCtx(branch, defaultBranch string, snapshot bool) *tmpl.Context {
+// newCtx is a release context whose default branch is "main".
+func newCtx(branch string, snapshot bool) *tmpl.Context {
 	gi := &gitinfo.Info{
 		Version:     "1.2.3",
 		Tag:         "v1.2.3",
@@ -36,7 +37,7 @@ func newCtx(branch, defaultBranch string, snapshot bool) *tmpl.Context {
 		ShortCommit: "deadbee",
 		Branch:      branch,
 	}
-	return tmpl.NewContext("demo", defaultBranch, gi, snapshot, time.Unix(0, 0).UTC(), nil)
+	return tmpl.NewContext("demo", "main", gi, snapshot, time.Unix(0, 0).UTC(), nil)
 }
 
 func demoCfg() *config.Config {
@@ -50,7 +51,7 @@ func demoCfg() *config.Config {
 }
 
 func TestResolvePlans_DefaultBranchKeepsLatest(t *testing.T) {
-	ctx := newCtx("main", "main", false)
+	ctx := newCtx("main", false)
 	plans, err := resolvePlans(demoCfg(), ctx, false, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestResolvePlans_DefaultBranchKeepsLatest(t *testing.T) {
 }
 
 func TestResolvePlans_FeatureBranchDropsLatest(t *testing.T) {
-	ctx := newCtx("feature/x", "main", false)
+	ctx := newCtx("feature/x", false)
 	plans, err := resolvePlans(demoCfg(), ctx, false, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +84,7 @@ func TestResolvePlans_FeatureBranchDropsLatest(t *testing.T) {
 }
 
 func TestResolvePlans_PerImageVersion(t *testing.T) {
-	ctx := newCtx("main", "main", false)
+	ctx := newCtx("main", false)
 	cfg := &config.Config{
 		Versioning: config.Versioning{Strategy: "registry"},
 		Images: []config.Image{
@@ -108,7 +109,7 @@ func TestResolvePlans_PerImageVersion(t *testing.T) {
 }
 
 func TestResolvePlans_SnapshotDropsLatest(t *testing.T) {
-	ctx := newCtx("main", "main", true)
+	ctx := newCtx("main", true)
 	plans, err := resolvePlans(demoCfg(), ctx, true, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +129,7 @@ func contains(xs []string, want string) bool {
 }
 
 func TestResolvePlans_PinnedVersionWins(t *testing.T) {
-	ctx := newCtx("main", "main", false)
+	ctx := newCtx("main", false)
 	cfg := &config.Config{
 		Versioning: config.Versioning{Strategy: "registry"},
 		Images: []config.Image{

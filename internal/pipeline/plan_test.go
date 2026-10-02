@@ -85,7 +85,7 @@ func TestNewPlanResult_EmptyPlanMarshalsEmptyInclude(t *testing.T) {
 }
 
 func TestResolvePlans_OnlySkipsExcludedImages(t *testing.T) {
-	ctx := newCtx("main", "main", false)
+	ctx := newCtx("main", false)
 	cfg := &config.Config{
 		Versioning: config.Versioning{Strategy: "registry"},
 		Images: []config.Image{

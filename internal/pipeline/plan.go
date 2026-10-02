@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/blairham/stevedore/internal/changed"
+	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/fingerprint"
 )
 
@@ -49,25 +50,9 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 
 	var evals []imageEval
 	for _, plan := range p.Plans {
-		ch, reason := true, ""
-		switch {
-		case len(o.Only) > 0:
-			reason = "selected via --only"
-		case o.ChangedSince != "":
-			d := changed.Evaluate(plan.Paths, shared, changedFiles)
-			ch, reason = d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince)
-		case markerMode:
-			ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
-			if changed.RefExists(o.context(), o.Dir, ref) {
-				files, err := changed.FilesSince(o.context(), o.Dir, ref)
-				if err != nil {
-					return nil, err
-				}
-				d := changed.Evaluate(plan.Paths, shared, files)
-				ch, reason = d.Changed, fmt.Sprintf("%s since its release marker", d.Reason)
-			} else {
-				reason = "no release marker yet (never released)"
-			}
+		ch, reason, err := changeDecision(o, cd, plan, changedFiles, markerMode)
+		if err != nil {
+			return nil, err
 		}
 		fpScoped := scopedFingerprintPaths(plan.Paths, shared)
 		fp, err := fingerprint.Compute(o.Dir, plan.Image, p.Config.Dist, fpScoped)
@@ -80,6 +65,31 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 		evals = append(evals, imageEval{plan: plan, fp: fp, changed: ch, reason: reason})
 	}
 	return evals, nil
+}
+
+// changeDecision reports whether plan's image changed, and why: --only
+// selects unconditionally, --changed-since diffs against that ref, marker mode
+// against the image's own release marker, and otherwise everything changed.
+func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, changedFiles []string, markerMode bool) (bool, string, error) {
+	switch {
+	case len(o.Only) > 0:
+		return true, "selected via --only", nil
+	case o.ChangedSince != "":
+		d := changed.Evaluate(plan.Paths, cd.SharedPaths, changedFiles)
+		return d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince), nil
+	case markerMode:
+		ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
+		if !changed.RefExists(o.context(), o.Dir, ref) {
+			return true, "no release marker yet (never released)", nil
+		}
+		files, err := changed.FilesSince(o.context(), o.Dir, ref)
+		if err != nil {
+			return false, "", err
+		}
+		d := changed.Evaluate(plan.Paths, cd.SharedPaths, files)
+		return d.Changed, fmt.Sprintf("%s since its release marker", d.Reason), nil
+	}
+	return true, "", nil
 }
 
 // groupPlans groups evaluated images by identical build spec — a group builds
@@ -211,7 +221,7 @@ func newPlanResult(toBuild [][]imageEval, skipped []imageEval, splitPerPlatform 
 			Versions: map[string]string{},
 		}
 		entry.Only = strings.Join(entry.IDs, ",")
-		var pins []string
+		pins := make([]string, 0, len(grp))
 		for _, m := range grp {
 			entry.Versions[m.plan.Image.ID] = m.plan.Version
 			pins = append(pins, fmt.Sprintf("--pin-version %s=%s", m.plan.Image.ID, m.plan.Version))
