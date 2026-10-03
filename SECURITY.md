@@ -95,3 +95,17 @@ by the ref it was dispatched from, usually `refs/heads/main`, rather than by
 the tag, so use `@refs/heads/main` in `--certificate-identity` for that release.
 
 The macOS builds are additionally Developer ID signed and notarized.
+
+**Build provenance.** Releases from `v1.0.6` also attach
+`stevedore.intoto.jsonl`, SLSA Build L3 provenance for every archive: it
+records that the archive was built by this repository's release workflow from
+the tagged commit. Check an archive against it with
+[`slsa-verifier`](https://github.com/slsa-framework/slsa-verifier):
+
+```sh
+VERSION=v1.0.6
+slsa-verifier verify-artifact stevedore_*_Linux_x86_64.tar.gz \
+  --provenance-path stevedore.intoto.jsonl \
+  --source-uri github.com/blairham/stevedore \
+  --source-tag "$VERSION"
+```
