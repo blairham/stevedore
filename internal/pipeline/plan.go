@@ -45,7 +45,9 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 	// latest markers first (important on a fresh CI checkout).
 	markerMode := cd.MarkerRefs && o.ChangedSince == "" && len(o.Only) == 0
 	if markerMode {
-		changed.FetchMarkers(o.context(), o.Dir, cd.MarkerPrefix)
+		if err := changed.FetchMarkers(o.context(), o.Dir, cd.MarkerPrefix); err != nil {
+			return nil, err
+		}
 	}
 
 	var evals []imageEval
@@ -82,11 +84,19 @@ func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, change
 		if !changed.RefExists(o.context(), o.Dir, ref) {
 			return true, "no release marker yet (never released)", nil
 		}
-		files, err := changed.FilesSince(o.context(), o.Dir, ref)
+		base, diverged, err := changed.MarkerBase(o.context(), o.Dir, ref)
+		if err != nil {
+			return false, "", err
+		}
+		files, err := changed.FilesSince(o.context(), o.Dir, base)
 		if err != nil {
 			return false, "", err
 		}
 		d := changed.Evaluate(plan.Paths, cd.SharedPaths, files)
+		if diverged {
+			fmt.Fprintf(progress, "warning: release marker %s has diverged from HEAD; diffing from merge base %.8s until it is reset\n", ref, base)
+			return d.Changed, fmt.Sprintf("%s since merge base %.8s (release marker diverged)", d.Reason, base), nil
+		}
 		return d.Changed, fmt.Sprintf("%s since its release marker", d.Reason), nil
 	}
 	return true, "", nil

@@ -198,3 +198,132 @@ func TestEvaluateScoped(t *testing.T) {
 		t.Errorf("unrelated Billing change should NOT rebuild PaymentsGateway: %+v", d)
 	}
 }
+
+// commitFile writes name and commits it, so a diff has something to show.
+func commitFile(t *testing.T, git func(dir string, args ...string) string, dir, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(dir, "add", name)
+	git(dir, "commit", "-q", "-m", name)
+}
+
+func TestMarkerBase(t *testing.T) {
+	const ref = "refs/releases/image/svc"
+
+	t.Run("marker an ancestor of HEAD: the marker", func(t *testing.T) {
+		clone, seed, git := markerRepos(t)
+		git(seed, "push", "-q", "origin", "HEAD:"+ref)
+		marker := git(seed, "rev-parse", "HEAD")
+		commitFile(t, git, seed, "main.txt")
+		git(seed, "push", "-q", "origin", "main")
+		git(clone, "pull", "-q")
+		if err := FetchMarkers(t.Context(), clone, "refs/releases/image/"); err != nil {
+			t.Fatal(err)
+		}
+		base, diverged, err := MarkerBase(t.Context(), clone, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if base != marker || diverged {
+			t.Errorf("MarkerBase = %s, diverged=%v; want %s, false", short(base), diverged, short(marker))
+		}
+	})
+
+	// The 2026-09-11 trading state again, seen from the plan: diffing from the
+	// stray commit itself reports the unmerged branch's own files as changed
+	// (they are absent from HEAD), so every image they touch rebuilds on every
+	// release. The base must be the fork point instead.
+	t.Run("marker on an unmerged branch: the merge base", func(t *testing.T) {
+		clone, seed, git := markerRepos(t)
+		fork := git(seed, "rev-parse", "HEAD")
+		git(seed, "checkout", "-q", "-b", "feature")
+		commitFile(t, git, seed, "branch-only.txt")
+		git(seed, "push", "-q", "origin", "HEAD:"+ref)
+		git(seed, "checkout", "-q", "main")
+		git(seed, "branch", "-q", "-D", "feature")
+		commitFile(t, git, seed, "main.txt")
+		git(seed, "push", "-q", "origin", "main")
+		git(clone, "pull", "-q")
+		if err := FetchMarkers(t.Context(), clone, "refs/releases/image/"); err != nil {
+			t.Fatal(err)
+		}
+		base, diverged, err := MarkerBase(t.Context(), clone, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if base != fork || !diverged {
+			t.Fatalf("MarkerBase = %s, diverged=%v; want fork %s, true", short(base), diverged, short(fork))
+		}
+		files, err := FilesSince(t.Context(), clone, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(files, ",") != "main.txt" {
+			t.Errorf("FilesSince(base) = %v, want [main.txt] (not the unmerged branch's files)", files)
+		}
+	})
+
+	t.Run("marker ahead of HEAD: the marker, not diverged", func(t *testing.T) {
+		clone, seed, git := markerRepos(t)
+		commitFile(t, git, seed, "newer.txt")
+		git(seed, "push", "-q", "origin", "HEAD:"+ref)
+		ahead := git(seed, "rev-parse", "HEAD")
+		if err := FetchMarkers(t.Context(), clone, "refs/releases/image/"); err != nil {
+			t.Fatal(err)
+		}
+		base, diverged, err := MarkerBase(t.Context(), clone, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if base != ahead || diverged {
+			t.Errorf("MarkerBase = %s, diverged=%v; want %s, false", short(base), diverged, short(ahead))
+		}
+	})
+}
+
+func TestFetchMarkers(t *testing.T) {
+	const prefix = "refs/releases/image/"
+	const ref = prefix + "svc"
+
+	// A marker reset by hand on origin is a non-fast-forward for any clone that
+	// already holds the old one. Origin is the baseline, so it must win; an
+	// unforced refspec rejects the update and the plan diffs from the old one.
+	t.Run("origin marker reset by hand: local copy follows it", func(t *testing.T) {
+		clone, seed, git := markerRepos(t)
+		git(seed, "checkout", "-q", "-b", "feature")
+		commitFile(t, git, seed, "branch-only.txt")
+		git(seed, "push", "-q", "origin", "HEAD:"+ref)
+		git(seed, "checkout", "-q", "main")
+		if err := FetchMarkers(t.Context(), clone, prefix); err != nil {
+			t.Fatal(err)
+		}
+		reset := git(seed, "rev-parse", "main")
+		git(seed, "push", "-q", "--force", "origin", "main:"+ref)
+		if err := FetchMarkers(t.Context(), clone, prefix); err != nil {
+			t.Fatal(err)
+		}
+		if got := git(clone, "rev-parse", ref); got != reset {
+			t.Errorf("local marker = %s, want origin's reset %s", short(got), short(reset))
+		}
+	})
+
+	// A failed fetch used to be swallowed: with no markers present locally every
+	// image reads "no release marker yet" and the release rebuilds everything.
+	t.Run("origin unreachable: an error, not an empty baseline", func(t *testing.T) {
+		clone, _, git := markerRepos(t)
+		git(clone, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing.git"))
+		if err := FetchMarkers(t.Context(), clone, prefix); err == nil {
+			t.Fatal("FetchMarkers succeeded against a missing origin")
+		}
+	})
+
+	t.Run("no origin remote: nothing to fetch, no error", func(t *testing.T) {
+		clone, _, git := markerRepos(t)
+		git(clone, "remote", "remove", "origin")
+		if err := FetchMarkers(t.Context(), clone, prefix); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

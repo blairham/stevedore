@@ -24,10 +24,16 @@ with `HEAD` first:
   release re-run).
 - **Diverged:** for example, released from a branch that was never merged. The release
   **fails**, after the images are pushed and notifications have fired. Until the marker
-  is reset, every image diffs from that stray commit and rebuilds on every release, so
+  is reset, change detection diffs from the merge base of the marker and `HEAD` rather
+  than from the stray commit (whose own files would otherwise read as changed on every
+  release), and `plan` says so in the image's reason. Each release still fails, so
   this needs a human. Reset it to the last commit actually released with a lease, e.g.
   `git push --force-with-lease=refs/releases/image/<id>:<stray> origin <sha>:refs/releases/image/<id>`.
   To prevent it, only release from your default branch.
+
+Markers are fetched from origin with a forced refspec, so a marker reset there wins
+over a stale local copy. A failed fetch fails the run: without markers every image
+would read "never released" and rebuild.
 
 ```sh
 stevedore release --changed-since origin/main
