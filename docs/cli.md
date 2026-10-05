@@ -42,7 +42,11 @@ inner-loop push must never be the thing that triggers a deploy. Use `release
 `--snapshot`, `--skip-sign`, `--skip-sbom`, `--skip-scan`, `--skip-test`,
 `--skip-changelog`, `--skip-publish`, `--only-changed` / `--changed-since <ref>`
 (skip unchanged images — see [Monorepos](monorepo.md)), and `--output json`
-(emit a machine-readable release summary to stdout).
+(emit a machine-readable release summary to stdout). With
+`change_detection.marker_refs` on, `--changed-since` does not replace the release
+markers: each image diffs from whichever of its marker and the ref is older, so a
+release that failed is still retried (see
+[Monorepos](monorepo.md)).
 
 `--only <id,…>` builds just those images, **unconditionally** — selection was the
 planner's decision, so change detection is skipped. `--pin-version <id>=<ver>`

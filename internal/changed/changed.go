@@ -195,6 +195,13 @@ func revParse(ctx context.Context, dir, rev string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// IsAncestor reports whether commit a is an ancestor of b; a commit counts as
+// its own ancestor. A git failure (an object missing from a shallow clone, an
+// unknown ref) is an error, never a "no".
+func IsAncestor(ctx context.Context, dir, a, b string) (bool, error) {
+	return isAncestor(ctx, dir, a, b)
+}
+
 // isAncestor reports whether a is an ancestor of b. git exits 1 for "no" and
 // anything else for a real failure (a missing object in a shallow clone, say),
 // which is returned rather than read as "no".

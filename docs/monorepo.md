@@ -35,6 +35,17 @@ Markers are fetched from origin with a forced refspec, so a marker reset there w
 over a stale local copy. A failed fetch fails the run: without markers every image
 would read "never released" and rebuild.
 
+**With `--changed-since` as well**, marker mode stays on and each image diffs from
+the **older** of its marker and the ref. CI often passes
+`--changed-since ${{ github.event.before }}`, and on its own that would skip a change
+whose release failed or was canceled: the marker never advanced past it, but the
+next push's ref is newer. When the marker is older, that change still rebuilds. When
+the ref is older, the diff widens to cover it, as asked, and the reason says
+`since <ref> (older than the release marker)`. When neither is an ancestor of the
+other, or git cannot tell (for example, a shallow clone missing one of them), both
+diffs are combined. An image with no marker yet still builds as never released.
+`--only` still turns change detection off entirely.
+
 ```sh
 stevedore release --changed-since origin/main
 # ==> building api

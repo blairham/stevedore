@@ -40,10 +40,13 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 		}
 	}
 
-	// Marker mode: with no explicit --changed-since or --only, use each
-	// image's own release-marker ref as its change-detection base. Fetch the
-	// latest markers first (important on a fresh CI checkout).
-	markerMode := cd.MarkerRefs && o.ChangedSince == "" && len(o.Only) == 0
+	// Marker mode: unless --only picked the images, use each image's own
+	// release-marker ref as its change-detection base. --changed-since does
+	// not switch it off — that silently dropped a change whose release failed
+	// or was canceled, since the next push's --changed-since no longer
+	// covered it. The two are combined per image instead (see markerDiff).
+	// Fetch the latest markers first (important on a fresh CI checkout).
+	markerMode := cd.MarkerRefs && len(o.Only) == 0
 	if markerMode {
 		if err := changed.FetchMarkers(o.context(), o.Dir, cd.MarkerPrefix); err != nil {
 			return nil, err
@@ -104,36 +107,81 @@ func changeScope(o Options, repoRoot string, plan ImagePlan) (changed.Scope, err
 }
 
 // changeDecision reports whether plan's image changed, and why: --only
-// selects unconditionally, --changed-since diffs against that ref, marker mode
-// against the image's own release marker, and otherwise everything changed.
+// selects unconditionally, marker mode diffs against the image's own release
+// marker (or --changed-since, when that is older), --changed-since alone
+// against that ref, and otherwise everything changed.
 func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, scope changed.Scope, changedFiles []string, markerMode bool) (bool, string, error) {
 	switch {
 	case len(o.Only) > 0:
 		return true, "selected via --only", nil
-	case o.ChangedSince != "":
-		d := changed.Evaluate(scope, cd.SharedPaths, changedFiles)
-		return d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince), nil
 	case markerMode:
 		ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
 		if !changed.RefExists(o.context(), o.Dir, ref) {
 			return true, "no release marker yet (never released)", nil
 		}
-		base, diverged, err := changed.MarkerBase(o.context(), o.Dir, ref)
-		if err != nil {
-			return false, "", err
-		}
-		files, err := changed.FilesSince(o.context(), o.Dir, base)
+		files, since, err := markerDiff(o, ref, changedFiles)
 		if err != nil {
 			return false, "", err
 		}
 		d := changed.Evaluate(scope, cd.SharedPaths, files)
-		if diverged {
-			fmt.Fprintf(progress, "warning: release marker %s has diverged from HEAD; diffing from merge base %.8s until it is reset\n", ref, base)
-			return d.Changed, fmt.Sprintf("%s since merge base %.8s (release marker diverged)", d.Reason, base), nil
-		}
-		return d.Changed, fmt.Sprintf("%s since its release marker", d.Reason), nil
+		return d.Changed, fmt.Sprintf("%s since %s", d.Reason, since), nil
+	case o.ChangedSince != "":
+		d := changed.Evaluate(scope, cd.SharedPaths, changedFiles)
+		return d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince), nil
 	}
 	return true, "", nil
+}
+
+// markerDiff returns the files changed since the image's release marker ref,
+// and a description of the base they were diffed from. A marker that has
+// diverged from HEAD is replaced by its merge base (see changed.MarkerBase).
+//
+// With --changed-since as well, the older of the two bases wins, so a marker
+// that lags behind the ref — its last release failed or was canceled — still
+// rebuilds what that release missed, and a ref older than the marker widens
+// the diff as asked. When neither is an ancestor of the other (or git cannot
+// tell, as in a shallow clone) the two diffs are unioned. changedFiles is the
+// diff since --changed-since, already taken.
+func markerDiff(o Options, ref string, changedFiles []string) ([]string, string, error) {
+	base, diverged, err := changed.MarkerBase(o.context(), o.Dir, ref)
+	if err != nil {
+		return nil, "", err
+	}
+	files, err := changed.FilesSince(o.context(), o.Dir, base)
+	if err != nil {
+		return nil, "", err
+	}
+	since := "its release marker"
+	if diverged {
+		fmt.Fprintf(progress, "warning: release marker %s has diverged from HEAD; diffing from merge base %.8s until it is reset\n", ref, base)
+		since = fmt.Sprintf("merge base %.8s (release marker diverged)", base)
+	}
+	if o.ChangedSince == "" {
+		return files, since, nil
+	}
+	if older, err := changed.IsAncestor(o.context(), o.Dir, base, o.ChangedSince); err == nil && older {
+		return files, since, nil
+	}
+	if older, err := changed.IsAncestor(o.context(), o.Dir, o.ChangedSince, base); err == nil && older {
+		return changedFiles, o.ChangedSince + " (older than the release marker)", nil
+	}
+	return union(files, changedFiles), fmt.Sprintf("%s or %s (unrelated bases)", since, o.ChangedSince), nil
+}
+
+// union returns a followed by the members of b not already in a.
+func union(a, b []string) []string {
+	seen := make(map[string]bool, len(a))
+	out := append([]string(nil), a...)
+	for _, f := range a {
+		seen[f] = true
+	}
+	for _, f := range b {
+		if !seen[f] {
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // groupPlans groups evaluated images by identical build spec — a group builds
