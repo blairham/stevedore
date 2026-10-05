@@ -107,6 +107,10 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Fixed
 
+- Config validation refuses an unknown `changelog.sort` or
+  `change_detection.resolver` (values are case-sensitive) and a
+  `versioning.initial` that is not `MAJOR.MINOR.PATCH`, instead of silently
+  picking a branch or releasing it as the version. (#64)
 - `--help` no longer shows a stray word as a flag's value name
   (`--split stevedore merge`, `--pin-version pins`); docs/cli.md lists every
   command's flags, and the docs no longer claim signing, SBOMs and the scan
