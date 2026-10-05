@@ -17,6 +17,8 @@ images:
     tags:
       - "{{ .Version }}"
       - "{{ .ShortCommit }}"
+      # release.yml drops this exact line for a prerelease or an older tag, so
+      # latest only moves forward. Keep the spelling, or that step fails closed.
       - "latest"
     build_args:
       - "VERSION={{ .Version }}"

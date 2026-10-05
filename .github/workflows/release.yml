@@ -78,8 +78,47 @@ jobs:
       - name: Build stevedore
         run: go build -o /usr/local/bin/stevedore .
 
+      # `latest` follows the same rule as the moving git tags below: only a
+      # plain semver tag that is the newest one moves it. .stevedore.yaml tags
+      # `latest` unconditionally, so for any other tag — a prerelease, or an
+      # older release re-run by dispatch — release from a copy of the config
+      # without that line. The copy lives outside the checkout, so the tree
+      # stays clean; build paths resolve against --dir, not the config file.
+      - name: Decide whether this release moves latest
+        id: latest
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          config=.stevedore.yaml
+          reason=""
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            reason="$TAG is not a plain semver tag"
+          else
+            newest=$(git tag --list 'v*.*.*' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V | tail -1 || true)
+            if [ -n "$newest" ] && [ "$newest" != "$TAG" ]; then
+              reason="$newest is newer than $TAG"
+            fi
+          fi
+          if [ -n "$reason" ]; then
+            config="$RUNNER_TEMP/stevedore.yaml"
+            grep -vxF '      - "latest"' .stevedore.yaml > "$config" || true
+            # Fail closed: if the line moved or changed spelling, the copy
+            # would still tag latest, and that is the bug this step exists for.
+            if [ "$(wc -l < .stevedore.yaml)" -ne $(( $(wc -l < "$config") + 1 )) ]; then
+              echo "::error::could not remove exactly one '- \"latest\"' line from .stevedore.yaml"
+              exit 1
+            fi
+            echo "::notice::$reason; not moving the image's latest tag"
+          fi
+          echo "config=$config" >> "$GITHUB_OUTPUT"
+
       - name: Release image (dogfood)
-        run: stevedore release
+        env:
+          CONFIG: ${{ steps.latest.outputs.config }}
+        run: stevedore release --config "$CONFIG"
 
   # GoReleaser publishes the CLI binary, checksums, the GitHub release, and the
   # Homebrew formula (to blairham/homebrew-tap).
