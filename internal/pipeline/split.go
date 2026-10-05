@@ -4,6 +4,7 @@
 package pipeline
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,9 +18,9 @@ import (
 // runs `release --split <platform>`, building only that platform and pushing
 // it untagged, by digest. The digest is recorded as a file under
 // dist/digests/<image-id>/, named after the platform(s) it covers. A final
-// `merge` run reads those files, stitches the digests into one tagged manifest
-// list per repository (`docker buildx imagetools create`), and finishes the
-// release. In CI the legs and the merge job share dist/digests/ via artifacts.
+// `merge` run reads those files, stitches the digests into one manifest list
+// per repository (`docker buildx imagetools create`, pushed by digest), gates
+// it, and only then tags it and finishes the release. In CI the legs and the merge job share dist/digests/ via artifacts.
 
 // platformFile renders the digest filename for a leg's platforms:
 // linux/arm64 → linux-arm64; a multi-platform leg joins with commas.
@@ -91,11 +92,12 @@ func readSplitDigests(dir, dist, id string) (digests []string, covered map[strin
 	return digests, covered, nil
 }
 
-// mergeGroup assembles the split legs' digests into one tagged manifest list
-// per repository and returns the merged manifest-list digest. It fails when a
-// configured platform has no recorded digest, so a partial matrix (a leg that
-// never ran or failed to upload its digests) can't publish an incomplete image.
-func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos, refs []string) (string, error) {
+// mergeGroup assembles the split legs' digests into one manifest list per
+// repository and returns its digest. The list is pushed untagged, by digest:
+// tags are applied only after the gates pass. It fails when a configured
+// platform has no recorded digest, so a partial matrix (a leg that never ran
+// or failed to upload its digests) can't publish an incomplete image.
+func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos []string) (string, error) {
 	digests, covered, err := readSplitDigests(o.Dir, dist, rep.Image.ID)
 	if err != nil {
 		return "", err
@@ -111,19 +113,28 @@ func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos, ref
 			rep.Image.ID, strings.Join(missing, ", "))
 	}
 
-	// One `imagetools create` per repository: its tags, its digest sources.
-	// The per-arch digests are identical across repos (content-addressed; the
-	// legs pushed the same blobs to every repo).
+	// imagetools create has no "push untagged" switch, but it accepts a digest
+	// reference as its target. So compute the list's digest first: --dry-run
+	// prints exactly the bytes a real create pushes (Capture trims only the
+	// trailing newline), and the per-arch digests are identical across repos
+	// (content-addressed; the legs pushed the same blobs to every repo), so one
+	// list serves them all.
+	dryArgs := imagetoolsCreate(append([]string{"--dry-run"}, sources(repos[0], digests)...)...)
+	var listDigest string
+	if o.DryRun {
+		r.Preview("docker", dryArgs...)
+		listDigest = dryRunDigest("", true)
+	} else {
+		list, err := r.Capture("docker", dryArgs...)
+		if err != nil {
+			return "", err
+		}
+		listDigest = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(list)))
+	}
+
+	// One untagged create per repository, addressed by the list's digest.
 	for _, repo := range repos {
-		args := []string{"buildx", "imagetools", "create"}
-		for _, ref := range refs {
-			if strings.HasPrefix(ref, repo+":") {
-				args = append(args, "--tag", ref)
-			}
-		}
-		for _, d := range digests {
-			args = append(args, repo+"@"+d)
-		}
+		args := imagetoolsCreate(append([]string{"--tag", repo + "@" + listDigest}, sources(repo, digests)...)...)
 		if err := r.Run("docker", args...); err != nil {
 			return "", err
 		}
@@ -131,5 +142,19 @@ func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos, ref
 	if o.DryRun {
 		return "", nil // Release substitutes the dry-run placeholder
 	}
-	return r.Capture("docker", "buildx", "imagetools", "inspect", refs[0], "--format", "{{.Manifest.Digest}}")
+	return listDigest, nil
+}
+
+// imagetoolsCreate renders a `docker buildx imagetools create` argument list.
+func imagetoolsCreate(args ...string) []string {
+	return append([]string{"buildx", "imagetools", "create"}, args...)
+}
+
+// sources renders the per-arch digests as repo@digest references.
+func sources(repo string, digests []string) []string {
+	out := make([]string, len(digests))
+	for i, d := range digests {
+		out[i] = repo + "@" + d
+	}
+	return out
 }

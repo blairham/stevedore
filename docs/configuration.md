@@ -82,7 +82,7 @@ provenance:
   mode: max               # min | max (max records the full build definition)
 
 test:
-  enabled: true           # smoke-test the built image before signing/pushing
+  enabled: true           # smoke-test the built image before signing/tagging
   cmd: ["/usr/bin/myapp", "--version"]   # run inside the container
   expect_exit: 0          # required exit code
   timeout: 30s            # Go duration; default 60s
@@ -168,7 +168,7 @@ Notifications fire only after the image passed every gate (scan, smoke test)
 and its release stages completed. Unlike `announce`, they also fire on
 `--snapshot` pushes — the payload carries the `snapshot` flag so the consumer
 can route dev vs. prod — and they respect `--skip-publish`. On a split release
-they fire from the `merge` run, once the tagged manifest lists exist. The URL
+they fire from the `merge` run, once the manifest lists are gated and tagged. The URL
 and credentials come from environment variables; a missing variable or a
 non-2xx response fails the release rather than silently skipping the trigger.
 

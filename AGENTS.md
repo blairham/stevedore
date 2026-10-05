@@ -102,12 +102,20 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 ## Architecture — the release pipeline
 
 `internal/pipeline` runs the stages in this order, so a bad image is never signed
-or shipped:
+or tagged:
 
 ```
-build → scan (gate) → smoke test (gate) → sign → SBOM + attest → provenance
-      → changelog (+ dependency diff) → GitHub release → announce → summary
+build + push by digest (+ provenance) → scan (gate) → smoke test (gate) → sign
+      → SBOM + attest → tag → changelog (+ dependency diff) → GitHub release
+      → announce → summary
 ```
+
+The build is pushed untagged (`push-by-digest`, to every repository at once)
+and every stage up to signing works on `repo@digest`; `applyTags` then points
+each repository's tags at that digest with `imagetools create
+--prefer-index=false` (a carbon copy — without the flag buildx wraps a
+single-platform manifest in a new index and the tag would name a different,
+unsigned digest). `--no-push` builds validate-only and skips everything after.
 
 The version feeding the tags is resolved first (`internal/versioner`); under the
 `registry`/`ecr` strategies each image is versioned independently from its own
@@ -118,7 +126,9 @@ an image with neither is scoped to its build context minus its dockerignore
 
 Split mode spreads the build across native-arch CI runners: `release --split
 <platform>` legs push untagged by digest (recorded under `dist/digests/`), and
-`stevedore merge` assembles the tagged manifest lists and runs the tail stages.
+`stevedore merge` assembles one manifest list per repository — pushed by its own
+digest, computed from `imagetools create --dry-run` since there is no untagged
+switch — then runs the gates, signs, tags, and runs the tail stages.
 `plan --split-platforms` emits the per-platform matrix (with runner hints) that
 drives the fan-out.
 

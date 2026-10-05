@@ -33,8 +33,9 @@ do not need any of it. Volunteering the case where your feature is unnecessary
 is worth more than the feature.
 
 **Do not use "secure" as an adjective.** This is a supply-chain audience and
-they have been marketed at. Say the mechanism instead: *the scan and smoke-test
-gates run before the signature, so a failing image is never signed.* A mechanism
+they have been marketed at. Say the mechanism instead: *the image is pushed by
+digest, and the scan and smoke-test gates run before the signature and before
+any tag, so a failing image is never signed or tagged.* A mechanism
 can be checked; an adjective invites someone to disprove it.
 
 **State the counterparty risk before anyone asks.** Apache-2.0, no account, no

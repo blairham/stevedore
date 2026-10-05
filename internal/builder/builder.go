@@ -32,8 +32,9 @@ type Spec struct {
 	// Push publishes to the registries.
 	Push bool
 	// PushByDigest pushes untagged, by digest only (split mode: one platform
-	// leg of a multi-arch build, merged into a tagged manifest list later by
-	// `imagetools create`). Requires Push.
+	// leg of a multi-arch build, merged into a manifest list later by
+	// `imagetools create`; or a whole release build, tagged once its gates
+	// pass). Requires Push.
 	PushByDigest bool
 	// Load loads the built image into the local docker daemon (single platform
 	// only). Used for local builds; ignored when Push is set. When neither Push

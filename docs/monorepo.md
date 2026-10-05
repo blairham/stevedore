@@ -126,7 +126,8 @@ checkout with no fingerprint safely rebuilds everything.
 
 Images whose build spec is identical (same Dockerfile, context, target, platforms,
 build args, and labels) and differ only by destination repository/tag are **built
-once** and pushed to every member's tags in a single `buildx` invocation — no
+once** and pushed by digest to every member's repository in a single `buildx`
+invocation, then — once the gates pass — tagged with every member's tags. No
 redundant rebuilds. Images that differ by a build arg (e.g. a `PROJECT=`) stay
 separate. Grouping is automatic; nothing to configure.
 
@@ -191,10 +192,10 @@ A single-runner multi-arch build emulates every non-native platform with QEMU �
 often 5–10× slower for compile-heavy stages. GitHub hosts native arm64 runners
 (`ubuntu-24.04-arm`, free for public repos), so stevedore can split the build:
 each matrix leg builds **one platform on its native runner** and pushes it
-untagged, by digest; a final job merges the digests into one tagged manifest
-list per image and runs the release tail (scan → smoke test → sign → SBOM →
-changelog → publish) against the merged artifact — so nothing is ever signed or
-published before every arch exists.
+untagged, by digest; a final job merges the digests into one manifest list per
+image (still untagged) and runs the release tail (scan → smoke test → sign →
+SBOM → tag → changelog → publish) against the merged artifact — so nothing is
+ever signed or tagged before every arch exists and the gates have passed.
 
 A composite action can't spawn jobs, so the fan-out lives in the workflow:
 `plan --split-platforms` emits one matrix entry per build group per platform,
@@ -257,7 +258,7 @@ The legs record each pushed digest as `dist/digests/<image-id>/<platform>`;
 `merge` refuses to publish while any configured platform has no digest, so a
 failed or missing leg can never ship a partial manifest list. Signing, SBOM
 attestation, and the vulnerability/smoke-test gates all run once, against the
-merged manifest-list digest — per-arch SLSA provenance from `--provenance` is
+merged manifest-list digest, and the tags are applied only after they pass — per-arch SLSA provenance from `--provenance` is
 attached by the legs at build time and survives the merge.
 
 For simple repos you can skip `plan` entirely and hardcode the matrix

@@ -32,7 +32,8 @@ images:
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.revision: "{{ .Commit }}"
 
-# The gates run before signing, so a failing image is never signed.
+# The gates run before signing and tagging, so a failing image is never signed
+# or tagged.
 scan:
   enabled: true
   scanner: grype

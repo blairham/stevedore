@@ -75,13 +75,13 @@ func TestMergeGroupCoversAllPlatformsOrFails(t *testing.T) {
 	}
 	r := &run.Runner{DryRun: true, Stderr: stderr}
 
-	_, err = mergeGroup(r, Options{Dir: dir, DryRun: true}, rep, "dist", rep.Repos, []string{"ghcr.io/x/app:1.0.0"})
+	_, err = mergeGroup(r, Options{Dir: dir, DryRun: true}, rep, "dist", rep.Repos)
 	if err == nil || !strings.Contains(err.Error(), "linux/arm64") {
 		t.Fatalf("want missing-platform error naming linux/arm64, got %v", err)
 	}
 }
 
-func TestMergeGroupBuildsImagetoolsCreatePerRepo(t *testing.T) {
+func TestMergeGroupBuildsUntaggedListPerRepo(t *testing.T) {
 	dir := t.TempDir()
 	for _, leg := range []struct{ platform, digest string }{
 		{"linux/amd64", "sha256:aaa"},
@@ -95,7 +95,6 @@ func TestMergeGroupBuildsImagetoolsCreatePerRepo(t *testing.T) {
 		Image: config.Image{ID: "app", Platforms: []string{"linux/amd64", "linux/arm64"}},
 		Repos: []string{"ghcr.io/x/app", "reg.io/x/app"},
 	}
-	refs := []string{"ghcr.io/x/app:1.0.0", "ghcr.io/x/app:latest", "reg.io/x/app:1.0.0"}
 
 	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
 	if err != nil {
@@ -103,7 +102,7 @@ func TestMergeGroupBuildsImagetoolsCreatePerRepo(t *testing.T) {
 	}
 	r := &run.Runner{DryRun: true, Stderr: stderr}
 
-	digest, err := mergeGroup(r, Options{Dir: dir, DryRun: true}, rep, "dist", rep.Repos, refs)
+	digest, err := mergeGroup(r, Options{Dir: dir, DryRun: true}, rep, "dist", rep.Repos)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,18 +116,20 @@ func TestMergeGroupBuildsImagetoolsCreatePerRepo(t *testing.T) {
 	}
 	cmds := string(out)
 	want := []string{
-		// One create per repo: its own tags, sources by digest.
-		"buildx imagetools create --tag ghcr.io/x/app:1.0.0 --tag ghcr.io/x/app:latest ghcr.io/x/app@sha256:aaa ghcr.io/x/app@sha256:bbb",
-		"buildx imagetools create --tag reg.io/x/app:1.0.0 reg.io/x/app@sha256:aaa reg.io/x/app@sha256:bbb",
+		// The list's digest is computed first, then pushed to each repo by
+		// that digest — sources from the same repo, and no tag.
+		"buildx imagetools create --dry-run ghcr.io/x/app@sha256:aaa ghcr.io/x/app@sha256:bbb",
+		"buildx imagetools create --tag ghcr.io/x/app@sha256:<digest-resolved-at-build-time> ghcr.io/x/app@sha256:aaa ghcr.io/x/app@sha256:bbb",
+		"buildx imagetools create --tag reg.io/x/app@sha256:<digest-resolved-at-build-time> reg.io/x/app@sha256:aaa reg.io/x/app@sha256:bbb",
 	}
 	for _, w := range want {
 		if !strings.Contains(cmds, w) {
 			t.Errorf("missing imagetools invocation %q in:\n%s", w, cmds)
 		}
 	}
-	// A repo's tags must never reference another repo's manifest.
-	if strings.Contains(cmds, "--tag reg.io/x/app:1.0.0 --tag ghcr.io") || strings.Contains(cmds, "--tag ghcr.io/x/app:1.0.0 --tag reg.io") {
-		t.Errorf("tags leaked across repos:\n%s", cmds)
+	// Tags are the gates' to grant: merging must not name a single one.
+	if strings.Contains(cmds, "app:") {
+		t.Errorf("merge applied a tag before the gates:\n%s", cmds)
 	}
 }
 

@@ -23,10 +23,10 @@ A leg builds **one** platform natively and pushes it **untagged, by digest**.
 No tags, no signing, no SBOM, no publish — it records the digest under
 `dist/digests/<image-id>/<platform>` and stops.
 
-`merge` assembles the digests into one tagged manifest list per image, then runs
-the entire release tail once against it: scan → smoke test → sign → SBOM →
-changelog → publish. So nothing is signed or published until every architecture
-exists, and `merge` refuses to publish while any configured platform has no
+`merge` assembles the digests into one manifest list per image — pushed by
+digest, still untagged — then runs the entire release tail once against it:
+scan → smoke test → sign → SBOM → tag → changelog → publish. So nothing is
+signed or tagged until every architecture exists and the gates have passed, and `merge` refuses to publish while any configured platform has no
 digest — a failed leg cannot ship a partial manifest list.
 
 ## Read this before you adopt it
