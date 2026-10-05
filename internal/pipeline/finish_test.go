@@ -4,8 +4,12 @@
 package pipeline
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/blairham/stevedore/internal/config"
@@ -73,5 +77,62 @@ func TestFinishReleaseRecordsFingerprintsOnlyForARealPublish(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// announceServer counts the announcements posted to it and points the Slack
+// announce config of p at it.
+func announceServer(t *testing.T, p *Prepared) *atomic.Int32 {
+	t.Helper()
+	var posts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		posts.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("TEST_SLACK_WEBHOOK", srv.URL)
+	p.Config.Announce.Slack = config.Webhook{Enabled: true, WebhookEnv: "TEST_SLACK_WEBHOOK"}
+	return &posts
+}
+
+// A release in which change detection skipped every image pushed nothing, so
+// it must not announce (or cut a GitHub release for) a version that does not
+// exist. One built image is enough to publish.
+func TestFinishReleasePublishesOnlyWhenSomethingWasBuilt(t *testing.T) {
+	skipped := summary.Image{ID: "billing", Skipped: true, Reason: "unchanged"}
+	built := summary.Image{ID: "checkout", Version: "1.0.0", Refs: []string{"r/checkout:1.0.0"}}
+	cases := []struct {
+		name   string
+		images []summary.Image
+		want   int32
+	}{
+		{"all skipped", []summary.Image{skipped}, 0},
+		{"no images", nil, 0},
+		{"one built", []summary.Image{skipped, built}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, p := finishHarness(t)
+			posts := announceServer(t, p)
+			result := summary.Result{Project: "proj", Images: tc.images}
+			if err := finishRelease(Options{Dir: dir}, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := posts.Load(); got != tc.want {
+				t.Errorf("announcements posted = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuiltRefsLeavesOutSkippedImages(t *testing.T) {
+	images := []summary.Image{
+		{ID: "billing", Skipped: true, Refs: []string{"r/billing:2.0.0"}},
+		{ID: "checkout", Refs: []string{"r/checkout:1.0.0", "r/checkout:latest"}},
+	}
+	got := builtRefs(images)
+	want := []string{"r/checkout:1.0.0", "r/checkout:latest"}
+	if !slices.Equal(got, want) {
+		t.Errorf("builtRefs = %v, want %v", got, want)
 	}
 }

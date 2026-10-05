@@ -137,7 +137,9 @@ notify:                   # machine-readable post-push notification (CD trigger)
 ```
 
 Publishing (`release.github` + `announce`) runs only on real releases, never on
-`--snapshot`, and can be turned off per-run with `--skip-publish`.
+`--snapshot`, and can be turned off per-run with `--skip-publish`. It also needs
+something to publish: when change detection skips every image, the run pushes
+nothing and creates no GitHub release and no announcement.
 
 The GitHub release is named after the **release version**: the tag on HEAD when
 it names that version (the `git` strategy always does), otherwise `v<version>` —
