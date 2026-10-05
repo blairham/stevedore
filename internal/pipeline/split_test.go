@@ -31,6 +31,7 @@ func TestPlatformFile(t *testing.T) {
 
 func TestSplitDigestRoundtrip(t *testing.T) {
 	dir := t.TempDir()
+	both := []string{"linux/amd64", "linux/arm64"}
 
 	// Two legs, one image each in the group; every member gets the digest.
 	if err := writeSplitDigest(dir, "dist", []string{"a", "b"}, []string{"linux/amd64"}, "sha256:aaa"); err != nil {
@@ -40,7 +41,7 @@ func TestSplitDigestRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	digests, covered, err := readSplitDigests(dir, "dist", "a")
+	digests, covered, err := readSplitDigests(dir, "dist", "a", both)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,11 +52,11 @@ func TestSplitDigestRoundtrip(t *testing.T) {
 		t.Errorf("covered = %v, want both platforms", covered)
 	}
 	// Group member b sees the same digests.
-	if bd, _, err := readSplitDigests(dir, "dist", "b"); err != nil || len(bd) != 2 {
+	if bd, _, err := readSplitDigests(dir, "dist", "b", both); err != nil || len(bd) != 2 {
 		t.Errorf("member b digests = %v (%v), want the same two", bd, err)
 	}
 
-	if _, _, err := readSplitDigests(dir, "dist", "missing"); err == nil {
+	if _, _, err := readSplitDigests(dir, "dist", "missing", both); err == nil {
 		t.Error("expected error for an image with no recorded digests")
 	}
 }
@@ -170,5 +171,129 @@ func TestDefaultRunner(t *testing.T) {
 		if got := defaultRunner(platform); got != want {
 			t.Errorf("defaultRunner(%q) = %q, want %q", platform, got, want)
 		}
+	}
+}
+
+// A leg is driven by a platform matrix, not by the image: `--split linux/arm64`
+// reaches every selected image, including amd64-only ones, which must be
+// skipped rather than built for a platform their config excludes.
+func TestSplitLegGroups_SkipsGroupsWithoutTheLegPlatform(t *testing.T) {
+	multi := evalFor("multi", "Dockerfile.multi", "1.0.0", true, "src changed")
+	multi.plan.Image.Platforms = []string{"linux/amd64", "linux/arm64"}
+	amdOnly := evalFor("amd", "Dockerfile.amd", "1.0.0", true, "src changed")
+	amdOnly.plan.Image.Platforms = []string{"linux/amd64"}
+	groups := [][]imageEval{{multi}, {amdOnly}}
+
+	kept, skipped := splitLegGroups(groups, nil, []string{"linux/arm64"})
+	if len(kept) != 1 || kept[0][0].plan.Image.ID != "multi" {
+		t.Fatalf("arm64 leg kept %v, want only multi", kept)
+	}
+	if len(skipped) != 1 || skipped[0].plan.Image.ID != "amd" {
+		t.Fatalf("arm64 leg skipped %v, want amd", skipped)
+	}
+	if r := skipped[0].reason; !strings.Contains(r, "linux/arm64") || !strings.Contains(r, "linux/amd64") {
+		t.Errorf("skip reason %q should name the leg platform and the image's platforms", r)
+	}
+
+	kept, skipped = splitLegGroups(groups, nil, []string{"linux/amd64"})
+	if len(kept) != 2 || len(skipped) != 0 {
+		t.Errorf("amd64 leg kept %d / skipped %d, want both kept", len(kept), len(skipped))
+	}
+}
+
+func TestLegPlatforms(t *testing.T) {
+	got := legPlatforms([]string{"linux/arm64", "linux/amd64"}, []string{"linux/amd64"})
+	if strings.Join(got, ",") != "linux/amd64" {
+		t.Errorf("legPlatforms = %v, want [linux/amd64]", got)
+	}
+	if got := legPlatforms([]string{"linux/arm64"}, []string{"linux/amd64"}); len(got) != 0 {
+		t.Errorf("legPlatforms = %v, want none", got)
+	}
+}
+
+// Every entry `plan --split-platforms` emits must survive the leg it drives:
+// the plan and the leg filter have to agree on which platforms an image has.
+func TestPlanSplitEntriesAreKeptByTheirLeg(t *testing.T) {
+	multi := evalFor("multi", "Dockerfile.multi", "1.0.0", true, "src changed")
+	multi.plan.Image.Platforms = []string{"linux/amd64", "linux/arm64"}
+	amdOnly := evalFor("amd", "Dockerfile.amd", "1.0.0", true, "src changed")
+	amdOnly.plan.Image.Platforms = []string{"linux/amd64"}
+	groups := [][]imageEval{{multi}, {amdOnly}}
+
+	r := newPlanResult(groups, nil, true)
+	if len(r.Include) != 3 {
+		t.Fatalf("plan entries = %d, want 3 (multi×2, amd×1)", len(r.Include))
+	}
+	for _, e := range r.Include {
+		var grp []imageEval
+		for _, g := range groups {
+			if g[0].plan.Image.ID == e.Group {
+				grp = g
+			}
+		}
+		kept, _ := splitLegGroups([][]imageEval{grp}, nil, []string{e.Platform})
+		if len(kept) != 1 {
+			t.Errorf("plan entry %s/%s would be skipped by its own leg", e.Group, e.Platform)
+		}
+	}
+}
+
+// End to end against a fake docker: a two-platform leg building an amd64-only
+// image builds and records amd64 alone.
+func TestBuildSplitLeg_BuildsOnlyConfiguredPlatforms(t *testing.T) {
+	dir, log, o, p, grp := gateHarness(t)
+	grp[0].plan.Image.Platforms = []string{"linux/amd64"}
+	o.SplitPlatforms = []string{"linux/amd64", "linux/arm64"}
+
+	if _, _, err := buildGroup(o, p, quietRunner(t), grp); err != nil {
+		t.Fatal(err)
+	}
+	calls := readCalls(t, log)
+	build := indexOf(calls, "buildx build")
+	if build < 0 {
+		t.Fatalf("no build in:\n%s", strings.Join(calls, "\n"))
+	}
+	if !strings.Contains(calls[build], "--platform linux/amd64 ") || strings.Contains(calls[build], "arm64") {
+		t.Errorf("leg build should target linux/amd64 only: %s", calls[build])
+	}
+	entries, err := os.ReadDir(splitDigestDir(dir, "dist", "app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "linux-amd64" {
+		t.Errorf("digest files = %v, want only linux-amd64", entries)
+	}
+}
+
+// A digest for a platform the image does not configure — a stale file in a
+// persistent dist/, or a leg that built it anyway — must stop the merge, not
+// ship an extra platform.
+func TestMergeGroupRejectsUnconfiguredPlatform(t *testing.T) {
+	dir := t.TempDir()
+	for _, leg := range []struct{ platform, digest string }{
+		{"linux/amd64", "sha256:aaa"},
+		{"linux/arm64", "sha256:bbb"},
+	} {
+		if err := writeSplitDigest(dir, "dist", []string{"app"}, []string{leg.platform}, leg.digest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep := ImagePlan{
+		Image: config.Image{ID: "app", Platforms: []string{"linux/amd64"}},
+		Repos: []string{"ghcr.io/x/app"},
+	}
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &run.Runner{DryRun: true, Stderr: stderr}
+
+	_, err = mergeGroup(r, Options{Dir: dir, DryRun: true}, rep, "dist", rep.Repos)
+	if err == nil || !strings.Contains(err.Error(), "linux-arm64") {
+		t.Fatalf("want an unexpected-platform error naming linux-arm64, got %v", err)
+	}
+	out, _ := os.ReadFile(stderr.Name())
+	if strings.Contains(string(out), "imagetools") {
+		t.Errorf("merge ran imagetools despite the unexpected digest:\n%s", out)
 	}
 }

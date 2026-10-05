@@ -39,7 +39,10 @@ re-resolving. Both come straight out of a `stevedore plan` entry (`.only` /
 `--split <platform>` builds only that platform, natively, and pushes it
 **untagged, by digest** — no tags, no sign/scan/SBOM/publish. The digest lands
 under `<dist>/digests/<image-id>/` for a later `stevedore merge`, which
-assembles the manifest list and runs the whole release tail. See
+assembles the manifest list and runs the whole release tail. A leg builds
+only the platforms each image configures: an image whose `platforms` doesn't
+include the leg's is skipped (reported with the reason), and writes no digest.
+See
 [Native multi-arch](monorepo.md#native-multi-arch-one-runner-per-platform).
 
 Every release also writes `<dist>/release-summary.json` and, in GitHub Actions, a

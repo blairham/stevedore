@@ -259,14 +259,18 @@ jobs:
 
 The legs record each pushed digest as `dist/digests/<image-id>/<platform>`;
 `merge` refuses to publish while any configured platform has no digest, so a
-failed or missing leg can never ship a partial manifest list. Signing, SBOM
+failed or missing leg can never ship a partial manifest list — and it refuses
+a digest for a platform the image does *not* configure (a stale file in a
+persistent `dist/`), so it can't ship an extra one either. Signing, SBOM
 attestation, and the vulnerability/smoke-test gates all run once, against the
 merged manifest-list digest, and the tags are applied only after they pass — per-arch SLSA provenance from `--provenance` is
 attached by the legs at build time and survives the merge.
 
 For simple repos you can skip `plan` entirely and hardcode the matrix
 (`matrix: {include: [{platform: linux/amd64, runner: ubuntu-24.04}, …]}`);
-`release --split` and `merge` don't care where the fan-out came from.
+`release --split` and `merge` don't care where the fan-out came from. A
+hardcoded leg skips every image whose `platforms` doesn't include the leg's
+platform, so an amd64-only image is never built on the arm64 leg.
 
 > **Tip:** if your image is pure Go (`CGO_ENABLED=0`), cross-compiling inside
 > the Dockerfile (`FROM --platform=$BUILDPLATFORM` + `GOOS`/`GOARCH` from
