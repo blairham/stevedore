@@ -28,13 +28,17 @@ type Image struct {
 	Pushed bool `json:"pushed"`
 	// Reason says why the image built ("src/… since its release marker") or
 	// why it was skipped ("inputs unchanged").
-	Reason     string         `json:"reason,omitempty"`
-	Skipped    bool           `json:"skipped"`
-	Signed     bool           `json:"signed"`
-	SBOM       bool           `json:"sbom"`
-	Provenance bool           `json:"provenance"`
-	Tested     bool           `json:"tested"`
-	Vulns      map[string]int `json:"vulns,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Skipped bool   `json:"skipped"`
+	// AlreadyReleased marks a skipped image whose commit tags already exist
+	// from this commit: an earlier run released it, so nothing was pushed but
+	// its release marker still advances.
+	AlreadyReleased bool           `json:"already_released,omitempty"`
+	Signed          bool           `json:"signed"`
+	SBOM            bool           `json:"sbom"`
+	Provenance      bool           `json:"provenance"`
+	Tested          bool           `json:"tested"`
+	Vulns           map[string]int `json:"vulns,omitempty"`
 }
 
 // Result is the whole release outcome.

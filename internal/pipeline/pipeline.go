@@ -731,6 +731,13 @@ func buildGroups(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, s
 	return images, depDiffs, nil
 }
 
+// advancesMarker reports whether an image's release marker moves: it was
+// built, or it was found already released (its commit tags exist from this
+// commit) — skipped, but released, so its marker moves like a build's.
+func advancesMarker(im summary.Image) bool {
+	return !im.Skipped || im.AlreadyReleased
+}
+
 // advanceMarkers advances each built image's release marker to HEAD (and
 // pushes it) so the next run's change detection diffs against this release.
 // Only on a real push of a real release — but regardless of how THIS run
@@ -754,7 +761,7 @@ func advanceMarkers(o Options, p *Prepared, images []summary.Image) []error {
 	}
 	var markerErrs []error
 	for _, im := range images {
-		if im.Skipped {
+		if !advancesMarker(im) {
 			continue
 		}
 		ref := changed.MarkerRef(cd.MarkerPrefix, im.ID)
@@ -987,6 +994,42 @@ func announceBody(p *Prepared) (string, error) {
 // signs every member repository by digest. It returns one summary entry per
 // member. Safe to call concurrently.
 func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summary.Image, string, error) {
+	released, err := releasedMembers(o, p, r, grp)
+	if err != nil {
+		return groupSummaries(o, p, grp), "", err
+	}
+	if len(released) == 0 {
+		return buildGroupMembers(o, p, r, grp)
+	}
+	// Members whose commit tags already exist from this commit were released
+	// by an earlier run: rebuild nothing for them and tag nothing, but report
+	// them so their release markers still advance.
+	irs := groupSummaries(o, p, grp)
+	var out []summary.Image
+	var rest []imageEval
+	for i, m := range grp {
+		at, ok := released[m.plan.Image.ID]
+		if !ok {
+			rest = append(rest, m)
+			continue
+		}
+		fmt.Fprintf(progress, "==> %s already released from this commit (%s exists); not rebuilding\n", m.plan.Image.ID, at.Ref)
+		ir := irs[i]
+		ir.Skipped, ir.AlreadyReleased, ir.Pushed = true, true, false
+		ir.Signed, ir.SBOM, ir.Provenance, ir.Tested = false, false, false, false
+		ir.Reason = "already released: " + at.Ref + " exists"
+		ir.Digest = at.Digest
+		out = append(out, ir)
+	}
+	if len(rest) == 0 {
+		return out, "", nil
+	}
+	built, dep, err := buildGroupMembers(o, p, r, rest)
+	return append(out, built...), dep, err
+}
+
+// buildGroupMembers is buildGroup once the already-released members are out.
+func buildGroupMembers(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summary.Image, string, error) {
 	plans := make([]ImagePlan, len(grp))
 	for i, m := range grp {
 		plans[i] = m.plan
@@ -1029,7 +1072,8 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 	// appear. Until this point the artifact exists in the registries by
 	// digest alone, so a failed gate leaves nothing for a consumer to pull by
 	// name.
-	return irs, depSection, applyTags(r, repos, refs, digest)
+	commit, short := headCommit(p)
+	return irs, depSection, applyTags(r, repos, orderRefsForTagging(refs, commit, short), digest)
 }
 
 // applyTags points every published tag at the already-pushed digest, one
