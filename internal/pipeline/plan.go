@@ -113,6 +113,9 @@ func changeScope(o Options, repoRoot string, plan ImagePlan) (changed.Scope, err
 func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, scope changed.Scope, changedFiles []string, markerMode bool) (bool, string, error) {
 	switch {
 	case len(o.Only) > 0:
+		if r := o.PlanReasons[plan.Image.ID]; r != "" {
+			return true, r, nil
+		}
 		return true, "selected via --only", nil
 	case o.BuildAll:
 		return true, "tag on HEAD (versioning.require_tag)", nil

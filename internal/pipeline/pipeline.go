@@ -93,6 +93,9 @@ type Options struct {
 	// groups. Either way, the groups that did push are recorded (markers,
 	// notifications, summary) before the run fails.
 	KeepGoing bool
+	// PlanReasons maps image IDs to the reason the plan gave for building
+	// them, reported instead of "selected via --only" (see ReasonsFromPlan).
+	PlanReasons map[string]string
 	// BuildAll builds every image regardless of change detection: a tagged
 	// release under versioning.require_tag.
 	BuildAll bool
@@ -650,7 +653,11 @@ func floatingTag(src, tag string, ctx *tmpl.Context) (bool, error) {
 // every stage that needs a pushed artifact (sign, SBOM, scan, provenance,
 // GitHub release, announce).
 func Release(o Options) error {
-	o, err := releaseOptions(o)
+	o, err := expandOnly(o)
+	if err != nil {
+		return err
+	}
+	o, err = releaseOptions(o)
 	if err != nil {
 		return err
 	}
@@ -798,6 +805,10 @@ func publishStage(o Options, p *Prepared, r *run.Runner, changelogPath string, i
 // carries their refs, rather than re-resolving a version (which, under
 // registry versioning, would now be the next one).
 func Publish(o Options) error {
+	o, err := expandOnly(o)
+	if err != nil {
+		return err
+	}
 	p, err := Prepare(o)
 	if err != nil {
 		return err

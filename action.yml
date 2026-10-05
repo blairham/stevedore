@@ -55,6 +55,12 @@ outputs:
   plan:
     description: "The JSON build plan emitted by `command: plan` (matrix mode); empty for other commands."
     value: ${{ steps.run.outputs.plan }}
+  only:
+    description: "`command: plan` only: every planned image id, comma-joined — the `--only` of a final `publish` or `merge` step."
+    value: ${{ steps.run.outputs.only }}
+  pins:
+    description: "`command: plan` only: every planned image's `--pin-version id=ver`, space-joined, to go with `only`."
+    value: ${{ steps.run.outputs.pins }}
   summary:
     description: "Compact JSON release summary ({project, images: [{id, version, digest, repositories, pushed, skipped, reason, …}]}) written by `command: release`/`build`; empty for other commands. Filter on `pushed` before notifying downstream systems."
     value: ${{ steps.run.outputs.summary }}

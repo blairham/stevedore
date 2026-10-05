@@ -82,7 +82,10 @@ An `--only` run is one job of a matrix, so — like a `--split` leg — it creat
 GitHub release and posts no announcement; N jobs would otherwise publish N times.
 It still notifies `notify.webhook` and advances its own release markers. Run
 `stevedore publish` once after the matrix to publish. (`merge --only` behaves
-the same way.)
+the same way.) `--only all` selects every image, without listing their ids (unless an image
+is itself named `all`). An `--only` run's summary gives each image's reason as
+`selected via --only`; set `STEVEDORE_PLAN` to the plan document and it reports
+the plan's reason instead (`merge` too).
 
 When an image fails — its build, a gate, signing — the release stops building
 further images and fails, but the images that already finished are not

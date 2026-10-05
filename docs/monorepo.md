@@ -179,7 +179,7 @@ the JSON.
 A matrix job does **not** create the GitHub release or announce — with N jobs
 that would be N `gh release create` calls for one tag and N Slack posts. As with
 split legs and `merge`, one final job does it: `stevedore publish`, given every
-entry's `only` and `pins` (GitHub's `join(….include.*.only, ',')` collects them),
+entry's `only` and `pins` (the `plan` step's flat `only` and `pins` outputs),
 writes the changelog, creates the release named after the pushed version, and
 announces once. It runs only if every matrix job succeeded.
 
@@ -189,6 +189,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.plan }}
+      only: ${{ steps.plan.outputs.only }}   # every planned id, comma-joined
+      pins: ${{ steps.plan.outputs.pins }}   # every planned --pin-version
     steps:
       - uses: actions/checkout@v6
         with: {fetch-depth: 0}
@@ -206,6 +208,8 @@ jobs:
       - uses: actions/checkout@v6
         with: {fetch-depth: 0}
       - uses: blairham/stevedore@v1
+        env:
+          STEVEDORE_PLAN: ${{ needs.plan.outputs.matrix }}   # keep the plan's reasons in the summary
         with:
           command: release
           args: --only ${{ matrix.only }} ${{ matrix.pins }}
@@ -224,10 +228,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}   # for gh release create
         with:
           command: publish
-          args: >-
-            --only ${{ join(fromJson(needs.plan.outputs.matrix).include.*.only, ',') }}
-            ${{ join(fromJson(needs.plan.outputs.matrix).include.*.pins, ' ') }}
+          args: --only ${{ needs.plan.outputs.only }} ${{ needs.plan.outputs.pins }}
 ```
+
+The `plan` step's `only` and `pins` outputs are every entry's `only` and `pins`
+flattened (each image once, even under `--split-platforms`), so the final step
+needs no `jq` or `join`. They are step outputs rather than keys of the plan
+document because the document is used whole as the matrix, where every
+top-level key would become a matrix dimension.
+
+An `--only` run reports each image's reason as `selected via --only` — it knows
+nothing else. Give it the plan in `STEVEDORE_PLAN` (as above; `merge` reads it
+too) and the release summary keeps the reason the plan decided on instead.
+`--only all` selects every image without listing them.
 
 Entries carry the member `ids`, so a caller can also map per-entry metadata —
 e.g. pick a per-service cloud credential/role for single-member entries.
