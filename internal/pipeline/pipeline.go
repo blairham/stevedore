@@ -703,6 +703,11 @@ func Release(o Options) error {
 	if len(o.SplitPlatforms) > 0 {
 		toBuild, skipped = splitLegGroups(toBuild, skipped, o.SplitPlatforms)
 	}
+	if o.FromDigests {
+		if err := checkMergeInputs(o, p.Config.Dist, toBuild, skipped); err != nil {
+			return err
+		}
+	}
 	return buildAndFinish(o, p, r, toBuild, skipped, fpPath, state)
 }
 
@@ -1526,7 +1531,10 @@ func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label
 	if o.DryRun {
 		return nil
 	}
-	return writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), platforms, digest)
+	if err := writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), platforms, digest); err != nil {
+		return err
+	}
+	return writeSplitVersions(o.Dir, p.Config.Dist, grp)
 }
 
 // buildOrMerge produces the group's artifact and returns its digest: built and

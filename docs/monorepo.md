@@ -277,6 +277,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.plan }}
+      only: ${{ steps.plan.outputs.only }}   # every planned id, once
+      pins: ${{ steps.plan.outputs.pins }}   # every planned --pin-version
     steps:
       - uses: actions/checkout@v6
         with: {fetch-depth: 0}
@@ -320,9 +322,23 @@ jobs:
       - uses: docker/login-action@v4
         with: {registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}"}
       - uses: blairham/stevedore@v1
+        env:
+          STEVEDORE_PLAN: ${{ needs.plan.outputs.matrix }}   # keep the plan's reasons in the summary
         with:
           command: merge
+          # Merge what the legs built, at the versions they built: without
+          # these, merge re-runs change detection and version resolution.
+          args: --only ${{ needs.plan.outputs.only }} ${{ needs.plan.outputs.pins }}
 ```
+
+Give `merge` the plan's `only` and `pins`. On its own it decides again — change
+detection and version resolution — and by the time it runs a release marker may
+have moved or a registry gained a tag, so it could pick a different set or a
+different version from the one the legs built. It refuses rather than guess:
+each leg records the version it built beside its digests
+(`dist/digests/<image-id>/version`), and `merge` fails when it resolves another
+one, or when, without `--only`, its change detection skips an image the legs
+pushed digests for.
 
 The legs record each pushed digest as `dist/digests/<image-id>/<platform>`;
 `merge` refuses to publish while any configured platform has no digest, so a

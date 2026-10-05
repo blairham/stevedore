@@ -105,6 +105,11 @@ under `<dist>/digests/<image-id>/` for a later `stevedore merge`, which
 assembles the manifest list and runs the whole release tail. A leg builds
 only the platforms each image configures: an image whose `platforms` doesn't
 include the leg's is skipped (reported with the reason), and writes no digest.
+Each leg also records the version it built (`<dist>/digests/<image-id>/version`).
+Give `merge` the plan's `--only` and `--pin-version` (its `only` and `pins`
+outputs) so it releases exactly that; without them it re-runs change detection
+and version resolution, and refuses when it resolves a different version or
+skips an image the legs pushed digests for.
 See
 [Native multi-arch](monorepo.md#native-multi-arch-one-runner-per-platform).
 
