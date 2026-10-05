@@ -32,10 +32,10 @@ func TestGatesCoverEveryPlatform(t *testing.T) {
 			t.Errorf("per-platform report %s missing: %v", name, err)
 		}
 	}
-	if indexOf(calls, "docker run --rm --platform linux/amd64") < 0 {
+	if indexOf(calls, "docker run --rm --name stevedore-test-", " --platform linux/amd64 ") < 0 {
 		t.Errorf("native platform not smoke tested:\n%s", strings.Join(calls, "\n"))
 	}
-	if indexOf(calls, "docker run --rm --platform linux/arm64") >= 0 {
+	if indexOf(calls, "docker run --rm --name stevedore-test-", " --platform linux/arm64 ") >= 0 {
 		t.Errorf("non-native platform run without test.platforms: all:\n%s", strings.Join(calls, "\n"))
 	}
 
@@ -73,7 +73,7 @@ func TestSmokeTestAllUsesEmulation(t *testing.T) {
 	}
 	calls := readCalls(t, log)
 	for _, plat := range []string{"linux/amd64", "linux/arm64"} {
-		if indexOf(calls, "docker run --rm --platform "+plat) < 0 {
+		if indexOf(calls, "docker run --rm --name stevedore-test-", " --platform "+plat+" ") < 0 {
 			t.Errorf("%s not smoke tested:\n%s", plat, strings.Join(calls, "\n"))
 		}
 	}
