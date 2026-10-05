@@ -113,7 +113,9 @@ func Render(projectName, owner string, imgs []Image) string {
 		fmt.Fprintf(&b, "    dockerfile: %s\n", img.Dockerfile)
 		fmt.Fprintf(&b, "    context: %s   # set to \".\" if the build copies from the repo root\n", img.Context)
 		b.WriteString("    platforms: [linux/amd64, linux/arm64]\n")
-		fmt.Fprintf(&b, "    repositories: [\"ghcr.io/%s/%s\"]\n", owner, img.ID)
+		// The id keeps the directory's spelling, but a repository path must
+		// be lowercase: Docker refuses ghcr.io/your-org/MyCompany.Api.
+		fmt.Fprintf(&b, "    repositories: [\"ghcr.io/%s\"]\n", strings.ToLower(owner+"/"+img.ID))
 		b.WriteString("    tags: [\"{{ .Version }}\", \"{{ .ShortCommit }}\", \"latest\"]\n")
 		b.WriteString("    build_args: [\"VERSION={{ .Version }}\"]\n\n")
 	}
