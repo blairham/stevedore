@@ -12,6 +12,7 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -201,6 +202,7 @@ func FromGoReleaser(data []byte) ([]Image, error) {
 			Dockerfile         string   `yaml:"dockerfile"`
 			Goos               string   `yaml:"goos"`
 			Goarch             string   `yaml:"goarch"`
+			Goarm              string   `yaml:"goarm"`
 			BuildFlagTemplates []string `yaml:"build_flag_templates"`
 		} `yaml:"dockers"`
 	}
@@ -217,7 +219,9 @@ func FromGoReleaser(data []byte) ([]Image, error) {
 	for _, d := range doc.Dockers {
 		repos, tags := splitRefs(d.ImageTemplates)
 		tags = stripArchTags(tags)
-		key := strings.Join(repos, ",")
+		// Keyed on the repository set, not its order: per-arch entries that
+		// list the same repos differently are still one image.
+		key := strings.Join(slices.Sorted(slices.Values(repos)), ",")
 		img, ok := byRepo[key]
 		if !ok {
 			img = &Image{
@@ -230,7 +234,7 @@ func FromGoReleaser(data []byte) ([]Image, error) {
 			order = append(order, key)
 		}
 		img.Tags = mergeUnique(img.Tags, tags)
-		if p := platform(d.Goos, d.Goarch); p != "" {
+		if p := platform(d.Goos, d.Goarch, d.Goarm); p != "" {
 			img.Platforms = mergeUnique(img.Platforms, []string{p})
 		}
 		args, labels, plats := parseBuildFlags(d.BuildFlagTemplates)
@@ -304,14 +308,26 @@ func splitRef(ref string) (repo, tag string) {
 	return ref[:i], ref[i+1:]
 }
 
+// archTagSuffixes are GoReleaser's conventional per-arch tag suffixes. One is
+// stripped per tag, the first that matches, so a longer suffix is listed before
+// any it ends with.
+var archTagSuffixes = []string{
+	"-arm64v8", "-armv8", "-armv7", "-armv6", "-armv5",
+	"-armv{{ .Arm }}", "-armv{{.Arm}}",
+	"-amd64", "-arm64", "-arm", "-{{ .Arch }}", "-{{.Arch}}",
+}
+
 // stripArchTags drops GoReleaser's per-arch tag suffixes (e.g. "-amd64",
-// "-{{ .Arch }}") so the merged multi-arch image keeps clean tags.
+// "-armv7", "-{{ .Arch }}") so the merged multi-arch image keeps clean tags.
 func stripArchTags(tags []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, t := range tags {
-		for _, suf := range []string{"-amd64", "-arm64", "-arm", "-{{ .Arch }}", "-{{.Arch}}"} {
-			t = strings.TrimSuffix(t, suf)
+		for _, suf := range archTagSuffixes {
+			if trimmed, ok := strings.CutSuffix(t, suf); ok {
+				t = trimmed
+				break
+			}
 		}
 		if t != "" && !seen[t] {
 			seen[t] = true
@@ -321,14 +337,21 @@ func stripArchTags(tags []string) []string {
 	return out
 }
 
-func platform(goos, goarch string) string {
+// platform renders a GoReleaser docker entry's goos/goarch/goarm as an OCI
+// platform. goarm is the 32-bit arm variant (linux/arm/v7); without it the
+// platform is plain linux/arm.
+func platform(goos, goarch, goarm string) string {
 	if goarch == "" {
 		return ""
 	}
 	if goos == "" {
 		goos = "linux"
 	}
-	return goos + "/" + goarch
+	p := goos + "/" + goarch
+	if goarch == "arm" && goarm != "" {
+		p += "/v" + strings.TrimPrefix(goarm, "v")
+	}
+	return p
 }
 
 func mapToArgs(m map[string]string) []string {

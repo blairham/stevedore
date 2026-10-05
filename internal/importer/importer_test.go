@@ -4,6 +4,7 @@
 package importer
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -170,5 +171,34 @@ func TestFromBakeJSONDockerfileRelativeToContext(t *testing.T) {
 		if img.Dockerfile != want[img.ID] {
 			t.Errorf("%s: dockerfile = %q, want %q (context %q)", img.ID, img.Dockerfile, want[img.ID], img.Context)
 		}
+	}
+}
+
+// Per-arch entries listing the same repositories in a different order are one
+// image; goarm selects the arm variant; -armv7 and -arm64v8 suffixes are
+// stripped like -amd64 (#60).
+func TestFromGoReleaserOrderAndArmVariants(t *testing.T) {
+	imgs, err := FromGoReleaser([]byte(`
+dockers:
+  - image_templates: ["ghcr.io/acme/app:{{ .Version }}-amd64", "docker.io/acme/app:{{ .Version }}-amd64"]
+    goarch: amd64
+  - image_templates: ["docker.io/acme/app:{{ .Version }}-arm64v8", "ghcr.io/acme/app:{{ .Version }}-arm64v8"]
+    goarch: arm64
+  - image_templates: ["ghcr.io/acme/app:{{ .Version }}-armv7", "docker.io/acme/app:{{ .Version }}-armv7"]
+    goarch: arm
+    goarm: 7
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("want 1 merged image, got %d: %+v", len(imgs), imgs)
+	}
+	img := imgs[0]
+	if want := []string{"linux/amd64", "linux/arm64", "linux/arm/v7"}; !slices.Equal(img.Platforms, want) {
+		t.Errorf("platforms = %v, want %v", img.Platforms, want)
+	}
+	if want := []string{"{{ .Version }}"}; !slices.Equal(img.Tags, want) {
+		t.Errorf("tags = %v, want %v", img.Tags, want)
 	}
 }
