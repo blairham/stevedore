@@ -203,3 +203,20 @@ func TestSourceDateEpochEnv(t *testing.T) {
 		t.Errorf("buildx saw SOURCE_DATE_EPOCH=%q, want 1714979289", got)
 	}
 }
+
+func TestAnnotationArgs(t *testing.T) {
+	ann := map[string]string{"org.opencontainers.image.description": "an app", "a.b": "c"}
+	single := strings.Join(buildxArgs(Spec{Dockerfile: "D", Context: ".", Push: true, Platforms: []string{"linux/amd64"}, Annotations: ann}, ""), " ")
+	if !strings.Contains(single, "--annotation manifest:a.b=c --annotation manifest:org.opencontainers.image.description=an app") {
+		t.Errorf("single-platform annotations: %s", single)
+	}
+	multi := strings.Join(buildxArgs(Spec{Dockerfile: "D", Context: ".", Push: true, Platforms: []string{"linux/amd64", "linux/arm64"}, Annotations: ann}, ""), " ")
+	if !strings.Contains(multi, "--annotation manifest,index:a.b=c") {
+		t.Errorf("multi-platform annotations: %s", multi)
+	}
+	// A local --load build never reaches a registry; annotations stay off it.
+	load := strings.Join(buildxArgs(Spec{Dockerfile: "D", Context: ".", Load: true, Annotations: ann}, ""), " ")
+	if strings.Contains(load, "--annotation") {
+		t.Errorf("--load build carries annotations: %s", load)
+	}
+}

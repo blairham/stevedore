@@ -133,6 +133,8 @@ type ImagePlan struct {
 	// Version is the version this image was tagged with — its own under per-image
 	// registry versioning, otherwise the release version.
 	Version string
+	// Annotations are the rendered OCI annotations (see config.Image).
+	Annotations map[string]string
 	// SourceDateEpoch is the SOURCE_DATE_EPOCH passed to the build, or "" for
 	// none (source_date_epoch: false, or a repository with no commits).
 	SourceDateEpoch string
@@ -354,12 +356,46 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 		if err != nil {
 			return nil, err
 		}
+		if cfg.DefaultLabelsEnabled() {
+			addDefaultLabels(&plan, ctx)
+		}
 		if cfg.SourceDateEpochEnabled() {
 			plan.SourceDateEpoch = sourceDateEpoch(plan.BuildArgs, ctx)
 		}
 		plans = append(plans, plan)
 	}
 	return plans, nil
+}
+
+// renderMap renders every value of m; an error names the key. The result is
+// never nil, so defaults can be added to it.
+func renderMap(m map[string]string, ctx *tmpl.Context) (map[string]string, error) {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		rv, err := tmpl.Render(v, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", k, err)
+		}
+		out[k] = rv
+	}
+	return out, nil
+}
+
+// addDefaultLabels fills in the org.opencontainers.image.* labels a plan does
+// not set itself: source, revision, version and created. One with nothing to
+// say (no origin remote, no commit) is left out rather than set empty.
+// revision is also what the already-released check (memberReleased) reads.
+func addDefaultLabels(plan *ImagePlan, ctx *tmpl.Context) {
+	for k, v := range map[string]string{
+		"org.opencontainers.image.source":  ctx.SourceURL,
+		revisionLabel:                      ctx.Commit,
+		"org.opencontainers.image.version": plan.Version,
+		"org.opencontainers.image.created": ctx.CommitDate,
+	} {
+		if _, set := plan.Labels[k]; !set && v != "" {
+			plan.Labels[k] = v
+		}
+	}
 }
 
 // sourceDateEpoch is the SOURCE_DATE_EPOCH a build gets: an image's own
@@ -457,13 +493,11 @@ func resolvePlan(img config.Image, ctx *tmpl.Context, fp floatingPolicy, version
 			return ImagePlan{}, fmt.Errorf("image %s %s: %w", img.ID, f.name, err)
 		}
 	}
-	plan.Labels = map[string]string{}
-	for k, v := range img.Labels {
-		rv, err := tmpl.Render(v, imgCtx)
-		if err != nil {
-			return ImagePlan{}, fmt.Errorf("image %s label %s: %w", img.ID, k, err)
-		}
-		plan.Labels[k] = rv
+	if plan.Labels, err = renderMap(img.Labels, imgCtx); err != nil {
+		return ImagePlan{}, fmt.Errorf("image %s label %w", img.ID, err)
+	}
+	if plan.Annotations, err = renderMap(img.Annotations, imgCtx); err != nil {
+		return ImagePlan{}, fmt.Errorf("image %s annotation %w", img.ID, err)
 	}
 
 	floating := make([]bool, len(tags))
@@ -1587,6 +1621,14 @@ func buildKey(dir string, plan ImagePlan) string {
 	for _, k := range lkeys {
 		fmt.Fprintf(h, "label=%s=%s\n", k, plan.Labels[k])
 	}
+	akeys := make([]string, 0, len(plan.Annotations))
+	for k := range plan.Annotations {
+		akeys = append(akeys, k)
+	}
+	sort.Strings(akeys)
+	for _, k := range akeys {
+		fmt.Fprintf(h, "annotation=%s=%s\n", k, plan.Annotations[k])
+	}
 	for _, s := range plan.Image.Secrets {
 		fmt.Fprintf(h, "secret=%s\n", s.ID)
 	}
@@ -1671,6 +1713,7 @@ func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance)
 		CacheTo:         plan.CacheTo,
 		ExtraFlags:      plan.Image.ExtraFlags,
 		SourceDateEpoch: plan.SourceDateEpoch,
+		Annotations:     plan.Annotations,
 	}
 }
 

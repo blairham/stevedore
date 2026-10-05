@@ -29,12 +29,15 @@ images:
       - "latest"
     build_args:
       - "VERSION={{ .Version }}"
+    # org.opencontainers.image.{source,revision,version,created} are set by
+    # default: source from the origin remote, created from the commit date.
+    # image.source is what links a ghcr package to its repo (and makes it
+    # public alongside a public repo), so spell it out when the origin remote
+    # is not the repo people should land on.
     labels:
-      # Set image.source and ghcr links the package to the repo, which is also
-      # what makes the package public alongside a public repo.
       org.opencontainers.image.source: "https://github.com/acme/myapp"
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.revision: "{{ .Commit }}"
+    annotations:          # OCI annotations, on the manifest (and index)
+      org.opencontainers.image.description: "myapp, the service"
 
 # The gates run before signing and tagging, so a failing image is never signed
 # or tagged.

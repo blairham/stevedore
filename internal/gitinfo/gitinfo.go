@@ -40,6 +40,10 @@ type Info struct {
 	// commits. Unlike the wall clock it is the same on every build of the
 	// commit, which is what makes it the reproducible-build timestamp.
 	CommitTime time.Time
+	// SourceURL is the origin remote as a browsable https URL
+	// ("https://github.com/acme/app" for git@github.com:acme/app.git), with
+	// any credentials dropped; empty with no origin remote.
+	SourceURL string
 	// Branch is the current branch name, verbatim from git. On a detached HEAD
 	// — how every tag-triggered CI job checks a release out — git reports the
 	// literal string "HEAD", which is why Branches exists.
@@ -69,6 +73,7 @@ func Gather(ctx context.Context, dir string) (*Info, error) {
 
 	info.Commit = output(ctx, dir, "rev-parse", "HEAD")
 	info.ShortCommit = output(ctx, dir, "rev-parse", "--short", "HEAD")
+	info.SourceURL = HTTPSURL(output(ctx, dir, "remote", "get-url", "origin"))
 	if ct, err := strconv.ParseInt(output(ctx, dir, "log", "-1", "--format=%ct", "HEAD"), 10, 64); err == nil {
 		info.CommitTime = time.Unix(ct, 0).UTC()
 	}
@@ -191,6 +196,56 @@ func branchesContaining(ctx context.Context, dir string) []string {
 		}
 	}
 	return names
+}
+
+// HTTPSURL normalizes a git remote URL to the https URL of the repository:
+// scp-style ("git@host:owner/repo.git"), ssh://, git:// and http(s):// remotes
+// all become "https://host/owner/repo", without user info, port or ".git".
+// A local path, or anything else without a host, yields "".
+func HTTPSURL(remote string) string {
+	remote = strings.TrimSpace(remote)
+	host, path, ok := splitURLRemote(remote)
+	if !ok {
+		host, path = splitSCPRemote(remote)
+	}
+	if i := strings.LastIndexByte(host, '@'); i >= 0 {
+		host = host[i+1:] // user info, and with it any token
+	}
+	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	if len(host) < 2 || path == "" || strings.ContainsRune(host+path, '\\') {
+		return ""
+	}
+	return "https://" + host + "/" + path
+}
+
+// splitURLRemote splits a scheme://[user@]host[:port]/path remote; ok is false
+// when remote has no scheme. A scheme with no web page behind it (a local
+// file remote) yields an empty host.
+func splitURLRemote(remote string) (host, path string, ok bool) {
+	scheme, rest, ok := strings.Cut(remote, "://")
+	if !ok {
+		return "", "", false
+	}
+	switch strings.ToLower(scheme) {
+	case "https", "http", "ssh", "git", "git+ssh", "ssh+git":
+	default:
+		return "", "", true
+	}
+	host, path, _ = strings.Cut(rest, "/")
+	if i := strings.LastIndexByte(host, ':'); i >= 0 && !strings.Contains(host[i:], "@") {
+		host = host[:i] // the port: ssh's 22 is not the web server's
+	}
+	return host, path, true
+}
+
+// splitSCPRemote splits git's scp-like [user@]host:path syntax. A colon after
+// a slash makes it a local path instead ("./a:b"), as git itself reads it.
+func splitSCPRemote(remote string) (host, path string) {
+	i := strings.IndexByte(remote, ':')
+	if i < 0 || strings.Contains(remote[:i], "/") {
+		return "", ""
+	}
+	return remote[:i], remote[i+1:]
 }
 
 // OnBranch reports whether HEAD is on the named branch. On a detached HEAD it
