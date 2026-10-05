@@ -132,6 +132,9 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 - `sign.cosign.args` reach `cosign attest` too. (#100)
 - Fingerprint state is saved only after a real publish, and `dist/` is
   excluded under a relative `--dir`. (#96, #87)
+- The `--only-changed` fingerprint covers file permission bits and
+  `extra_flags`, so `chmod +x` or a flag-passed build arg is a change. The
+  first run after upgrading rebuilds every image once. (#115)
 - Change detection sees both sides of a rename and non-ASCII paths, tolerates
   a leading `./` on path globs, and matches the `origin` remote by name.
   (#95, #109, #113)
