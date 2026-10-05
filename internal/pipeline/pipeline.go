@@ -1080,6 +1080,10 @@ func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label
 	// Only the leg's platforms the image is configured for: splitLegGroups
 	// already dropped the groups with none, so this is never empty.
 	platforms := legPlatforms(o.SplitPlatforms, grp[0].plan.Image.Platforms)
+	if len(platforms) == 0 {
+		// An empty list would drop --platform and build the host's default.
+		return fmt.Errorf("image %s is not configured for split platform(s) %s", grp[0].plan.Image.ID, strings.Join(o.SplitPlatforms, ","))
+	}
 	fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(platforms, ","))
 	spec := toSpec(grp[0].plan, o.Dir, true, false, p.Config.Provenance)
 	spec.Platforms = platforms
