@@ -428,3 +428,27 @@ func TestNotifyWebhookIsRequiredDefaultsTrue(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateCache(t *testing.T) {
+	base := func(c Cache) *Config {
+		return &Config{Version: 1, Cache: c, Images: []Image{{ID: "a", Repositories: []string{"r/a"}}}}
+	}
+	for _, c := range []struct {
+		cache Cache
+		ok    bool
+	}{
+		{Cache{}, true},
+		{Cache{Type: "none"}, true},
+		{Cache{Type: "gha"}, true},
+		{Cache{Type: "gha", Ref: "x"}, false},
+		{Cache{Type: "registry"}, false},
+		{Cache{Type: "registry", Ref: "ghcr.io/acme/cache", Mode: "min"}, true},
+		{Cache{Type: "local", Ref: "/tmp/c", Mode: "all"}, false},
+		{Cache{Type: "s3"}, false},
+		{Cache{Ref: "x"}, false},
+	} {
+		if err := base(c.cache).Validate(); (err == nil) != c.ok {
+			t.Errorf("%+v: Validate = %v, want ok=%v", c.cache, err, c.ok)
+		}
+	}
+}

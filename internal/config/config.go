@@ -75,6 +75,11 @@ type Config struct {
 	// scalars are replaced whole, never concatenated. It may not set id.
 	ImageDefaults Image `yaml:"image_defaults" jsonschema:"without=id"`
 
+	// Cache wires a BuildKit build cache into every image, scoped per image
+	// (and per platform on a split leg). An image with its own cache_from or
+	// cache_to keeps those instead.
+	Cache Cache `yaml:"cache"`
+
 	Images     []Image    `yaml:"images"`
 	Sign       Sign       `yaml:"sign"`
 	SBOM       SBOM       `yaml:"sbom"`
@@ -329,9 +334,10 @@ type Image struct {
 	Project string `yaml:"project"`
 
 	// CacheFrom lists buildx --cache-from sources, e.g.
-	// "type=registry,ref=ghcr.io/acme/myapp:buildcache". Values may contain
+	// "type=registry,ref=ghcr.io/acme/myapp:buildcache". Setting it (or
+	// CacheTo) takes the image out of the top-level cache. Values may contain
 	// templates; entries that render to an empty string are skipped, so a
-	// value like '{{ index .Env "STEVEDORE_CACHE_FROM" }}' enables caching only where
+	// value like '{{ env "STEVEDORE_CACHE_FROM" }}' enables caching only where
 	// the environment provides it (e.g. CI) without breaking local builds.
 	CacheFrom []string `yaml:"cache_from"`
 
@@ -687,6 +693,9 @@ func (c *Config) Validate() error {
 	if err := c.Scan.validate(); err != nil {
 		return err
 	}
+	if err := c.Cache.validate(); err != nil {
+		return err
+	}
 	if err := c.Provenance.validate(); err != nil {
 		return err
 	}
@@ -791,6 +800,59 @@ func outputFlag(scanner, arg string) string {
 		}
 	}
 	return ""
+}
+
+// Cache is the top-level build cache. stevedore renders the buildx
+// --cache-from/--cache-to entries itself, with a scope per image — and per
+// platform on a split leg, so the legs of one image do not evict each other.
+type Cache struct {
+	// Type is gha (the GitHub Actions cache), registry (a cache image per
+	// scope, tagged <ref>:<scope>), local (a directory per scope,
+	// <ref>/<scope>) or none. Empty is none.
+	Type string `yaml:"type"`
+	// Ref is where the cache lives: a repository for registry, a directory
+	// for local. Not used by gha. May contain templates.
+	Ref string `yaml:"ref"`
+	// Mode is the cache-to mode, min or max (default max: cache every
+	// intermediate layer, which is what makes a multi-stage build cheap).
+	Mode string `yaml:"mode"`
+}
+
+// Cache types.
+const (
+	CacheGHA      = "gha"
+	CacheRegistry = "registry"
+	CacheLocal    = "local"
+	CacheNone     = "none"
+)
+
+// Enabled reports whether the cache is configured to do anything.
+func (c Cache) Enabled() bool { return c.Type != "" && c.Type != CacheNone }
+
+func (c Cache) validate() error {
+	switch c.Type {
+	case "", CacheNone:
+		if c.Ref != "" || c.Mode != "" {
+			return fmt.Errorf("cache.ref and cache.mode need a cache.type")
+		}
+		return nil
+	case CacheGHA:
+		if c.Ref != "" {
+			return fmt.Errorf("cache.ref is not used by type gha (the scope is per image); remove it")
+		}
+	case CacheRegistry, CacheLocal:
+		if c.Ref == "" {
+			return fmt.Errorf("cache.type %s needs cache.ref (a %s)", c.Type, map[string]string{CacheRegistry: "repository", CacheLocal: "directory"}[c.Type])
+		}
+	default:
+		return fmt.Errorf("cache.type %q unsupported (want gha, registry, local or none)", c.Type)
+	}
+	switch c.Mode {
+	case "", "min", "max":
+		return nil
+	default:
+		return fmt.Errorf("cache.mode %q invalid (want min or max)", c.Mode)
+	}
 }
 
 func (p Provenance) validate() error {

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"text/template"
 	"text/template/parse"
@@ -223,6 +224,23 @@ var funcs = template.FuncMap{
 	"trimPrefix": strings.TrimPrefix,
 	"trimSuffix": strings.TrimSuffix,
 	"json":       toJSON,
+	"env":        os.Getenv,
+}
+
+// funcsFor is funcs with env bound to data's environment when data is a
+// release context — {{ env "X" }} reads what {{ .Env.X }} reads, but renders
+// "" for an unset variable where .Env.X fails the render.
+func funcsFor(data any) template.FuncMap {
+	c, ok := data.(*Context)
+	if !ok || c.Env == nil {
+		return funcs
+	}
+	out := make(template.FuncMap, len(funcs))
+	for k, v := range funcs {
+		out[k] = v
+	}
+	out["env"] = func(name string) string { return c.Env[name] }
+	return out
 }
 
 // toJSON encodes v as JSON, so a template that builds a JSON document (the
@@ -248,7 +266,7 @@ func Parse(s string) error {
 // helper functions and missingkey=error as Render. It is for templates whose
 // data is not the release context, such as the notify payload.
 func RenderData(s string, data any) (string, error) {
-	t, err := template.New("stevedore").Funcs(funcs).Option("missingkey=error").Parse(s)
+	t, err := template.New("stevedore").Funcs(funcsFor(data)).Option("missingkey=error").Parse(s)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", s, err)
 	}

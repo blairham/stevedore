@@ -223,3 +223,14 @@ func TestCommitDate(t *testing.T) {
 		t.Errorf("no commit: CommitDate, CommitTimestamp = %q, %d", c.CommitDate, c.CommitTimestamp)
 	}
 }
+
+// env renders "" for an unset variable where .Env.X fails the render.
+func TestEnvFunc(t *testing.T) {
+	ctx := testCtx() // Env: FOO=bar
+	if got, err := Render(`{{ env "FOO" }}|{{ env "NOPE" }}`, ctx); err != nil || got != "bar|" {
+		t.Errorf("env = %q, %v; want \"bar|\"", got, err)
+	}
+	if _, err := Render(`{{ .Env.NOPE }}`, ctx); err == nil {
+		t.Error(".Env.NOPE should still fail the render")
+	}
+}

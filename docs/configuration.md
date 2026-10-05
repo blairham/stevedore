@@ -18,6 +18,11 @@ source_date_epoch: true   # pass SOURCE_DATE_EPOCH=<commit time> to every build
                           # (build arg + buildx env); false to opt out
 dist: dist                # output dir for SBOMs and the changelog
 
+cache:                    # build cache for every image (see "Build cache")
+  type: gha               # gha | registry | local | none (default none)
+  # ref: ghcr.io/acme/buildcache   # registry: a repository; local: a directory
+  # mode: max             # cache-to mode, min | max (default max)
+
 image_defaults:           # merged under every image (see "Image defaults")
   platforms: [linux/amd64, linux/arm64]
 
@@ -53,14 +58,15 @@ images:
         # optional: true  # a real release REFUSES to start without it, unless
       # - id: npmrc        # the secret is marked optional.
       #   file: ./.npmrc
-    cache_from:           # buildx --cache-from sources; empty-rendering
-      # entries are skipped, so an env-templated value enables caching only
-      # where the environment provides it (e.g. CI) and stays inert locally
+    cache_from:           # buildx --cache-from sources, instead of the top-level
+      # cache for this image; empty-rendering entries are skipped, so an
+      # env-templated value enables caching only where the environment
+      # provides it (e.g. CI) and stays inert locally
       - "type=registry,ref=ghcr.io/acme/myapp:buildcache"
-      # - '{{ index .Env "STEVEDORE_CACHE_FROM" }}'
+      # - '{{ env "STEVEDORE_CACHE_FROM" }}'
     cache_to:             # buildx --cache-to destinations (same skip rule)
       - "type=registry,ref=ghcr.io/acme/myapp:buildcache,mode=max"
-      # - '{{ index .Env "STEVEDORE_CACHE_TO" }}'
+      # - '{{ env "STEVEDORE_CACHE_TO" }}'
     paths:                # change-detection globs (see Monorepos); ** supported.
       - "services/myapp/**"   # omitted: the build context minus .dockerignore,
                               # plus the Dockerfile and this config
@@ -281,7 +287,25 @@ undefined field is an error (no silent empty strings). Available fields:
 | `.Detached` | `true` when HEAD points at a commit rather than a branch (any tag-triggered CI release) |
 | `.Env.NAME` | environment variable `NAME` |
 
-Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`, `json` (encodes a value as JSON).
+Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`, `json` (encodes a value as JSON), `env` (`{{ env "NAME" }}` is the environment variable, or `""` when it is unset — where `{{ .Env.NAME }}` fails the render).
+
+## Build cache
+
+The top-level `cache:` wires a BuildKit cache into every image, so neither the config
+nor the workflow has to spell out a scope per image:
+
+| `type` | `--cache-from` / `--cache-to` for image `api` |
+|--------|-----------------------------------------------|
+| `gha` | `type=gha,scope=api` / `type=gha,scope=api,mode=max` |
+| `registry` | `type=registry,ref=<ref>:api` / `…,mode=max` — one cache tag per scope |
+| `local` | `type=local,src=<ref>/api` / `type=local,dest=<ref>/api,mode=max` |
+| `none` (or absent) | none |
+
+On a split leg (`release --split linux/arm64`) the scope also names the leg's
+platforms — `api-linux-arm64` — so legs running in parallel on different runners do not
+overwrite each other's cache. `ref` may be templated (`{{ env "REGISTRY" }}/cache`,
+`{{ .ID }}`). An image that sets its own `cache_from` or `cache_to` keeps exactly those
+and takes nothing from `cache:`.
 
 ## Image defaults
 

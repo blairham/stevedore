@@ -136,6 +136,11 @@ type ImagePlan struct {
 	// Version is the version this image was tagged with — its own under per-image
 	// registry versioning, otherwise the release version.
 	Version string
+	// Cache is the top-level cache as it applies to this image, nil when the
+	// image has none or brings its own cache_from/cache_to. CacheFrom and
+	// CacheTo already hold its entries for a whole-image build; a split leg
+	// re-scopes them to its platforms.
+	Cache *autoCache
 	// Annotations are the rendered OCI annotations (see config.Image).
 	Annotations map[string]string
 	// SourceDateEpoch is the SOURCE_DATE_EPOCH passed to the build, or "" for
@@ -361,6 +366,9 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 		}
 		if cfg.DefaultLabelsEnabled() {
 			addDefaultLabels(&plan, ctx)
+		}
+		if err := applyCache(cfg.Cache, &plan, ctx); err != nil {
+			return nil, err
 		}
 		if cfg.SourceDateEpochEnabled() {
 			plan.SourceDateEpoch = sourceDateEpoch(plan.BuildArgs, ctx)
@@ -1486,6 +1494,12 @@ func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label
 	}
 	fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(platforms, ","))
 	spec := toSpec(grp[0].plan, o.Dir, true, false, p.Config.Provenance)
+	if c := grp[0].plan.Cache; c != nil {
+		// Each leg its own scope: legs run in parallel on different runners,
+		// and one scope shared between them is overwritten by whichever
+		// finishes last.
+		spec.CacheFrom, spec.CacheTo = c.entries(cacheScope(grp[0].plan.Image.ID, platforms))
+	}
 	spec.Platforms = platforms
 	spec.PushByDigest = true
 	spec.Refs = repos // untagged: bare repo names
