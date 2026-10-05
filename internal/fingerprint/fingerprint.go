@@ -21,12 +21,38 @@ import (
 )
 
 // skipDirs are directories never included in a fingerprint (VCS metadata and
-// generated build output that don't affect the source-level inputs).
+// dependencies that don't affect the source-level inputs).
 var skipDirs = map[string]bool{
 	".git":         true,
-	"obj":          true, // .NET build output
-	"bin":          true, // .NET build output
 	"node_modules": true, // JS deps
+}
+
+// dotnetOutputDirs are .NET build output, skipped only beside a project file
+// (see isDotnetOutput). Anywhere else bin/ is as likely to hold a COPY'd
+// entrypoint script as build output, and hiding it let an edit there leave the
+// fingerprint unchanged.
+var dotnetOutputDirs = map[string]bool{"bin": true, "obj": true}
+
+// dotnetProjectExts are the MSBuild project files whose directory gets the
+// bin/ and obj/ output folders.
+var dotnetProjectExts = map[string]bool{".csproj": true, ".fsproj": true, ".vbproj": true}
+
+// isDotnetOutput reports whether dir, a bin/ or obj/ directory, sits beside a
+// .NET project file — i.e. is that project's build output.
+func isDotnetOutput(dir string) bool {
+	if !dotnetOutputDirs[filepath.Base(dir)] {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Dir(dir))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && dotnetProjectExts[strings.ToLower(filepath.Ext(e.Name()))] {
+			return true
+		}
+	}
+	return false
 }
 
 // Compute returns a hex digest of the build inputs for img: the Dockerfile, the
@@ -111,9 +137,10 @@ func hashTree(h io.Writer, root, distDir string) error {
 }
 
 // walkFiles returns the root-relative paths of the files under root that keep
-// accepts, sorted. Skipped dirs and the dist dir (when it lives under root) are
-// not descended into, and symlinks are not followed. distDir must be absolute
-// and clean, as filepath.Abs returns it.
+// accepts, sorted. Skipped dirs, .NET build output, and the dist dir (when it
+// lives under root) are not descended into, though root itself always is, and
+// symlinks are not followed. distDir must be absolute and clean, as
+// filepath.Abs returns it.
 func walkFiles(root, distDir string, keep func(rel string) bool) ([]string, error) {
 	var rels []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -121,7 +148,7 @@ func walkFiles(root, distDir string, keep func(rel string) bool) ([]string, erro
 			return err
 		}
 		if d.IsDir() {
-			if skipDirs[d.Name()] {
+			if path != root && (skipDirs[d.Name()] || isDotnetOutput(path)) {
 				return filepath.SkipDir
 			}
 			if abs, absErr := filepath.Abs(path); absErr == nil && abs == distDir {
