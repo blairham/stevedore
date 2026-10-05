@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -43,13 +42,11 @@ type ContextScope struct {
 
 // RepoRoot returns the top level of the git work tree containing dir.
 func RepoRoot(ctx context.Context, dir string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := git(ctx, dir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // LoadContextScope builds the default scope for an image whose build context

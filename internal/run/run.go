@@ -33,11 +33,15 @@ func New(ctx context.Context, dryRun, verbose bool) *Runner {
 // Run executes name with args, streaming output. In dry-run mode it prints the
 // command and returns nil without executing.
 func (r *Runner) Run(name string, args ...string) error {
+	return r.run(r.Context(), name, args)
+}
+
+func (r *Runner) run(ctx context.Context, name string, args []string) error {
 	r.echo(name, args)
 	if r.DryRun {
 		return nil
 	}
-	cmd := exec.CommandContext(r.Context(), name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = r.out()
 	cmd.Stderr = r.err()
 	cmd.Stdin = os.Stdin
@@ -55,22 +59,85 @@ func (r *Runner) Preview(name string, args ...string) {
 }
 
 // Capture runs the command and returns its stdout. It executes even in dry-run
-// mode, since it is used for read-only queries (e.g. reading a digest file).
+// mode, since it is used for read-only queries (e.g. reading a digest file),
+// and so is echoed under --verbose with the "+ " of a command that ran, never
+// the "[dry-run] " of one that did not.
 func (r *Runner) Capture(name string, args ...string) (string, error) {
+	return r.capture(r.Context(), name, args)
+}
+
+func (r *Runner) capture(ctx context.Context, name string, args []string) (string, error) {
 	if r.Verbose {
-		r.echo(name, args)
+		r.echoRan(name, args)
 	}
-	out, err := exec.CommandContext(r.Context(), name, args...).Output()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
+func (r *Runner) refresh(ctx context.Context, name string, args []string) error {
+	if r.DryRun || r.Verbose {
+		r.echoRan(name, args)
+	}
+	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// Packages whose API takes a context rather than a Runner (internal/changed,
+// internal/gitinfo) reach the invocation's Runner through the context: the
+// pipeline attaches it with WithRunner, and Exec, Query and
+// Refresh start commands through it, bound to the context passed. A
+// context without one gets a quiet Runner that executes everything.
+
+type runnerKey struct{}
+
+// WithRunner returns ctx carrying r.
+func WithRunner(ctx context.Context, r *Runner) context.Context {
+	return context.WithValue(ctx, runnerKey{}, r)
+}
+
+func fromContext(ctx context.Context) *Runner {
+	if r, ok := ctx.Value(runnerKey{}).(*Runner); ok && r != nil {
+		return r
+	}
+	return &Runner{}
+}
+
+// Exec is Run through ctx's Runner: skipped (and echoed) under dry-run.
+func Exec(ctx context.Context, name string, args ...string) error {
+	return fromContext(ctx).run(ctx, name, args)
+}
+
+// Query is Capture through ctx's Runner: a read-only query that runs
+// under dry-run too and is echoed under verbose.
+func Query(ctx context.Context, name string, args ...string) (string, error) {
+	return fromContext(ctx).capture(ctx, name, args)
+}
+
+// Refresh runs a command that changes only local state the run itself
+// has to read in order to plan — fetching git refs, say. Unlike Run it
+// executes under dry-run too, because the plan would be wrong without it;
+// unlike Capture it is echoed under dry-run as well as verbose, because it
+// does change something. The command's own output is in the error when it
+// fails.
+func Refresh(ctx context.Context, name string, args ...string) error {
+	return fromContext(ctx).refresh(ctx, name, args)
+}
+
 // Has reports whether an executable is available on PATH.
 func Has(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// echoRan echoes a command that executes whatever the mode.
+func (r *Runner) echoRan(name string, args []string) {
+	fmt.Fprintln(r.err(), "+ "+name+" "+strings.Join(quote(args), " "))
 }
 
 func (r *Runner) echo(name string, args []string) {
