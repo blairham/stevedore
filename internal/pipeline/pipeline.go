@@ -106,7 +106,8 @@ type ImagePlan struct {
 	CacheFrom []string
 	CacheTo   []string
 	// Paths are the resolved dependency globs for change detection (per-image
-	// Paths plus any graph-resolved directories). Empty means unscoped.
+	// Paths plus any graph-resolved directories). Empty means change detection
+	// falls back to the build context (see changeScope).
 	Paths []string
 	// Version is the version this image was tagged with — its own under per-image
 	// registry versioning, otherwise the release version.

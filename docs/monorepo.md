@@ -7,7 +7,7 @@ change. There are two modes:
 
 | Mode | How it decides | Best for |
 |------|----------------|----------|
-| `--changed-since <ref>` | git diff since a ref; an image builds if a changed file matches its paths | CI (stateless — compare a PR to `main`) |
+| `--changed-since <ref>` | git diff since a ref; an image builds if a changed file is in its [scope](#scoping-each-image) | CI (stateless — compare a PR to `main`) |
 | `--only-changed` | content fingerprint vs. the last release, stored in `<dist>/fingerprints.json` | local iteration |
 | `change_detection.marker_refs` | each image diffs against **its own** last-release git ref (`refs/releases/image/<id>`), advanced after each push | CI, per-image release cadence (stateless, no ref to pass) |
 
@@ -43,10 +43,49 @@ stevedore release --changed-since origin/main
 
 ## Scoping each image
 
+Every image has a **scope**: the files whose change rebuilds it. A diff since the
+base (`--changed-since` or the image's release marker) that is empty leaves every
+image unchanged, whatever its scope. Otherwise an image rebuilds when a changed
+file falls in its scope or matches `change_detection.shared_paths`.
+
+### The default: the build context
+
+An image that declares no `paths` (and gets none from a resolver) is scoped to
+what `docker build` would actually send it:
+
+- every file under its **build context** directory,
+- minus what the context's **dockerignore** excludes — `<Dockerfile>.dockerignore`
+  next to the Dockerfile when it exists (BuildKit's rule), otherwise
+  `<context>/.dockerignore`, parsed with Docker's own matcher, so `!` re-inclusion,
+  `**`, a leading `/` and excluded parent directories behave exactly as in a build,
+- plus the **Dockerfile** (wherever it lives), the dockerignore file itself, and
+  `.stevedore.yaml` (build args, target, and platforms live there).
+
+So a README edit outside `services/api/` — or a `*.md` inside it that its
+`.dockerignore` drops — does not release an image built from `services/api`:
+
+```sh
+stevedore release --changed-since HEAD~1
+# ==> skipping api (no matching files in context services/api (.dockerignore) since HEAD~1)
+```
+
+The plan reason names the scope it used, so a surprising rebuild says which file
+reached the image and through which context. An image whose context is the repo
+root (`.`) with no dockerignore is still rebuilt by any change; add a
+`.dockerignore` (it shrinks the build context too) or declare `paths`. Only an
+image whose context is not a local directory — a remote git or tarball URL — is
+**unscoped**: git cannot see it, so it always builds.
+
+This default applies to the diff-based modes (`--changed-since`, marker refs).
+An `--only-changed` fingerprint of an image without `paths` still hashes its whole
+context directory, dockerignored files included.
+
+### Declaring paths
+
 The hard case is **many images built from one Dockerfile and one context** (they
-differ only by a build arg). Without scoping, any change rebuilds everything —
-because every image's context is the whole repo. Declare what each image actually
-depends on:
+differ only by a build arg). Their default scope is the same shared context, so a
+change to any service rebuilds every one of them. Declare what each image actually
+depends on; `paths` replaces the default scope entirely:
 
 ```yaml
 change_detection:

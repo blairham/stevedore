@@ -50,9 +50,23 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 		}
 	}
 
+	// Diff-based detection needs each image's scope in repository-relative
+	// terms, which is what git reports.
+	var repoRoot string
+	if o.ChangedSince != "" || markerMode {
+		var err error
+		if repoRoot, err = changed.RepoRoot(o.context(), o.Dir); err != nil {
+			return nil, err
+		}
+	}
+
 	var evals []imageEval
 	for _, plan := range p.Plans {
-		ch, reason, err := changeDecision(o, cd, plan, changedFiles, markerMode)
+		scope, err := changeScope(o, repoRoot, plan)
+		if err != nil {
+			return nil, err
+		}
+		ch, reason, err := changeDecision(o, cd, plan, scope, changedFiles, markerMode)
 		if err != nil {
 			return nil, err
 		}
@@ -69,15 +83,35 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 	return evals, nil
 }
 
+// changeScope returns the files plan's image is built from, for diff-based
+// change detection: its resolved paths when it has any, otherwise its build
+// context filtered by the context's dockerignore (see changed.ContextScope).
+// repoRoot is empty when no diff will be taken, and so is the scope.
+func changeScope(o Options, repoRoot string, plan ImagePlan) (changed.Scope, error) {
+	scope := changed.Scope{Paths: plan.Paths}
+	if repoRoot == "" || len(plan.Paths) > 0 {
+		return scope, nil
+	}
+	cs, ok, err := changed.LoadContextScope(repoRoot,
+		abs(o.Dir, plan.Image.Context), abs(o.Dir, plan.Image.Dockerfile), o.ConfigPath)
+	if err != nil {
+		return scope, fmt.Errorf("image %s: %w", plan.Image.ID, err)
+	}
+	if ok {
+		scope.Context = cs
+	}
+	return scope, nil
+}
+
 // changeDecision reports whether plan's image changed, and why: --only
 // selects unconditionally, --changed-since diffs against that ref, marker mode
 // against the image's own release marker, and otherwise everything changed.
-func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, changedFiles []string, markerMode bool) (bool, string, error) {
+func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, scope changed.Scope, changedFiles []string, markerMode bool) (bool, string, error) {
 	switch {
 	case len(o.Only) > 0:
 		return true, "selected via --only", nil
 	case o.ChangedSince != "":
-		d := changed.Evaluate(plan.Paths, cd.SharedPaths, changedFiles)
+		d := changed.Evaluate(scope, cd.SharedPaths, changedFiles)
 		return d.Changed, fmt.Sprintf("%s since %s", d.Reason, o.ChangedSince), nil
 	case markerMode:
 		ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
@@ -92,7 +126,7 @@ func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, change
 		if err != nil {
 			return false, "", err
 		}
-		d := changed.Evaluate(plan.Paths, cd.SharedPaths, files)
+		d := changed.Evaluate(scope, cd.SharedPaths, files)
 		if diverged {
 			fmt.Fprintf(progress, "warning: release marker %s has diverged from HEAD; diffing from merge base %.8s until it is reset\n", ref, base)
 			return d.Changed, fmt.Sprintf("%s since merge base %.8s (release marker diverged)", d.Reason, base), nil

@@ -20,6 +20,6 @@ func FuzzMatch(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, pattern, path string) {
 		_ = Match([]string{pattern}, path)
-		_ = Evaluate([]string{pattern}, nil, []string{path})
+		_ = Evaluate(Scope{Paths: []string{pattern}}, nil, []string{path})
 	})
 }

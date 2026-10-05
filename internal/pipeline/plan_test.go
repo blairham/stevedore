@@ -4,10 +4,16 @@
 package pipeline
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/blairham/stevedore/internal/config"
+	"github.com/blairham/stevedore/internal/fingerprint"
 )
 
 func evalFor(id, dockerfile, version string, changed bool, reason string) imageEval {
@@ -130,4 +136,115 @@ func TestValidateImageIDs(t *testing.T) {
 	if err := validateImageIDs(cfg, Options{PinVersions: map[string]string{"nope": "1.0.0"}}); err == nil {
 		t.Error("unknown --pin-version id should error")
 	}
+}
+
+// unscopedRepo builds a git repo with one image that declares no paths: its
+// context is services/api, whose .dockerignore drops Markdown. It returns the
+// repo dir and a helper that writes a file and commits it.
+func unscopedRepo(t *testing.T) (string, func(name string)) {
+	t.Helper()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t.co",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t.co",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	commit := func(name string) {
+		t.Helper()
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(name+time.Now().String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", name)
+		git("commit", "-q", "-m", name)
+	}
+	git("init", "-q", "-b", "main")
+	for _, f := range []string{".stevedore.yaml", "README.md", "services/api/Dockerfile", "services/api/main.go"} {
+		commit(f)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "services/api/.dockerignore"), []byte("*.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "dockerignore")
+	return dir, commit
+}
+
+func unscopedPrepared(dir string, markers bool) (Options, *Prepared) {
+	cfg := &config.Config{Dist: "dist"}
+	cfg.ChangeDetection.MarkerRefs = markers
+	cfg.ChangeDetection.MarkerPrefix = "refs/releases/image/"
+	o := Options{Dir: dir, ConfigPath: filepath.Join(dir, ".stevedore.yaml")}
+	p := &Prepared{Config: cfg, Plans: []ImagePlan{{
+		Image: config.Image{ID: "api", Dockerfile: "services/api/Dockerfile", Context: "services/api"},
+	}}}
+	return o, p
+}
+
+// An image with no paths used to count as changed on every commit, so a
+// README-only commit released it. Its default scope is now its build context
+// minus what its .dockerignore drops.
+func TestEvaluateImages_UnscopedImageUsesItsContext(t *testing.T) {
+	dir, commit := unscopedRepo(t)
+	for _, tc := range []struct {
+		file   string
+		want   bool
+		reason string
+	}{
+		{"README.md", false, "no matching files in context services/api (.dockerignore) since HEAD~1"},
+		{"services/api/NOTES.md", false, "no matching files in context services/api (.dockerignore) since HEAD~1"},
+		{"services/api/main.go", true, "services/api/main.go (in context services/api (.dockerignore)) since HEAD~1"},
+		{"services/api/Dockerfile", true, "services/api/Dockerfile (in context"},
+		{".stevedore.yaml", true, ".stevedore.yaml (in context"},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			commit(tc.file)
+			o, p := unscopedPrepared(dir, false)
+			o.ChangedSince = "HEAD~1"
+			evals, err := evaluateImages(o, p, fingerprint.State{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if e := evals[0]; e.changed != tc.want || !strings.HasPrefix(e.reason, tc.reason) {
+				t.Errorf("changed=%v reason=%q, want changed=%v reason starting %q", e.changed, e.reason, tc.want, tc.reason)
+			}
+		})
+	}
+}
+
+// Under marker refs an empty diff since the marker — a re-run of the commit
+// already released — is unchanged, and so is a commit outside the context.
+func TestEvaluateImages_UnscopedImageMarkerMode(t *testing.T) {
+	dir, commit := unscopedRepo(t)
+	cmd := exec.Command("git", "update-ref", "refs/releases/image/api", "HEAD")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("update-ref: %v\n%s", err, out)
+	}
+	check := func(want bool, reason string) {
+		t.Helper()
+		o, p := unscopedPrepared(dir, true)
+		evals, err := evaluateImages(o, p, fingerprint.State{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e := evals[0]; e.changed != want || e.reason != reason {
+			t.Errorf("changed=%v reason=%q, want changed=%v reason %q", e.changed, e.reason, want, reason)
+		}
+	}
+	check(false, "no files changed since its release marker")
+	commit("README.md")
+	check(false, "no matching files in context services/api (.dockerignore) since its release marker")
+	commit("services/api/main.go")
+	check(true, "services/api/main.go (in context services/api (.dockerignore)) since its release marker")
 }
