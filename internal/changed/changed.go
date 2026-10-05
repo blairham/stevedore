@@ -18,20 +18,27 @@ import (
 
 // FilesSince returns the repo-relative paths that differ between ref and the
 // current working tree. On a clean checkout this is the ref..HEAD change set.
+//
+// Renames are reported as a deletion plus an addition (--no-renames), so a file
+// moved out of an image's scope still marks that image changed; with rename
+// detection git names only the destination. Paths come back verbatim and
+// NUL-separated (core.quotePath=false, -z): git otherwise C-quotes a non-ASCII
+// name ("caf\303\251.txt", quotes included), which matches no glob.
 func FilesSince(ctx context.Context, dir, ref string) ([]string, error) {
 	if ref == "" {
 		return nil, fmt.Errorf("changed-since requires a git ref")
 	}
-	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only", ref)
+	cmd := exec.CommandContext(ctx, "git", "-c", "core.quotePath=false",
+		"diff", "--name-only", "--no-renames", "-z", ref, "--")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff against %s: %w", ref, err)
 	}
 	var files []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if l := strings.TrimSpace(line); l != "" {
-			files = append(files, l)
+	for name := range strings.SplitSeq(string(out), "\x00") {
+		if name != "" {
+			files = append(files, name)
 		}
 	}
 	return files, nil

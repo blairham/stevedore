@@ -40,7 +40,21 @@ func markerRepos(t *testing.T) (string, string, func(dir string, args ...string)
 	git(seed, "remote", "add", "origin", origin)
 	git(seed, "push", "-q", "origin", "main")
 	git(root, "clone", "-q", origin, clone)
+	quiesce(t, git, origin, seed, clone)
 	return clone, seed, git
+}
+
+// quiesce turns off git's automatic housekeeping in each repo. A fetch or
+// commit can leave a detached `gc --auto` / `maintenance run --auto` still
+// writing into .git after the command returns, and t.TempDir's cleanup then
+// fails with "directory not empty". The config lives in the repos, so it also
+// covers the git processes the code under test spawns.
+func quiesce(t *testing.T, git func(dir string, args ...string) string, dirs ...string) {
+	t.Helper()
+	for _, d := range dirs {
+		git(d, "config", "gc.auto", "0")
+		git(d, "config", "maintenance.auto", "false")
+	}
 }
 
 func TestAdvanceMarkerOutcomes(t *testing.T) {
@@ -149,6 +163,49 @@ func TestRefExistsAndAdvance(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("expected no changes since marker, got %v", files)
+	}
+}
+
+// FilesSince must report both sides of a rename and non-ASCII names verbatim:
+// a file moved out of an image's scope changes that image, and a name git
+// would C-quote still matches its glob.
+func TestFilesSinceRenamesAndNonASCII(t *testing.T) {
+	clone, _, git := markerRepos(t)
+	git(clone, "config", "user.email", "t@t.co")
+	git(clone, "config", "user.name", "t")
+	if err := os.MkdirAll(filepath.Join(clone, "svc-a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"shared", "svc-b"} {
+		if err := os.MkdirAll(filepath.Join(clone, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitFile(t, git, clone, "svc-a/util.go")
+	base := git(clone, "rev-parse", "HEAD")
+	git(clone, "mv", "svc-a/util.go", "shared/util.go")
+	git(clone, "commit", "-q", "-m", "move util")
+	commitFile(t, git, clone, "svc-b/café.txt")
+
+	files, err := FilesSince(t.Context(), clone, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"svc-a/util.go": true, "shared/util.go": true, "svc-b/café.txt": true}
+	if len(files) != len(want) {
+		t.Errorf("FilesSince = %q, want the keys of %v", files, want)
+	}
+	for _, f := range files {
+		if !want[f] {
+			t.Errorf("unexpected path %q in %q", f, files)
+		}
+	}
+
+	if d := Evaluate(Scope{Paths: []string{"svc-a/**"}}, nil, files); !d.Changed {
+		t.Errorf("rename out of svc-a: Evaluate(svc-a/**) = %+v, want changed", d)
+	}
+	if d := Evaluate(Scope{Paths: []string{"svc-b/**"}}, nil, files); !d.Changed {
+		t.Errorf("non-ASCII name: Evaluate(svc-b/**) = %+v, want changed", d)
 	}
 }
 
