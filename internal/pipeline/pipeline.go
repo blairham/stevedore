@@ -62,7 +62,7 @@ type Options struct {
 	NoPush        bool // build (and change-detect) but don't push; skips push-dependent stages
 	Parallel      int  // build up to N images concurrently (default 1)
 	SkipChangelog bool
-	SkipPublish   bool   // skip GitHub release + announce
+	SkipPublish   bool   // skip GitHub release, announce and notify webhook
 	OnlyChanged   bool   // skip images whose build inputs are unchanged (fingerprint state)
 	ChangedSince  string // git ref: skip images not touched by the diff since this ref
 	SoftVersion   bool   // tolerate version-resolution failure (check): warn + placeholder
@@ -604,6 +604,23 @@ func loadReleaseState(o Options, p *Prepared) (string, fingerprint.State, error)
 		return "", nil, err
 	}
 	return fpPath, state, nil
+}
+
+// BuildPushOptions turns a `build` invocation into the `build --push` release
+// run: a multi-arch snapshot that is pushed, scanned, smoke-tested and tagged,
+// and nothing more. The release extras — signing, SBOM, changelog, and every
+// outbound announcement (GitHub release, announce, notify webhook) — belong
+// to `release`. The notify webhook in particular exists to trigger CD, and an
+// inner-loop push must never be what deploys. The gates stay on: they are
+// cheap next to the build, and a tag only lands once they pass.
+func BuildPushOptions(o Options) Options {
+	o.Snapshot = true
+	o.Push = true
+	o.SkipSign = true
+	o.SkipSBOM = true
+	o.SkipChangelog = true
+	o.SkipPublish = true
+	return o
 }
 
 // releaseOptions applies the option implications of a release run: a split
