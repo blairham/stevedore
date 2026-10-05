@@ -6,6 +6,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -86,7 +87,12 @@ func (r *Runner) capture(ctx context.Context, name string, args []string) (strin
 	}
 	out, err := exec.CommandContext(ctx, name, args...).Output()
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", name, err)
+		var stderr []byte
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			stderr = ee.Stderr
+		}
+		return "", failure(name, err, stderr)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -97,7 +103,7 @@ func (r *Runner) refresh(ctx context.Context, name string, args []string) error 
 	}
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(string(out)))
+		return failure(name, err, out)
 	}
 	return nil
 }
