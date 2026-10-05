@@ -34,7 +34,8 @@ type Config struct {
 	ProjectName string `yaml:"project_name"`
 
 	// DefaultBranch is the branch on which "latest"-style floating tags are
-	// allowed to publish. Defaults to "main".
+	// allowed to publish, and the branch a real (non-snapshot) release must be
+	// cut from. Defaults to "main".
 	DefaultBranch string `yaml:"default_branch"`
 
 	// Dist is the output directory for generated artifacts (SBOMs, changelog).

@@ -79,6 +79,8 @@ func dryRunRepo(t *testing.T) string {
 	}
 	git(dir, "commit", "-q", "-am", "feat: second")
 	git(dir, "tag", "v0.1.0")
+	// Merged: a real release is only cut from the default branch.
+	git(dir, "push", "-q", "origin", "main")
 	return dir
 }
 

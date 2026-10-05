@@ -54,6 +54,16 @@ commit does not count: releasing under it would overwrite that release's image
 tags from a different commit). The others source the version elsewhere, which is handy when your tags drift out of sync with what's
 actually published.
 
+A real release (anything but `--snapshot`, `--no-push` or a `--split` leg) must
+also be cut from a commit on `default_branch`: HEAD has to be reachable from
+`origin/<default_branch>` (fetched when missing or stale; the local branch when
+there is no `origin` remote). Otherwise a manual dispatch from a feature branch
+would publish real versions of unmerged code. A shallow clone cannot prove it
+either way and is refused with a hint — check out with `fetch-depth: 0`.
+`--allow-non-default-branch` (on `release`, `merge` and `publish`) overrides it.
+`merge` is the step that tags a split release, so it is the one held to the
+branch; the legs only push untagged digests.
+
 ## Deriving the version from ECR
 
 ```yaml

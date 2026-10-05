@@ -11,17 +11,18 @@ import (
 
 func newMergeCmd() *cobra.Command {
 	var (
-		snapshot      bool
-		skipSign      bool
-		skipSBOM      bool
-		skipScan      bool
-		skipTest      bool
-		skipChangelog bool
-		skipPublish   bool
-		output        string
-		only          []string
-		pinVersions   []string
-		keepGoing     bool
+		snapshot        bool
+		skipSign        bool
+		skipSBOM        bool
+		skipScan        bool
+		skipTest        bool
+		skipChangelog   bool
+		skipPublish     bool
+		output          string
+		only            []string
+		pinVersions     []string
+		keepGoing       bool
+		allowNonDefault bool
 	)
 	cmd := &cobra.Command{
 		Use:   "merge",
@@ -54,6 +55,7 @@ func newMergeCmd() *cobra.Command {
 			}
 			o.PinVersions = pins
 			o.KeepGoing = keepGoing
+			o.AllowNonDefaultBranch = allowNonDefault
 			return pipeline.Merge(o)
 		},
 	}
@@ -68,5 +70,6 @@ func newMergeCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; match the split legs' pins)")
 	cmd.Flags().BoolVar(&keepGoing, "keep-going", false, "merge every image whose digests are complete even after one fails, then fail at the end (the ones that merged are still tagged, recorded and notified)")
 	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
+	cmd.Flags().BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
 	return cmd
 }

@@ -64,7 +64,10 @@ Planning still has to read the world, so a few commands do run:
 `--snapshot`, `--skip-sign`, `--skip-sbom`, `--skip-scan`, `--skip-test`,
 `--skip-changelog`, `--skip-publish`, `--only-changed` / `--changed-since <ref>`
 (skip unchanged images — see [Monorepos](monorepo.md)), and `--output json`
-(emit a machine-readable release summary to stdout). With
+(emit a machine-readable release summary to stdout).
+`--allow-non-default-branch` lets a real release publish from a commit that is
+not on `default_branch`, which is otherwise refused (see
+[Versioning](versioning.md); `merge` and `publish` take it too). With
 `change_detection.marker_refs` on, `--changed-since` does not replace the release
 markers: each image diffs from whichever of its marker and the ref is older, so a
 release that failed is still retried (see
