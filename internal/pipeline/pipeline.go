@@ -1185,6 +1185,14 @@ func Merge(o Options) error {
 // $GITHUB_OUTPUT would hand a later step placeholder digests as if they had
 // been pushed. --output json still prints the document.
 func emitSummary(o Options, p *Prepared, result summary.Result) error {
+	if len(o.SplitPlatforms) == 0 {
+		// A split leg's digest is one platform's, not the image a consumer
+		// pulls; the merge run pins the list.
+		result.Images = pinDigests(result.Images)
+	}
+	if err := writeOutputsFile(o, p, result); err != nil {
+		return err
+	}
 	if !o.DryRun {
 		if err := result.WriteGitHubStepSummary(); err != nil {
 			fmt.Fprintf(progress, "warning: could not write GitHub step summary: %v\n", err)

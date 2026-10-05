@@ -173,6 +173,15 @@ notify:                   # machine-readable post-push notification (CD trigger)
     # required: false                    # a failed delivery warns instead of failing
     # payload_template: '{"service": {{ json .Image }}, "version": {{ json .Version }}}'
 
+outputs:                  # a digest-pinned file for GitOps (see docs/ci.md)
+  file: dist/kustomize-images.yaml   # relative to the repo root
+  template: |             # Go template over {Project, Version, Images}
+    images:
+    {{- range .Images }}
+      - name: {{ .Repository }}
+        digest: {{ .Digest }}
+    {{- end }}
+
 policy:
   require: [scan, test, sign, sbom]  # stages a real release may not go without
 ```

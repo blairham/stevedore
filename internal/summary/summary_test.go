@@ -97,12 +97,12 @@ func TestWriteGitHubOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := string(data)
-	if !strings.HasPrefix(line, "summary={") || strings.Count(line, "\n") != 1 {
-		t.Fatalf("want single-line summary=<json> output, got %q", line)
+	line, _, _ := strings.Cut(string(data), "\n")
+	if !strings.HasPrefix(line, "summary={") {
+		t.Fatalf("want a single-line summary=<json> output first, got %q", data)
 	}
 	var parsed Result
-	if err := json.Unmarshal(data[len("summary="):len(data)-1], &parsed); err != nil {
+	if err := json.Unmarshal([]byte(line[len("summary="):]), &parsed); err != nil {
 		t.Fatalf("output not valid JSON: %v", err)
 	}
 	img := parsed.Images[0]
@@ -145,5 +145,40 @@ func TestMarkdownPlatforms(t *testing.T) {
 	}
 	if strings.Contains(md, "| `solo` | linux/amd64") {
 		t.Errorf("single-platform image should not get platform rows:\n%s", md)
+	}
+}
+
+// refs/digests key each pinned image's first repository@digest by id; ref and
+// digest are set only when there is exactly one, so a multi-image release
+// cannot be mistaken for its first image.
+func TestWriteGitHubOutputPins(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "output")
+	t.Setenv("GITHUB_OUTPUT", out)
+	api := Image{ID: "api", Digest: "sha256:aa", DigestRefs: []string{"reg/api@sha256:aa", "mirror/api@sha256:aa"}}
+	skipped := Image{ID: "web", Skipped: true}
+	if err := (Result{Images: []Image{api, skipped}}).WriteGitHubOutput(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(out)
+	for _, want := range []string{
+		`refs={"api":"reg/api@sha256:aa"}`, `digests={"api":"sha256:aa"}`,
+		"ref=reg/api@sha256:aa", "digest=sha256:aa",
+	} {
+		if !strings.Contains(string(data), want+"\n") {
+			t.Errorf("missing %q in:\n%s", want, data)
+		}
+	}
+
+	os.Remove(out)
+	worker := Image{ID: "worker", Digest: "sha256:bb", DigestRefs: []string{"reg/worker@sha256:bb"}}
+	if err := (Result{Images: []Image{api, worker}}).WriteGitHubOutput(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(out)
+	if !strings.Contains(string(data), `refs={"api":"reg/api@sha256:aa","worker":"reg/worker@sha256:bb"}`) {
+		t.Errorf("refs for two images missing:\n%s", data)
+	}
+	if strings.Contains(string(data), "\nref=") || strings.Contains(string(data), "\ndigest=") {
+		t.Errorf("ref/digest set with two pinned images:\n%s", data)
 	}
 }

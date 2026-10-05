@@ -21,6 +21,10 @@ type Image struct {
 	Version string   `json:"version,omitempty"`
 	Digest  string   `json:"digest,omitempty"`
 	Refs    []string `json:"refs,omitempty"`
+	// DigestRefs are repository@digest for every repository, set for an image
+	// whose digest is a published one (pushed by this run, or already released
+	// from this commit) — what a GitOps consumer pins to.
+	DigestRefs []string `json:"digest_refs,omitempty"`
 	// Repositories are the bare repos (no tag) this image publishes to.
 	Repositories []string `json:"repositories,omitempty"`
 	// Pushed reports whether the refs were actually published (false under
@@ -83,10 +87,26 @@ func (r Result) JSON() ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
 }
 
-// WriteGitHubOutput appends the compact single-line JSON as a `summary` step
-// output to the file named by $GITHUB_OUTPUT, if set — the composite action
-// republishes it so workflows can drive per-image follow-ups (e.g. deploy
-// notifications) without knowing the dist path. No-op outside GitHub Actions.
+// Pinned returns the images that have DigestRefs, in order.
+func (r Result) Pinned() []Image {
+	var out []Image
+	for _, img := range r.Images {
+		if len(img.DigestRefs) > 0 {
+			out = append(out, img)
+		}
+	}
+	return out
+}
+
+// WriteGitHubOutput appends step outputs to the file named by $GITHUB_OUTPUT,
+// if set — the composite action republishes them so workflows can drive
+// per-image follow-ups without knowing the dist path. No-op outside GitHub
+// Actions. They are:
+//   - summary: the compact single-line JSON;
+//   - refs / digests: JSON objects keyed by image id, of each pinned image's
+//     first repository@digest and its digest — fromJSON(...).api in a workflow;
+//   - ref / digest: the same for the one pinned image, set only when exactly
+//     one image was pinned, so a single-image repo needs no fromJSON.
 func (r Result) WriteGitHubOutput() error {
 	path := os.Getenv("GITHUB_OUTPUT")
 	if path == "" {
@@ -96,12 +116,29 @@ func (r Result) WriteGitHubOutput() error {
 	if err != nil {
 		return err
 	}
+	lines := []string{"summary=" + string(data)}
+	pinned := r.Pinned()
+	refs, digests := map[string]string{}, map[string]string{}
+	for _, img := range pinned {
+		refs[img.ID], digests[img.ID] = img.DigestRefs[0], img.Digest
+	}
+	for name, m := range map[string]map[string]string{"refs": refs, "digests": digests} {
+		b, merr := json.Marshal(m)
+		if merr != nil {
+			return merr
+		}
+		lines = append(lines, name+"="+string(b))
+	}
+	if len(pinned) == 1 {
+		lines = append(lines, "ref="+pinned[0].DigestRefs[0], "digest="+pinned[0].Digest)
+	}
+	sort.Strings(lines[1:])
 	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G703: a file the Actions runner names
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	_, err = fmt.Fprintf(f, "summary=%s\n", data)
+	_, err = fmt.Fprintln(f, strings.Join(lines, "\n"))
 	return err
 }
 
