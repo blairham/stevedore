@@ -50,3 +50,20 @@ stevedore verify ghcr.io/acme/myapp:1.4.0 \
   --certificate-identity "https://github.com/acme/myapp/.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 ```
+
+Both flags are regexps matched against the **whole** value — stevedore anchors
+them before handing them to cosign, whose own `--certificate-identity-regexp`
+matches anywhere. So `release@acme.com` accepts exactly that identity and not
+`release@acme.com.evil.io`; write `https://github.com/acme/myapp/.*` when you
+mean a prefix.
+
+For a keyed signature, verify against the **public** key. Set
+`sign.cosign.public_key` beside `sign.cosign.key` and `stevedore verify` uses it
+by default, or pass `--key cosign.pub`. `sign.cosign.key` is the private signing
+key and is never used to verify; a keyed config without `public_key` is an
+error that says so. `--key` and the identity flags select different modes and
+are refused together.
+
+```sh
+stevedore verify ghcr.io/acme/myapp:1.4.0 --key cosign.pub
+```

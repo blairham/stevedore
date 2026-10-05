@@ -66,9 +66,13 @@ for yours:
 
 ```sh
 stevedore verify ghcr.io/blairham/stevedore:1.0.0 \
-  --certificate-identity '^https://github\.com/blairham/stevedore/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-identity '^https://github\.com/blairham/stevedore/\.github/workflows/release\.yml@refs/tags/v.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+`stevedore verify` matches the identity against the whole certificate
+identity, hence the trailing `.*`; cosign's own regexp flag matches anywhere
+in it, so anchor both ends yourself when you call cosign directly.
 
 Or with cosign directly, if you would rather not use the tool you are checking:
 

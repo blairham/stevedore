@@ -291,6 +291,18 @@ func TestValidateCosignKeyMustExist(t *testing.T) {
 	}
 }
 
+func TestValidateCosignPublicKeyMustExist(t *testing.T) {
+	cfg := Config{Version: 1, Images: []Image{{ID: "a", Repositories: []string{"r1"}}}}
+	cfg.Sign.Cosign.PublicKey = filepath.Join(t.TempDir(), "does-not-exist.pub")
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "sign.cosign.public_key") {
+		t.Fatalf("expected a public_key error for a missing file, got %v", err)
+	}
+	cfg.Sign.Cosign.PublicKey = writeTemp(t, "cosign.pub", "fake")
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("valid public key file should pass: %v", err)
+	}
+}
+
 func TestDiscover(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := Discover(dir); err == nil {

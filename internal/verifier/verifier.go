@@ -6,6 +6,7 @@
 package verifier
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,9 +19,12 @@ type Options struct {
 	// and Identity/Issuer are required.
 	Key string
 	// Identity is the expected certificate identity (regexp) for keyless
-	// verification, e.g. the workflow URL or an email.
+	// verification, e.g. the workflow URL or an email. It must match the whole
+	// identity: authArgs anchors it, so "release@acme.com" does not also
+	// accept "release@acme.com.evil.io".
 	Identity string
-	// Issuer is the expected OIDC issuer (regexp) for keyless verification.
+	// Issuer is the expected OIDC issuer (regexp, anchored like Identity) for
+	// keyless verification.
 	Issuer string
 	// SBOM, when true, verifies the SBOM attestation.
 	SBOM bool
@@ -73,12 +77,21 @@ func authArgs(o Options) []string {
 	}
 	var args []string
 	if o.Identity != "" {
-		args = append(args, "--certificate-identity-regexp", o.Identity)
+		args = append(args, "--certificate-identity-regexp", anchor(o.Identity))
 	}
 	if o.Issuer != "" {
-		args = append(args, "--certificate-oidc-issuer-regexp", o.Issuer)
+		args = append(args, "--certificate-oidc-issuer-regexp", anchor(o.Issuer))
 	}
 	return args
+}
+
+// anchor makes a regexp match the whole string. cosign matches the identity
+// and issuer regexps unanchored, so a bare identity would accept any
+// certificate that merely contains it. The group keeps an alternation from
+// escaping the anchors, and a pattern that is already anchored still means the
+// same thing.
+func anchor(re string) string {
+	return "^(?:" + re + ")$"
 }
 
 func runCheck(r *run.Runner, name, exe string, args []string) Check {
@@ -112,8 +125,17 @@ func provenanceCheck(r *run.Runner, ref string) Check {
 	return Check{Name: name, OK: true, Detail: "provenance attestation present"}
 }
 
-// Valid reports whether the options are usable (keyless needs an identity).
+// ErrKeyAndIdentity reports that both a key and keyless identity flags were
+// given. They select different verification modes, and cosign would silently
+// ignore one of them.
+var ErrKeyAndIdentity = errors.New("--key and --certificate-identity/--certificate-oidc-issuer are mutually exclusive: a keyed signature has no certificate identity to check")
+
+// Valid reports whether the options are usable: keyed or keyless, not both,
+// and keyless needs an identity.
 func (o Options) Valid() error {
+	if o.Key != "" && (o.Identity != "" || o.Issuer != "") {
+		return ErrKeyAndIdentity
+	}
 	if o.Key == "" && o.Identity == "" {
 		return fmt.Errorf("keyless verification needs --certificate-identity (or provide --key)")
 	}

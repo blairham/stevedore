@@ -56,7 +56,8 @@ images:
 sign:
   cosign:
     enabled: true
-    key: ""               # omit for keyless (OIDC) signing
+    key: ""               # private signing key; omit for keyless (OIDC) signing
+    public_key: ""        # its public key: the default for `stevedore verify --key`
     args: []              # extra flags for both cosign sign and cosign attest
 
 sbom:
