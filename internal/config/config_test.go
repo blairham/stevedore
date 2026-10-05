@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -325,5 +326,55 @@ func TestLoadScanFailOn(t *testing.T) {
 				t.Errorf("Validate: %v", err)
 			}
 		})
+	}
+}
+
+// scan.ignore accepts bare IDs (the original form) and {id, reason, expires}
+// mappings in one list. An unquoted date is a YAML timestamp and must still
+// decode to its text; a misspelled key must fail rather than yield an ignore
+// that never expires.
+func TestLoadScanIgnoreForms(t *testing.T) {
+	load := func(t *testing.T, ignore string) (*Config, error) {
+		t.Helper()
+		p := writeTemp(t, ".stevedore.yaml", "project_name: demo\nscan:\n  enabled: true\n  ignore:\n"+ignore+
+			"images:\n  - repositories: [ghcr.io/x/demo]\n")
+		c, err := Load(p)
+		if err != nil {
+			return nil, err
+		}
+		return c, c.Validate()
+	}
+
+	c, err := load(t, "    - CVE-1\n    - id: CVE-2\n      reason: not reachable\n      expires: 2026-12-31\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ScanIgnore{{ID: "CVE-1"}, {ID: "CVE-2", Reason: "not reachable", Expires: "2026-12-31"}}
+	if !slices.Equal(c.Scan.Ignore, want) {
+		t.Errorf("Ignore = %+v, want %+v", c.Scan.Ignore, want)
+	}
+
+	for name, ignore := range map[string]string{
+		"unknown key": "    - id: CVE-2\n      expiry: 2026-12-31\n",
+		"bad date":    "    - id: CVE-2\n      expires: next year\n",
+		"missing id":  "    - reason: nope\n",
+		"nested":      "    - [CVE-1]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := load(t, ignore); err == nil {
+				t.Error("expected an error")
+			}
+		})
+	}
+}
+
+func TestValidateScanVEXMustExist(t *testing.T) {
+	s := Scan{Enabled: true, Scanner: "grype", FailOn: "high", VEX: []string{filepath.Join(t.TempDir(), "missing.json")}}
+	if err := s.validate(); err == nil {
+		t.Fatal("expected error for missing VEX document")
+	}
+	s.VEX = []string{writeTemp(t, "doc.vex.json", "{}")}
+	if err := s.validate(); err != nil {
+		t.Errorf("existing VEX document should pass: %v", err)
 	}
 }

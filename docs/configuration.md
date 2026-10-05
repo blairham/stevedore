@@ -71,8 +71,15 @@ scan:
   fail_on: high           # block the release at this severity or above;
                           # negligible|low|medium|high|critical, or none to
                           # scan and report without gating (default: critical)
-  ignore:                 # vulnerability IDs to exclude from the gate
-    - CVE-2024-0000
+  ignore:                 # vulnerabilities to exclude from the gate
+    - CVE-2024-0000       # a bare ID applies until removed
+    - id: CVE-2024-1111   # or record why, and until when:
+      reason: not reachable; no fixed release upstream
+      expires: 2026-12-31 # YYYY-MM-DD, last day it applies (UTC); after
+                          # that the finding counts again and the release
+                          # log warns that the ignore expired
+  vex: []                 # VEX documents (OpenVEX, CSAF, CycloneDX) passed
+                          # to the scanner as --vex; must exist
   args: []                # extra flags passed to the scanner; output flags
                           # (trivy -f/--format/-o/--output/-t/--template,
                           # grype -o/--output/--file/-t/--template) are

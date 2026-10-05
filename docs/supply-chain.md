@@ -21,6 +21,11 @@ scanned, tested, and signed.
 
 - **Scan gate** — `scan.fail_on` blocks the release if the built image has a
   vulnerability at or above the given severity (defaults to `critical`).
+  Accepted findings go in `scan.ignore`, each with an optional `reason` and
+  `expires` date so an exception is auditable and lapses on its own: once it
+  expires the finding counts against the gate again and the release log says
+  so. `scan.vex` hands VEX documents to grype/trivy (`--vex`), so a vendor's
+  "not affected" statements filter the report at the source.
 - **Smoke test gate** — `test.cmd` runs the image and blocks the release unless it
   exits `test.expect_exit`. Don't sign or ship an image that doesn't even start.
 - **Signing** — cosign, keyed or keyless (OIDC), always by digest.

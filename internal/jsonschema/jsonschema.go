@@ -21,7 +21,20 @@ func Generate(v any, title string) map[string]any {
 // typeKey is JSON Schema's "type" keyword, which every node carries.
 const typeKey = "type"
 
+// Schemer is implemented by types whose YAML form is not their Go shape (a
+// custom unmarshaler accepting several spellings); its schema is used as is.
+type Schemer interface {
+	JSONSchema() map[string]any
+}
+
+var schemerType = reflect.TypeFor[Schemer]()
+
 func schemaFor(t reflect.Type) map[string]any {
+	if t.Implements(schemerType) {
+		if s, ok := reflect.Zero(t).Interface().(Schemer); ok {
+			return s.JSONSchema()
+		}
+	}
 	switch t.Kind() {
 	case reflect.Pointer:
 		return schemaFor(t.Elem())
