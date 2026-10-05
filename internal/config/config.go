@@ -133,7 +133,19 @@ func (p Policy) validate() error {
 // Release configures post-build publishing steps.
 type Release struct {
 	GitHub GitHubRelease `yaml:"github"`
+	GitLab GitLabRelease `yaml:"gitlab"`
 }
+
+// GitLabRelease configures creating a GitLab release (via the glab CLI) with
+// the changelog as the body. Runs only on a real (non-snapshot) release. glab
+// authenticates from GITLAB_TOKEN, or in GitLab CI from the job token with
+// GLAB_ENABLE_CI_AUTOLOGIN=true.
+type GitLabRelease struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// AnyEnabled reports whether any release target is enabled.
+func (r Release) AnyEnabled() bool { return r.GitHub.Enabled || r.GitLab.Enabled }
 
 // GitHubRelease configures creating a GitHub release (via the gh CLI) with the
 // changelog as the body. Runs only on a real (non-snapshot) release.

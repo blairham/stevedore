@@ -44,8 +44,9 @@ inner-loop push must never be the thing that triggers a deploy. Use `release
 `--dry-run` prints each command that would publish or change something —
 `docker buildx`, `cosign`, `syft`, `gh`, the notify webhook — prefixed
 `[dry-run]`, and runs none of them. It writes **no files**: not `dist/` (no
-changelog, fingerprints, digests, SBOMs or release summary) and not the GitHub
-Actions `$GITHUB_STEP_SUMMARY` / `$GITHUB_OUTPUT` files. `--output json` still
+changelog, fingerprints, digests, SBOMs or release summary) and not the step
+summary / outputs files (`$STEVEDORE_SUMMARY_FILE` / `$STEVEDORE_OUTPUTS_FILE`,
+or GitHub Actions' `$GITHUB_STEP_SUMMARY` / `$GITHUB_OUTPUT`). `--output json` still
 prints the summary to stdout. A dry run therefore leaves the tree exactly as it
 found it, so a real release can follow it.
 
@@ -162,9 +163,12 @@ tag.
 
 ## Release summary
 
-Every release also writes `<dist>/release-summary.json` and, in GitHub Actions, a
+Every release also writes `<dist>/release-summary.json` and a Markdown
 job-summary table (images, digests, signed/sbom/provenance/test status, vuln
-counts) to `$GITHUB_STEP_SUMMARY`. Each image entry carries `repositories`,
+counts) to `$STEVEDORE_SUMMARY_FILE`, or in GitHub Actions to
+`$GITHUB_STEP_SUMMARY`; the key=value outputs below go to
+`$STEVEDORE_OUTPUTS_FILE`, or `$GITHUB_OUTPUT`. Each `STEVEDORE_*` variable
+wins over its GitHub counterpart, so any CI system can collect both files. Each image entry carries `repositories`,
 `pushed` (false under `--no-push`), and a `reason` — why it built ("src/…
 since its release marker") or why it was skipped ("inputs unchanged"). Under
 GitHub Actions the compact JSON is also written as a `summary` step output

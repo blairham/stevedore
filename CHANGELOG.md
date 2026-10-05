@@ -73,6 +73,10 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
   `test.platforms` picks native-only or emulated too. (#119)
 - `.CommitDate` and `.CommitTimestamp` in templates, and `SOURCE_DATE_EPOCH`
   from the commit time for reproducible builds. (#122)
+- Non-GitHub CI: `STEVEDORE_SUMMARY_FILE` / `STEVEDORE_OUTPUTS_FILE` receive
+  the step summary and key=value outputs (winning over `$GITHUB_*`), a
+  `release.gitlab` target creates a GitLab release via `glab`, and
+  docs/ci.md shows a GitLab CI pipeline. (#141)
 
 ### Changed
 

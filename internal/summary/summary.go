@@ -98,17 +98,39 @@ func (r Result) Pinned() []Image {
 	return out
 }
 
-// WriteGitHubOutput appends step outputs to the file named by $GITHUB_OUTPUT,
-// if set — the composite action republishes them so workflows can drive
-// per-image follow-ups without knowing the dist path. No-op outside GitHub
-// Actions. They are:
+// Sink environment variables. Each names a file stevedore appends to and wins
+// over its GitHub Actions counterpart, so any CI system can collect the step
+// summary and the key=value outputs.
+const (
+	SummaryFileEnv = "STEVEDORE_SUMMARY_FILE"
+	OutputsFileEnv = "STEVEDORE_OUTPUTS_FILE"
+)
+
+// OutputsPath is the file key=value outputs are appended to:
+// $STEVEDORE_OUTPUTS_FILE, else $GITHUB_OUTPUT, else "" (none).
+func OutputsPath() string { return sinkPath(OutputsFileEnv, "GITHUB_OUTPUT") }
+
+// MarkdownPath is the file the Markdown summary is appended to:
+// $STEVEDORE_SUMMARY_FILE, else $GITHUB_STEP_SUMMARY, else "" (none).
+func MarkdownPath() string { return sinkPath(SummaryFileEnv, "GITHUB_STEP_SUMMARY") }
+
+func sinkPath(generic, github string) string {
+	if p := os.Getenv(generic); p != "" {
+		return p
+	}
+	return os.Getenv(github)
+}
+
+// WriteGitHubOutput appends key=value outputs to OutputsPath(), if any — in
+// GitHub Actions the composite action republishes them so workflows can drive
+// per-image follow-ups without knowing the dist path. They are:
 //   - summary: the compact single-line JSON;
 //   - refs / digests: JSON objects keyed by image id, of each pinned image's
 //     first repository@digest and its digest — fromJSON(...).api in a workflow;
 //   - ref / digest: the same for the one pinned image, set only when exactly
 //     one image was pinned, so a single-image repo needs no fromJSON.
 func (r Result) WriteGitHubOutput() error {
-	path := os.Getenv("GITHUB_OUTPUT")
+	path := OutputsPath()
 	if path == "" {
 		return nil
 	}
@@ -196,10 +218,9 @@ func platformTable(b *strings.Builder, imgs []Image) {
 	}
 }
 
-// WriteGitHubStepSummary appends the Markdown table to the file named by
-// $GITHUB_STEP_SUMMARY, if set. It is a no-op outside GitHub Actions.
+// WriteGitHubStepSummary appends the Markdown table to MarkdownPath(), if any.
 func (r Result) WriteGitHubStepSummary() error {
-	path := os.Getenv("GITHUB_STEP_SUMMARY")
+	path := MarkdownPath()
 	if path == "" {
 		return nil
 	}

@@ -62,6 +62,32 @@ func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, target, title, 
 	return nil
 }
 
+// GitLabRelease creates a GitLab release for tag using the glab CLI, with
+// notesPath as the body and assets attached. target is the commit the tag is
+// created at when it does not exist yet (--ref); it is omitted when empty.
+// GitLab has no draft or prerelease flag, so neither is offered.
+func GitLabRelease(r *run.Runner, cfg config.GitLabRelease, tag, target, title, notesPath string, assets []string) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if tag == "" {
+		return fmt.Errorf("gitlab release needs a tag (use the git versioning strategy or tag the release)")
+	}
+	if !r.DryRun && !run.Has("glab") {
+		return fmt.Errorf("release.gitlab.enabled but glab not found on PATH")
+	}
+	args := []string{"release", "create", tag}
+	args = append(args, assets...)
+	args = append(args, "--name", title, "--notes-file", notesPath)
+	if target != "" {
+		args = append(args, "--ref", target)
+	}
+	if err := r.Run("glab", args...); err != nil {
+		return fmt.Errorf("glab release create: %w", err)
+	}
+	return nil
+}
+
 // Message is the data passed to announcement templates.
 type Message struct {
 	ProjectName string
