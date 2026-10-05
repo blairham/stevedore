@@ -137,3 +137,43 @@ func TestSignNeedsDigest(t *testing.T) {
 		t.Errorf("cosign ran without a digest: %q", got)
 	}
 }
+
+// Keyless signing passes no --key: cosign then takes the OIDC path.
+func TestSignKeylessArgv(t *testing.T) {
+	calls := fakeCosign(t, 0)
+	if err := Sign(quiet(t), config.Cosign{Enabled: true}, []string{"ghcr.io/x/a"}, "sha256:abc"); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"sign", "--yes", "ghcr.io/x/a@sha256:abc"}}
+	if got := calls(); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("cosign calls = %q, want %q", got, want)
+	}
+}
+
+// A dry run previews without cosign installed and without a digest, and runs
+// nothing.
+func TestDryRunNeedsNoCosign(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	r := quiet(t)
+	r.DryRun = true
+	cfg := config.Cosign{Enabled: true}
+	if err := Sign(r, cfg, []string{"ghcr.io/x/a"}, ""); err != nil {
+		t.Errorf("dry-run Sign: %v", err)
+	}
+	if err := Attest(r, cfg, []string{"ghcr.io/x/a"}, "", "p", "spdxjson"); err != nil {
+		t.Errorf("dry-run Attest: %v", err)
+	}
+}
+
+// A real run without cosign on PATH fails up front, naming the tool, rather
+// than releasing an unsigned image.
+func TestMissingCosignFails(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	cfg := config.Cosign{Enabled: true}
+	if err := Sign(quiet(t), cfg, []string{"ghcr.io/x/a"}, "sha256:abc"); err == nil || !strings.Contains(err.Error(), "cosign not found") {
+		t.Errorf("Sign err = %v", err)
+	}
+	if err := Attest(quiet(t), cfg, []string{"ghcr.io/x/a"}, "sha256:abc", "p", "spdxjson"); err == nil || !strings.Contains(err.Error(), "cosign") {
+		t.Errorf("Attest err = %v", err)
+	}
+}
