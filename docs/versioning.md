@@ -89,6 +89,27 @@ either way and is refused with a hint — check out with `fetch-depth: 0`.
 `merge` is the step that tags a split release, so it is the one held to the
 branch; the legs only push untagged digests.
 
+## Tag-driven releases: `require_tag`
+
+```yaml
+versioning:
+  require_tag: true
+```
+
+With `require_tag`, a version tag on HEAD is what makes a run a release, so one
+release job serves every push:
+
+- **HEAD has a version tag** → a real release of **every image**. Change
+  detection (`marker_refs`, `--changed-since`, `--only-changed`) is bypassed: a
+  tag on a commit whose sources did not change since the last release is still a
+  release, and would otherwise be skipped. `plan` lists every image too.
+  `--only` still narrows the run.
+- **HEAD is untagged** → a **validate-only build**: the run becomes `--snapshot
+  --no-push`, builds what change detection selects, and pushes nothing. A
+  `release --split` leg or a `merge` has no validate-only form and is refused.
+
+`--snapshot` and `--no-push` runs are unaffected.
+
 ## Deriving the version from ECR
 
 ```yaml

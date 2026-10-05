@@ -232,6 +232,11 @@ type Versioning struct {
 	// Command is the shell command whose trimmed stdout is the version for the
 	// command strategy, e.g. an ECR-native `aws ecr describe-images` query.
 	Command string `yaml:"command"`
+
+	// RequireTag makes a version tag on HEAD the release trigger. Without one,
+	// `release` runs as a validate-only build (a snapshot, not pushed); with
+	// one, every image builds, whatever change detection would have skipped.
+	RequireTag bool `yaml:"require_tag"`
 }
 
 // Image describes one buildable image and where it should be published.

@@ -107,6 +107,7 @@ versioning:
   # repo: ghcr.io/acme/myapp   # defaults to each image's own repository
   # region: us-east-1     # ecr only; inferred from the ECR host otherwise
   # initial: "0.1.0"      # when the repo has no semver tags yet
+  # require_tag: true    # tag on HEAD = release every image; untagged = validate-only build
 
 change_detection:         # scope --only-changed / --changed-since for monorepos
   resolver: ""            # "dotnet" auto-derives per-image paths from .csproj refs
