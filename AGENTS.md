@@ -57,7 +57,7 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 
 | Package | Purpose |
 |---------|---------|
-| `cmd` | cobra commands: release, merge, publish, plan, build, check, verify, doctor, init, schema |
+| `cmd` | cobra commands: release, merge, publish, plan, build, check, verify, promote, doctor, init, schema |
 | `internal/config` | `.stevedore.yaml` schema, load, defaults, validation |
 | `internal/pipeline` | orchestrates the whole release; the integration layer |
 | `internal/builder` | `docker buildx` build/push (multi-arch, provenance, cache) |
@@ -71,6 +71,7 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 | `internal/sbom` | syft SBOM generation |
 | `internal/sbomdiff` | dependency diff between two SBOMs |
 | `internal/verifier` | verify a pushed image's signature/attestation/provenance |
+| `internal/promote` | `stevedore promote` — copy a released digest to other tags/repos (oras + crane), verified |
 | `internal/changelog` | conventional-commit changelog |
 | `internal/changed` | git-diff change detection + glob matching |
 | `internal/fingerprint` | content-hash change detection (`--only-changed`) |
