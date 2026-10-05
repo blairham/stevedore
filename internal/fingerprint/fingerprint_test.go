@@ -183,3 +183,70 @@ func TestStateRoundTrip(t *testing.T) {
 		t.Errorf("round-trip mismatch: %v", loaded)
 	}
 }
+
+// bin/ and obj/ are .NET build output only beside a project file. Elsewhere a
+// bin/ is ordinary input — a Dockerfile that does `COPY bin/entry.sh` — and an
+// edit there must change the fingerprint (issue #50).
+func TestComputeDotnetOutputOnlyBesideAProject(t *testing.T) {
+	for _, scoped := range [][]string{nil, {"**"}} {
+		dir := t.TempDir()
+		writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM scratch\nCOPY bin/entry.sh /\n")
+		writeFile(t, filepath.Join(dir, "bin", "entry.sh"), "#!/bin/sh\n")
+		writeFile(t, filepath.Join(dir, "obj", "data.txt"), "a")
+		writeFile(t, filepath.Join(dir, "src", "Api", "Api.csproj"), "<Project/>")
+		writeFile(t, filepath.Join(dir, "src", "Api", "bin", "Release", "Api.dll"), "v1")
+		writeFile(t, filepath.Join(dir, "src", "Api", "obj", "project.assets.json"), "{}")
+		writeFile(t, filepath.Join(dir, "src", "Lib", "Lib.FSPROJ"), "<Project/>")
+		writeFile(t, filepath.Join(dir, "src", "Lib", "obj", "x.cache"), "1")
+		img := demoImage()
+		fp := func() string {
+			t.Helper()
+			got, err := Compute(dir, img, "dist", scoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+
+		base := fp()
+		writeFile(t, filepath.Join(dir, "src", "Api", "bin", "Release", "Api.dll"), "v2")
+		writeFile(t, filepath.Join(dir, "src", "Api", "obj", "project.assets.json"), `{"v":2}`)
+		writeFile(t, filepath.Join(dir, "src", "Lib", "obj", "x.cache"), "2")
+		if got := fp(); got != base {
+			t.Errorf("scoped=%v: .NET bin/ and obj/ output changed the fingerprint", scoped)
+		}
+
+		writeFile(t, filepath.Join(dir, "bin", "entry.sh"), "#!/bin/sh\nexec app\n")
+		edited := fp()
+		if edited == base {
+			t.Errorf("scoped=%v: editing a non-.NET bin/entry.sh left the fingerprint unchanged", scoped)
+		}
+		writeFile(t, filepath.Join(dir, "obj", "data.txt"), "b")
+		if fp() == edited {
+			t.Errorf("scoped=%v: editing a non-.NET obj/data.txt left the fingerprint unchanged", scoped)
+		}
+	}
+}
+
+// The build context itself is always walked, even when it is named bin and
+// sits beside a project file.
+func TestComputeContextNamedBin(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "App.csproj"), "<Project/>")
+	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM scratch\n")
+	writeFile(t, filepath.Join(dir, "bin", "entry.sh"), "a")
+	img := demoImage()
+	img.Context = "bin"
+	before, err := Compute(dir, img, "dist", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "bin", "entry.sh"), "b")
+	after, err := Compute(dir, img, "dist", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Error("a context named bin was not hashed")
+	}
+}
