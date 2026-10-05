@@ -120,7 +120,10 @@ transitively — and nothing else.
 
 For `--only-changed`, the fingerprint file lives under `dist/` (git-ignored);
 persist it between CI runs like a build cache (e.g. `actions/cache`). A fresh
-checkout with no fingerprint safely rebuilds everything.
+checkout with no fingerprint safely rebuilds everything. Only a run that publishes
+writes it: `--no-push`, snapshot builds (including `stevedore build`) and
+`--split` legs read the file but leave it as it was, so validating a change never
+makes the next real release skip it. The `merge` run records it for a split release.
 
 ## Build once, tag many
 

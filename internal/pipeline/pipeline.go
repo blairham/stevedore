@@ -517,7 +517,7 @@ func Release(o Options) error {
 // publishes and emits the summary. A marker that cannot advance does not stop
 // the rest; it is reported once the release is otherwise done.
 func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result, fpPath string, state fingerprint.State, depDiffSections []string) error {
-	if !o.DryRun {
+	if recordsFingerprints(o) {
 		if err := state.Save(fpPath); err != nil {
 			return fmt.Errorf("save fingerprint state: %w", err)
 		}
@@ -557,6 +557,16 @@ func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result,
 	return nil
 }
 
+// recordsFingerprints reports whether this run may become the baseline for the
+// next --only-changed run. Only a run that actually published what it built
+// qualifies: a fingerprint hashes the inputs alone, not the version or the push
+// mode, so one saved by a --no-push validation, a snapshot or a split leg
+// would match the next real release and make it skip images nobody released.
+// A merge run is the real publish of a split release, so it records.
+func recordsFingerprints(o Options) bool {
+	return !o.DryRun && !o.NoPush && !o.Snapshot && len(o.SplitPlatforms) == 0
+}
+
 // reportGroups announces the skipped images and the shared builds, and returns
 // the skipped images' summary entries.
 func reportGroups(toBuild [][]imageEval, skipped []imageEval) []summary.Image {
@@ -574,8 +584,9 @@ func reportGroups(toBuild [][]imageEval, skipped []imageEval) []summary.Image {
 }
 
 // loadReleaseState creates dist/ and loads the fingerprint state from it.
-// Fingerprint state drives --only-changed. It is maintained on every release
-// so the next --only-changed run has a baseline to compare against.
+// Fingerprint state drives --only-changed. Every release reads it; only a
+// real publish writes it back (see recordsFingerprints), so the next
+// --only-changed run compares against what was last released.
 func loadReleaseState(o Options, p *Prepared) (string, fingerprint.State, error) {
 	if err := mkdirDist(filepath.Join(o.Dir, p.Config.Dist)); err != nil {
 		return "", nil, fmt.Errorf("create dist dir: %w", err)
