@@ -85,7 +85,7 @@ func newReleaseCmd() *cobra.Command {
 	cmd.Flags().IntVar(&parallel, "parallel", 1, "build up to N images concurrently")
 	cmd.Flags().BoolVar(&skipChangelog, "skip-changelog", false, "skip changelog generation")
 	cmd.Flags().BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
-	cmd.Flags().StringVar(&changedSince, "changed-since", "", "git ref: only build images whose paths changed since this ref (stateless, CI-native)")
+	cmd.Flags().StringVar(&changedSince, "changed-since", "", "git ref: only build images whose paths changed since this ref (stateless, CI-native; under marker_refs, since the older of this and the image's marker)")
 	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to build unconditionally, skipping change detection (matrix mode: one plan entry per job)")
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; from the plan's `pins`)")
 	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")

@@ -248,3 +248,85 @@ func TestEvaluateImages_UnscopedImageMarkerMode(t *testing.T) {
 	commit("services/api/main.go")
 	check(true, "services/api/main.go (in context services/api (.dockerignore)) since its release marker")
 }
+
+// marker_refs and --changed-since together diff from the older base, per
+// image. CI commonly passes --changed-since <push's before>; that used to turn
+// marker mode off, so a change whose release failed (marker never advanced)
+// was never rebuilt once the next push moved past it.
+func TestEvaluateImages_MarkerWithChangedSince(t *testing.T) {
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t.co",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t.co",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	eval := func(dir, since string) imageEval {
+		t.Helper()
+		o, p := unscopedPrepared(dir, true)
+		o.ChangedSince = since
+		evals, err := evaluateImages(o, p, fingerprint.State{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return evals[0]
+	}
+	const marker = "refs/releases/image/api"
+
+	t.Run("marker older than --changed-since: the marker", func(t *testing.T) {
+		dir, commit := unscopedRepo(t)
+		git(dir, "update-ref", marker, "HEAD")
+		commit("services/api/main.go") // released, but the release failed
+		commit("README.md")            // the next push touches nothing of api's
+		e := eval(dir, "HEAD~1")
+		want := "services/api/main.go (in context services/api (.dockerignore)) since its release marker"
+		if !e.changed || e.reason != want {
+			t.Errorf("changed=%v reason=%q, want changed=true reason %q", e.changed, e.reason, want)
+		}
+	})
+
+	t.Run("--changed-since older than the marker: the ref", func(t *testing.T) {
+		dir, commit := unscopedRepo(t)
+		commit("services/api/main.go")
+		git(dir, "update-ref", marker, "HEAD")
+		commit("README.md")
+		e := eval(dir, "HEAD~2")
+		want := "services/api/main.go (in context services/api (.dockerignore)) since HEAD~2 (older than the release marker)"
+		if !e.changed || e.reason != want {
+			t.Errorf("changed=%v reason=%q, want changed=true reason %q", e.changed, e.reason, want)
+		}
+	})
+
+	t.Run("both at HEAD: unchanged", func(t *testing.T) {
+		dir, _ := unscopedRepo(t)
+		git(dir, "update-ref", marker, "HEAD")
+		e := eval(dir, "HEAD")
+		if want := "no files changed since its release marker"; e.changed || e.reason != want {
+			t.Errorf("changed=%v reason=%q, want changed=false reason %q", e.changed, e.reason, want)
+		}
+	})
+
+	t.Run("unrelated bases: the union", func(t *testing.T) {
+		dir, _ := unscopedRepo(t)
+		git(dir, "update-ref", marker, "HEAD")
+		tree := git(dir, "mktree") // empty tree: an orphan commit sharing no history
+		orphan := git(dir, "commit-tree", tree, "-m", "orphan")
+		e := eval(dir, orphan)
+		if !e.changed || !strings.HasSuffix(e.reason, "since its release marker or "+orphan+" (unrelated bases)") {
+			t.Errorf("changed=%v reason=%q, want changed=true via the union", e.changed, e.reason)
+		}
+	})
+}
+
+func TestUnion(t *testing.T) {
+	if got, want := union([]string{"a", "b"}, []string{"b", "c", "c"}), []string{"a", "b", "c"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("union = %v, want %v", got, want)
+	}
+}
