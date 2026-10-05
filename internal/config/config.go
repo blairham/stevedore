@@ -686,15 +686,28 @@ func (c *Config) applyDefaults() {
 		// ("none", or an explicit "", opts out).
 		orDefault(&c.Scan.FailOn, "critical")
 	}
+	// The project name is a default id for one image only: handing it to
+	// every id-less image made a second one a duplicate (#65).
+	idless := 0
+	for _, img := range c.Images {
+		if img.ID == "" {
+			idless++
+		}
+	}
+	nameFallback := ""
+	if idless == 1 {
+		nameFallback = c.ProjectName
+	}
 	for i := range c.Images {
-		c.Images[i].applyDefaults(i, c.ProjectName)
+		c.Images[i].applyDefaults(i, nameFallback)
 	}
 }
 
-// applyDefaults fills an image's unset fields. The i-th image with no id takes
-// the project name, or "image<i>" when there is none.
-func (img *Image) applyDefaults(i int, projectName string) {
-	orDefault(&img.ID, projectName)
+// applyDefaults fills an image's unset fields. An image with no id takes
+// nameFallback — the project name when it is the only id-less image — or
+// "image<i>".
+func (img *Image) applyDefaults(i int, nameFallback string) {
+	orDefault(&img.ID, nameFallback)
 	orDefault(&img.ID, fmt.Sprintf("image%d", i))
 	orDefault(&img.Dockerfile, "Dockerfile")
 	orDefault(&img.Context, ".")

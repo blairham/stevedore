@@ -63,6 +63,49 @@ images:
 	}
 }
 
+// project_name names an id-less image only when it is the only one; two of
+// them used to both take it and fail as duplicates (#65).
+func TestLoadIDFallbackWithProjectName(t *testing.T) {
+	cases := map[string]struct {
+		yaml string
+		want []string
+	}{
+		"two id-less images": {`
+project_name: p
+images:
+  - repositories: [ghcr.io/x/a]
+  - repositories: [ghcr.io/x/b]
+`, []string{"image0", "image1"}},
+		"one id-less image": {`
+project_name: p
+images:
+  - repositories: [ghcr.io/x/a]
+`, []string{"p"}},
+		"one id-less beside a named one": {`
+project_name: p
+images:
+  - id: api
+    repositories: [ghcr.io/x/a]
+  - repositories: [ghcr.io/x/b]
+`, []string{"api", "p"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, err := Load(writeTemp(t, ".stevedore.yaml", tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, img := range c.Images {
+				got = append(got, img.ID)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("ids = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadIDFallbackWithoutProjectName(t *testing.T) {
 	p := writeTemp(t, ".stevedore.yaml", `
 images:
