@@ -107,3 +107,14 @@ func TestScanIgnoreSchemaAcceptsBothForms(t *testing.T) {
 		t.Errorf("oneOf = %v", alts)
 	}
 }
+
+// Fields with a fixed set of values carry it as an enum, so an editor flags
+// `scanner: foo` instead of accepting any string.
+func TestEnumsReachTheSchema(t *testing.T) {
+	scan := object(t, object(t, Generate(config.Config{}, "x"), "properties"), "scan")
+	scanner := object(t, object(t, scan, "properties"), "scanner")
+	enum, _ := scanner["enum"].([]any)
+	if len(enum) != 2 || enum[0] != "grype" || enum[1] != "trivy" {
+		t.Errorf("scan.scanner enum = %v, want [grype trivy]", scanner["enum"])
+	}
+}

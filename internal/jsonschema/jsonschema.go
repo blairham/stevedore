@@ -69,13 +69,32 @@ func structSchema(t reflect.Type) map[string]any {
 		if name == "" || name == "-" {
 			continue
 		}
-		props[name] = without(schemaFor(f.Type), f.Tag.Get("jsonschema"))
+		props[name] = withEnum(without(schemaFor(f.Type), f.Tag.Get("jsonschema")), f.Tag.Get("enum"))
 	}
 	return map[string]any{
 		typeKey:                "object",
 		"properties":           props,
 		"additionalProperties": false,
 	}
+}
+
+// withEnum applies a field's `enum:"a,b"` tag: the values config validation
+// accepts, so an editor flags `scanner: foo` before a release does. The schema
+// node is copied, never shared.
+func withEnum(s map[string]any, tag string) map[string]any {
+	if tag == "" {
+		return s
+	}
+	out := make(map[string]any, len(s)+1)
+	for k, v := range s {
+		out[k] = v
+	}
+	vals := []any{}
+	for v := range strings.SplitSeq(tag, ",") {
+		vals = append(vals, v)
+	}
+	out["enum"] = vals
+	return out
 }
 
 // without applies a field's `jsonschema:"without=a,b"` tag: the named

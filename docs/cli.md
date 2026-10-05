@@ -194,3 +194,114 @@ Then add to the top of `.stevedore.yaml` for autocomplete + validation:
 ```yaml
 # yaml-language-server: $schema=./stevedore.schema.json
 ```
+
+## Flag reference
+
+Every command's own flags, as `--help` prints them. The [global flags](#global-flags)
+(`--config`, `--dir`, `--dry-run`, `--verbose`) apply to all of them. `stevedore
+completion <shell>` prints a shell completion script (bash, zsh, fish, powershell).
+
+### `stevedore release`
+
+| Flag | Meaning |
+|------|---------|
+| `--allow-non-default-branch` | publish a real release from a commit that is not on default_branch |
+| `--changed-since <string>` | git ref: only build images whose paths changed since this ref (stateless, CI-native; under marker_refs, since the older of this and the image's marker) |
+| `--keep-going` | build every image even after one fails, then fail at the end (the ones that built are still tagged, recorded and notified) |
+| `--no-push` | build (and change-detect) without pushing; skips the scan, smoke test, signing, SBOM and publish |
+| `--only <strings>` | image id(s) to build unconditionally, skipping change detection (matrix mode: one plan entry per job); 'all' selects every image |
+| `--only-changed` | skip images whose build inputs are unchanged since the last release (fingerprint state) |
+| `--output <string>` | output format: text or json (json emits a release summary to stdout) (default "text") |
+| `--parallel <int>` | build up to N images concurrently (default 1) |
+| `--pin-version <stringArray>` | pin an image's version as id=version (repeatable; from the plan's pins) |
+| `--skip-changelog` | skip changelog generation |
+| `--skip-publish` | skip the GitHub/GitLab release, announcements, and notify webhooks |
+| `--skip-sbom` | skip SBOM generation |
+| `--skip-scan` | skip vulnerability scanning |
+| `--skip-sign` | skip cosign signing |
+| `--skip-test` | skip the post-build smoke test |
+| `--snapshot` | release without a tag/clean tree (skips floating tags) |
+| `--split <strings>` | platform(s) to build natively on this runner, pushed untagged by digest for a later stevedore merge (native multi-arch CI: one matrix leg per arch) |
+
+### `stevedore merge`
+
+| Flag | Meaning |
+|------|---------|
+| `--allow-non-default-branch` | publish a real release from a commit that is not on default_branch |
+| `--keep-going` | merge every image whose digests are complete even after one fails, then fail at the end (the ones that merged are still tagged, recorded and notified) |
+| `--only <strings>` | image id(s) to merge (matrix mode: match the split legs' --only); 'all' selects every image |
+| `--output <string>` | output format: text or json (json emits a release summary to stdout) (default "text") |
+| `--pin-version <stringArray>` | pin an image's version as id=version (repeatable; match the split legs' pins) |
+| `--skip-changelog` | skip changelog generation |
+| `--skip-publish` | skip the GitHub/GitLab release, announcements, and notify webhooks |
+| `--skip-sbom` | skip SBOM generation |
+| `--skip-scan` | skip vulnerability scanning |
+| `--skip-sign` | skip cosign signing |
+| `--skip-test` | skip the post-build smoke test |
+| `--snapshot` | merge a snapshot release (skips floating tags) |
+
+### `stevedore publish`
+
+| Flag | Meaning |
+|------|---------|
+| `--allow-non-default-branch` | publish a real release from a commit that is not on default_branch |
+| `--only <strings>` | image id(s) the matrix built (the plan step's flat only output); default every image, as does 'all' |
+| `--pin-version <stringArray>` | pin an image's version as id=version (repeatable; the plan entries' pins), so the release is named after what was pushed |
+
+### `stevedore plan`
+
+| Flag | Meaning |
+|------|---------|
+| `--changed-since <string>` | git ref: plan only images whose paths changed since this ref (under marker_refs, since the older of this and the image's marker) |
+| `--only-changed` | skip images whose build inputs are unchanged since the last release (fingerprint state) |
+| `--snapshot` | plan a snapshot release (affects floating tags and versioning) |
+| `--split-platforms` | emit one matrix entry per build group per platform, with native runner hints (pair with release --split and merge) |
+
+### `stevedore build`
+
+| Flag | Meaning |
+|------|---------|
+| `--push` | push instead of loading locally (multi-arch) |
+
+### `stevedore check`
+
+No flags of its own.
+
+### `stevedore verify`
+
+| Flag | Meaning |
+|------|---------|
+| `--certificate-identity <string>` | expected certificate identity regexp, matched against the whole identity (keyless) |
+| `--certificate-oidc-issuer <string>` | expected OIDC issuer regexp, matched against the whole issuer (keyless) |
+| `--key <string>` | cosign public key (default sign.cosign.public_key; omit for keyless) |
+| `--no-provenance` | skip provenance verification |
+| `--no-sbom` | skip SBOM attestation verification |
+
+### `stevedore promote`
+
+| Flag | Meaning |
+|------|---------|
+| `--certificate-identity <string>` | expected certificate identity regexp, matched against the whole identity (keyless) |
+| `--certificate-oidc-issuer <string>` | expected OIDC issuer regexp, matched against the whole issuer (keyless) |
+| `--from <string>` | source tag or sha256 digest in the image's first repository (required) |
+| `--key <string>` | cosign public key (default sign.cosign.public_key; omit for keyless) |
+| `--to <stringArray>` | tag to point at the promoted digest (repeatable, required) |
+| `--to-repo <stringArray>` | destination repository (repeatable; default: the image's configured repositories) |
+
+### `stevedore doctor`
+
+No flags of its own.
+
+### `stevedore init`
+
+| Flag | Meaning |
+|------|---------|
+| `--file <string>` | source file (for --from goreleaser\|bake) or directory (for --from services) |
+| `--force` | overwrite an existing config |
+| `--from <string>` | source: dockerfiles \| goreleaser \| bake \| services (default "dockerfiles") |
+| `--map <stringArray>` | services: map a config field to a manifest key, field=key (fields: id, repositories, dockerfile, context, target, paths) |
+| `--map-build-arg <stringArray>` | services: emit a build arg from a manifest key, ARG=key (replaces the default PROJECT=project) |
+
+### `stevedore schema`
+
+No flags of its own.

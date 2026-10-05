@@ -14,7 +14,7 @@ means a new major version.
 | Command names and flags | `release`, `merge`, `plan`, `build`, `check`, `verify`, `doctor`, `init`, `schema` and their flags keep working. Flags may be added; existing ones are not removed or repurposed. |
 | Exit codes | `0` success, non-zero failure. A gate that blocks a release keeps failing the command. |
 | Published refs | The tags stevedore computes from a given config and git state do not change. This is the one people forget: a "better" tag scheme is a breaking change, because it silently stops overwriting what a deployment pulls. |
-| `plan --output json` and the release summary | Field names and types are stable; new fields may appear. Consume it by key, not by position. |
+| The JSON `plan` prints and the release summary (`release`/`merge --output json`, `dist/release-summary.json`) | Field names and types are stable; new fields may appear. Consume it by key, not by position. |
 | The GitHub Action's inputs and outputs | Stable, and the moving `v1` tag never crosses a major. |
 | The `latest`-style floating-tag rule | Floating tags (`latest`, `*-latest`, major and major.minor tags) publish on the default branch of a real release, never from a snapshot, and not from a prerelease unless `prerelease_floating_tags` is set. |
 
@@ -25,7 +25,7 @@ means a new major version.
   library API, open an issue and say what you would build with it — it is not a
   no, it is an unmade decision.
 - **Human-readable stdout.** The progress output (`==> building …`) is for
-  people. Parse `--output json` or the action's `summary` output instead; that is
+  people. Parse `plan`'s JSON, `--output json` or the action's `summary` output instead; that is
   what they are for.
 - **Which external tool is invoked, and how.** stevedore orchestrates rather than
   reimplements, so the exact `docker buildx` argv is an implementation detail and

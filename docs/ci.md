@@ -4,8 +4,10 @@ Running stevedore in CI: the GitHub Action, pinning, doing it by hand, and
 [GitLab CI](#gitlab-ci).
 
 stevedore does the same thing locally and in CI. The easiest way is the bundled
-**GitHub Action**, which installs stevedore and every tool it needs (cosign, syft,
-grype, and optionally crane) for you:
+**GitHub Action**, which installs stevedore, sets up buildx, and installs
+cosign, syft, grype and (optionally) crane for you. It does not install trivy:
+with `scan.scanner: trivy`, add a step such as `aquasecurity/setup-trivy`
+before it.
 
 ```yaml
 name: release
@@ -56,11 +58,13 @@ default it resolves to the newest release *in the action's own major line*, so
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `command` | `release` | Subcommand: `release`, `build`, `check`, `verify`, `doctor`. |
+| `command` | `release` | Subcommand: `release`, `merge`, `publish`, `plan`, `build`, `check`, `verify`, `promote`, `doctor`. |
 | `args` | `""` | Extra args, e.g. `--snapshot --only-changed`. |
 | `config` | autodiscover | Path to the config file. |
 | `version` | `latest` | stevedore version to install (`v1.0.2` or later; see below). |
+| `install-stevedore` | `true` | Download and verify the stevedore release binary; set `false` if it is already on PATH. |
 | `working-directory` | `.` | Directory to run in. |
+| `setup-buildx` | `true` | Set up docker buildx (a `docker-container` builder, which push-by-digest needs); disable if an earlier step already did. |
 | `install-cosign` / `install-syft` / `install-grype` | `true` | Install that tool. cosign is installed regardless whenever the action installs stevedore, because it verifies the download. |
 | `install-crane` | `false` | Install crane (enable for `versioning.strategy: registry`). |
 
@@ -71,7 +75,7 @@ default it resolves to the newest release *in the action's own major line*, so
 | `refs` | `release`, `merge` | JSON: image id → `repository@sha256:…` (first repository) for every image with a published digest — pushed this run, or already released from this commit |
 | `digests` | same | JSON: image id → `sha256:…` |
 | `ref` / `digest` | same | the one pinned image's `repository@sha256:…` / digest — only when exactly one image was pinned |
-| `summary` | `release`, `build` | the compact JSON release summary (each image also carries `digest_refs`) |
+| `summary` | `release`, `merge`, `build --push` | the compact JSON release summary (each image also carries `digest_refs`); a plain local `build` writes none |
 | `plan` / `only` / `pins` | `plan` | matrix mode (see [Monorepos](monorepo.md)) |
 
 A dry run, a `--no-push` build and a split leg pin nothing: none of them has a digest a
