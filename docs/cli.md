@@ -11,6 +11,7 @@ Every command, every flag, and the JSON surfaces meant for machines.
 | `stevedore build` | Inner-loop build: one platform, loaded into the local docker daemon, no push. `--push` publishes a multi-arch snapshot — see [`build --push`](#build---push). |
 | `stevedore check` | Validate the config and print the fully-resolved release plan (the exact refs that would publish). |
 | `stevedore verify <ref>` | Verify a pushed image's cosign signature, SBOM attestation, and SLSA provenance. |
+| `stevedore promote <id>` | Copy a released image by digest to other tags or repositories without rebuilding, after verifying its signature. See [`promote`](#promote). |
 | `stevedore doctor` | Probe for docker/buildx/git/cosign/syft/grype/crane/aws, report versions, and print install hints for anything your config requires. |
 | `stevedore init` | Scaffold a `.stevedore.yaml` by scanning Dockerfiles, or `--from goreleaser` / `--from bake` / `--from services` to import an existing setup (see [Importing a config](importing.md)). |
 | `stevedore schema` | Print the JSON Schema for `.stevedore.yaml` (for editor autocomplete/validation). |
@@ -120,6 +121,39 @@ matrix built and the release is named after the version it pushed. Without the
 pins, a `registry`/`ecr` strategy would re-resolve — and, the jobs having pushed,
 resolve the *next* version. Like `release`, it needs a clean checkout, tagged
 under the `git` strategy.
+
+## `promote`
+
+```sh
+stevedore promote app --from 1.4.0 --to stable                 # retag in place
+stevedore promote app --from 1.4.0 --to 1.4.0 --to prod \
+  --to-repo registry.example.com/prod/app                     # to another repo
+stevedore promote app --from sha256:… --to prod                # roll back by digest
+```
+
+`promote` moves an image between environments, or rolls one back, without
+rebuilding it. The digest never changes, so the signatures, SBOM attestation and
+provenance made at release time still apply.
+
+- **Source**: the image's first configured repository, at `--from` (a tag,
+  resolved with `crane digest`, or a `sha256:` digest).
+- **Verified first**: the source's cosign signature is checked with the same
+  flags as `verify` (`--key`, or `--certificate-identity` +
+  `--certificate-oidc-issuer`, defaulting to `sign.cosign.public_key`). An
+  unsigned or wrongly signed image is refused before anything is copied.
+- **Destinations**: each `--to-repo` (repeatable), or every configured
+  repository of the image. A destination other than the source gets the image
+  copied by digest with its OCI referrers (`oras copy -r`: cosign v3 bundle
+  signatures and attestations) and any tag-based cosign artifacts
+  (`sha256-<hex>.sig`/`.att`/`.sbom`, copied with `crane copy`). The signature
+  is then verified again in the destination.
+- **Tags**: each `--to` (repeatable) is applied with `crane tag` in every
+  destination, and only after every verification has passed.
+
+`--dry-run` resolves the digest and prints the copy and tag commands without
+running them. `cosign copy` is not used: on cosign v3's default bundle-format
+signatures it copies no signature and overwrites the destination's referrers
+tag.
 
 ## Release summary
 

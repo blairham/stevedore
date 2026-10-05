@@ -98,7 +98,8 @@ need:
 | `cosign` | signing & attestation | when `sign.cosign.enabled` |
 | `syft` | SBOM generation | when `sbom.enabled` |
 | `grype` or `trivy` | vulnerability scanning | when `scan.enabled` |
-| `crane` | registry-based versioning | when `versioning.strategy: registry` |
+| `crane` | registry-based versioning; `promote` | when `versioning.strategy: registry`, or to promote |
+| `oras` | copying an image with its signatures to another repository | only for `promote` across repositories |
 | `aws` | ECR-based versioning | when `versioning.strategy: ecr` |
 | `gh` | GitHub releases | when `release.github.enabled` |
 
@@ -154,6 +155,7 @@ Working configs, each validated in CI against the real binary:
 | `stevedore build` | Inner loop: one platform, loaded into the local docker daemon, no push. |
 | `stevedore check` | Validate the config and print the exact refs that would publish. |
 | `stevedore verify <ref>` | Check a pushed image's signature, SBOM attestation and provenance. |
+| `stevedore promote <id>` | Point new tags (or other repositories) at a released digest, signature verified first; no rebuild. |
 | `stevedore doctor` | Report which external tools are present, and how to install the missing ones. |
 | `stevedore init` | Scaffold a config by scanning Dockerfiles, or import one with `--from`. |
 | `stevedore schema` | Print the JSON Schema, for editor autocomplete and validation. |
