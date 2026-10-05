@@ -187,7 +187,7 @@ func TestGateErrorMentionsSeverityAndCVE(t *testing.T) {
 }
 
 func TestCommand(t *testing.T) {
-	name, args, raw := command(config.Scan{Scanner: "grype"}, "img:tag", "dist", "app")
+	name, args, raw := command(config.Scan{Scanner: "grype"}, "img:tag", "dist", "app", "")
 	if name != "grype" || args[0] != "img:tag" {
 		t.Errorf("grype command = %s %v", name, args)
 	}
@@ -195,7 +195,7 @@ func TestCommand(t *testing.T) {
 		t.Errorf("raw path = %q", raw)
 	}
 
-	name, args, _ = command(config.Scan{Scanner: "trivy"}, "img:tag", "dist", "app")
+	name, args, _ = command(config.Scan{Scanner: "trivy"}, "img:tag", "dist", "app", "")
 	if name != "trivy" || args[0] != "image" {
 		t.Errorf("trivy command = %s %v", name, args)
 	}
@@ -243,13 +243,40 @@ func TestCommandVEX(t *testing.T) {
 	cfg := config.Scan{VEX: []string{"a.vex.json", "b.vex.json"}, Args: []string{"--x"}}
 	for _, sc := range []string{"grype", "trivy"} {
 		cfg.Scanner = sc
-		_, args, _ := command(cfg, "img@sha256:d", "dist", "app")
+		_, args, _ := command(cfg, "img@sha256:d", "dist", "app", "")
 		got := strings.Join(args, " ")
 		if !strings.Contains(got, "--vex a.vex.json --vex b.vex.json --x") {
 			t.Errorf("%s args = %q", sc, got)
 		}
 		if sc == "trivy" && args[len(args)-1] != "img@sha256:d" {
 			t.Errorf("trivy ref should be last: %q", got)
+		}
+	}
+}
+
+// One CVE in a package both platforms ship is one finding, not two; a finding
+// only one platform has still counts.
+func TestDistinctCounts(t *testing.T) {
+	a := &Report{Vulns: []Vuln{{ID: "CVE-1", Severity: "critical", Package: "openssl", Version: "1"}}}
+	b := &Report{Vulns: []Vuln{
+		{ID: "cve-1", Severity: "critical", Package: "openssl", Version: "1"},
+		{ID: "CVE-2", Severity: "high", Package: "musl", Version: "2"},
+	}}
+	got := DistinctCounts(a, b)
+	if got["critical"] != 1 || got["high"] != 1 {
+		t.Errorf("counts = %v", got)
+	}
+}
+
+func TestCommandPlatform(t *testing.T) {
+	for _, sc := range []string{"grype", "trivy"} {
+		_, args, _ := command(config.Scan{Scanner: sc}, "img@sha256:d", "dist", "app-linux-arm64", "linux/arm64")
+		if !strings.Contains(strings.Join(args, " "), "--platform linux/arm64") {
+			t.Errorf("%s args = %v", sc, args)
+		}
+		_, args, _ = command(config.Scan{Scanner: sc}, "img@sha256:d", "dist", "app", "")
+		if strings.Contains(strings.Join(args, " "), "--platform") {
+			t.Errorf("%s: no platform must mean no --platform: %v", sc, args)
 		}
 	}
 }

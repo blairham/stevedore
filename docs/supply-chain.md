@@ -28,6 +28,18 @@ scanned, tested, and signed.
   "not affected" statements filter the report at the source.
 - **Smoke test gate** — `test.cmd` runs the image and blocks the release unless it
   exits `test.expect_exit`. Don't sign or ship an image that doesn't even start.
+
+Both gates, and the SBOM, cover **every platform** of a multi-arch image, not
+just the variant the runner's architecture would pick: grype/trivy and syft get
+`--platform` per configured platform (reports and SBOMs land in `dist/` as
+`scan-<id>-<os>-<arch>.json` / `sbom-<id>-<os>-<arch>.*`; a single-platform
+image keeps the plain `scan-<id>.json` name), and a finding in any one variant
+fails the gate. The smoke test runs `docker run --platform` on the platforms
+the docker host can run — natively by default, or also under emulation with
+`test.platforms: all` when an emulator is registered (e.g.
+`docker/setup-qemu-action`). A platform that cannot be run is skipped with a
+warning and recorded in the release summary, and the image is then not
+reported as `tested`. Each platform's SBOM is attested to the image's digest.
 - **Signing** — cosign, keyed or keyless (OIDC), always by digest.
 - **SBOM** — syft, optionally attached to the image as a signed attestation.
 - **Provenance** — BuildKit SLSA provenance (`mode=max` records the full build).

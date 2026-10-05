@@ -39,13 +39,23 @@ case "$1 $2" in
 "run "*)
 	[ "$FAKE_SMOKE_FAIL" = 1 ] && exit 1
 	;;
+"version "*)
+	echo "${FAKE_DOCKER_HOST:-linux/amd64}"
+	;;
+"buildx inspect")
+	[ -n "$FAKE_EMULATES" ] && echo "Platforms: $FAKE_EMULATES"
+	;;
 esac
 exit 0
 `
 
 const fakeGrype = `#!/bin/sh
 echo "grype $*" >> "$FAKE_LOG"
-if [ "$FAKE_SCAN_CRITICAL" = 1 ]; then
+crit=$FAKE_SCAN_CRITICAL
+case " $* " in
+*" --platform $FAKE_SCAN_CRITICAL_ON "*) crit=1 ;;
+esac
+if [ "$crit" = 1 ]; then
 	echo '{"matches":[{"vulnerability":{"id":"CVE-1","severity":"Critical"},"artifact":{"name":"x","version":"1"}}]}'
 else
 	echo '{"matches":[]}'
@@ -78,6 +88,9 @@ func gateHarness(t *testing.T) (dir, log string, o Options, p *Prepared, grp []i
 	t.Setenv("FAKE_LOG", log)
 	t.Setenv("FAKE_SMOKE_FAIL", "")
 	t.Setenv("FAKE_SCAN_CRITICAL", "")
+	t.Setenv("FAKE_SCAN_CRITICAL_ON", "-")
+	t.Setenv("FAKE_DOCKER_HOST", "")
+	t.Setenv("FAKE_EMULATES", "")
 
 	p = &Prepared{Config: &config.Config{
 		Dist: "dist",
@@ -146,7 +159,7 @@ func taggingCalls(calls []string) []int {
 func assertTaggedAfterGates(t *testing.T, calls []string, digest string) {
 	t.Helper()
 	scan := indexOf(calls, "grype ghcr.io/x/app@"+digest)
-	smoke := indexOf(calls, "docker run --rm ghcr.io/x/app@"+digest)
+	smoke := indexOf(calls, "docker run --rm --platform linux/amd64 ghcr.io/x/app@"+digest)
 	sign := indexOf(calls, "cosign sign", "reg.io/x/app@"+digest)
 	if scan < 0 || smoke < 0 || sign < 0 {
 		t.Fatalf("gates did not run on the digest (scan=%d smoke=%d sign=%d):\n%s", scan, smoke, sign, strings.Join(calls, "\n"))

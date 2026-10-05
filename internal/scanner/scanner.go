@@ -40,7 +40,9 @@ type Vuln struct {
 type Report struct {
 	Scanner string
 	Ref     string
-	Vulns   []Vuln
+	// Platform is the variant scanned ("" when the scanner picked).
+	Platform string
+	Vulns    []Vuln
 	// Counts is severity -> number of vulns (after ignores applied).
 	Counts map[string]int
 	// Blocking are the vulns at or above the fail_on threshold.
@@ -84,21 +86,26 @@ func activeIgnores(ignores []config.ScanIgnore, t time.Time) (map[string]bool, [
 // trivy is both the scanner name in config and its executable.
 const trivy = "trivy"
 
-// Scan scans ref with the configured scanner, writes the raw report to distDir,
-// and returns a normalized Report. In dry-run mode, or with scanning disabled,
-// it returns an empty report; dry-run also echoes the command.
-func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report, error) {
+// Scan scans ref with the configured scanner, writes the raw report to distDir
+// as scan-<name>.json, and returns a normalized Report. A non-empty platform
+// selects that variant of a multi-platform image; without one the scanner
+// picks the host's. In dry-run mode, or with scanning disabled, it returns an
+// empty report; dry-run also echoes the command.
+func Scan(r *run.Runner, cfg config.Scan, distDir, name, ref, platform string) (*Report, error) {
 	if !cfg.Enabled {
 		return &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}}, nil
 	}
-	name, args, raw := command(cfg, ref, distDir, imageID)
+	bin, args, raw := command(cfg, ref, distDir, name, platform)
 	if r.DryRun {
-		r.Preview(name, args...)
+		r.Preview(bin, args...)
 		_, expired := activeIgnores(cfg.Ignore, now())
 		return &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}, Expired: expired}, nil
 	}
-	out, err := r.Capture(name, args...)
+	out, err := r.Capture(bin, args...)
 	if err != nil {
+		if platform != "" {
+			return nil, fmt.Errorf("%s scan of %s (%s): %w", cfg.Scanner, ref, platform, err)
+		}
 		return nil, fmt.Errorf("%s scan of %s: %w", cfg.Scanner, ref, err)
 	}
 	if raw != "" {
@@ -111,14 +118,20 @@ func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report
 	if err != nil {
 		return nil, err
 	}
-	return buildReport(cfg, ref, vulns, now()), nil
+	rep := buildReport(cfg, ref, vulns, now())
+	rep.Platform = platform
+	return rep, nil
 }
 
 // command returns the scanner invocation and the path its JSON is saved to.
-// Both grype and trivy take one --vex flag per document.
-func command(cfg config.Scan, ref, distDir, imageID string) (name string, args []string, rawPath string) {
-	rawPath = filepath.Join(distDir, fmt.Sprintf("scan-%s.json", imageID))
-	vex := make([]string, 0, 2*len(cfg.VEX))
+// Both grype and trivy take one --vex flag per document, and --platform to
+// pick a variant of a multi-platform image.
+func command(cfg config.Scan, ref, distDir, name, platform string) (bin string, args []string, rawPath string) {
+	rawPath = filepath.Join(distDir, fmt.Sprintf("scan-%s.json", name))
+	vex := make([]string, 0, 2*len(cfg.VEX)+2)
+	if platform != "" {
+		vex = append(vex, "--platform", platform)
+	}
 	for _, v := range cfg.VEX {
 		vex = append(vex, "--vex", v)
 	}
@@ -152,6 +165,25 @@ func buildReport(cfg config.Scan, ref string, vulns []Vuln, t time.Time) *Report
 	return rep
 }
 
+// DistinctCounts tallies by severity the distinct findings across reports —
+// one per vulnerability, package and version — so a CVE in a package every
+// platform ships counts once rather than once per platform.
+func DistinctCounts(reps ...*Report) map[string]int {
+	seen := map[string]bool{}
+	counts := map[string]int{}
+	for _, rep := range reps {
+		for _, v := range rep.Vulns {
+			k := strings.ToUpper(v.ID) + "\x00" + v.Package + "\x00" + v.Version
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			counts[v.Severity]++
+		}
+	}
+	return counts
+}
+
 // Summary renders a one-line severity tally, most severe first.
 func (rep *Report) Summary() string {
 	if len(rep.Vulns) == 0 {
@@ -177,7 +209,7 @@ func (rep *Report) GateError(failOn string) error {
 		return severityRank[rep.Blocking[i].Severity] > severityRank[rep.Blocking[j].Severity]
 	})
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d vulnerabilit%s at or above %q in %s:", len(rep.Blocking), plural(len(rep.Blocking)), failOn, rep.Ref)
+	fmt.Fprintf(&b, "%d vulnerabilit%s at or above %q in %s%s:", len(rep.Blocking), plural(len(rep.Blocking)), failOn, rep.Ref, onPlatform(rep.Platform))
 	shown := rep.Blocking
 	const maxShown = 20
 	if len(shown) > maxShown {
@@ -190,6 +222,13 @@ func (rep *Report) GateError(failOn string) error {
 		fmt.Fprintf(&b, "\n  ... and %d more", len(rep.Blocking)-maxShown)
 	}
 	return fmt.Errorf("%s", b.String())
+}
+
+func onPlatform(p string) string {
+	if p == "" {
+		return ""
+	}
+	return " (" + p + ")"
 }
 
 func plural(n int) string {

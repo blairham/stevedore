@@ -33,12 +33,39 @@ type Image struct {
 	// AlreadyReleased marks a skipped image whose commit tags already exist
 	// from this commit: an earlier run released it, so nothing was pushed but
 	// its release marker still advances.
-	AlreadyReleased bool           `json:"already_released,omitempty"`
-	Signed          bool           `json:"signed"`
-	SBOM            bool           `json:"sbom"`
-	Provenance      bool           `json:"provenance"`
-	Tested          bool           `json:"tested"`
-	Vulns           map[string]int `json:"vulns,omitempty"`
+	AlreadyReleased bool `json:"already_released,omitempty"`
+	Signed          bool `json:"signed"`
+	SBOM            bool `json:"sbom"`
+	Provenance      bool `json:"provenance"`
+	Tested          bool `json:"tested"`
+	// Vulns counts the distinct findings across every scanned platform.
+	Vulns map[string]int `json:"vulns,omitempty"`
+	// Platforms records the gates per platform of the image, so a variant that
+	// was not smoke tested is visible rather than hidden behind Tested.
+	Platforms []Platform `json:"platforms,omitempty"`
+}
+
+// Platform is one platform's gate results.
+type Platform struct {
+	Platform string         `json:"platform"`
+	Vulns    map[string]int `json:"vulns,omitempty"`
+	Scanned  bool           `json:"scanned"`
+	Tested   bool           `json:"tested"`
+	// TestSkipped is why the smoke test did not run on this platform.
+	TestSkipped string `json:"test_skipped,omitempty"`
+	// SBOM is the path of this platform's SBOM, when one was generated.
+	SBOM string `json:"sbom,omitempty"`
+}
+
+// PlatformEntry returns the entry for platform, appending one if absent.
+func (img *Image) PlatformEntry(platform string) *Platform {
+	for i := range img.Platforms {
+		if img.Platforms[i].Platform == platform {
+			return &img.Platforms[i]
+		}
+	}
+	img.Platforms = append(img.Platforms, Platform{Platform: platform})
+	return &img.Platforms[len(img.Platforms)-1]
 }
 
 // Result is the whole release outcome.
@@ -105,7 +132,31 @@ func (r Result) Markdown() string {
 			check(img.Signed), check(img.SBOM), check(img.Provenance), check(img.Tested),
 			vulnCell(img.Vulns))
 	}
+	platformTable(&b, r.Images)
 	return b.String()
+}
+
+// platformTable renders the per-platform gate results of every multi-platform
+// image, where one row per image would hide an untested variant.
+func platformTable(b *strings.Builder, imgs []Image) {
+	header := false
+	for _, img := range imgs {
+		if img.Skipped || len(img.Platforms) < 2 {
+			continue
+		}
+		if !header {
+			b.WriteString("\n| image | platform | scanned | test | vulns |\n")
+			b.WriteString("|-------|----------|:-------:|:----:|-------|\n")
+			header = true
+		}
+		for _, pl := range img.Platforms {
+			test := check(pl.Tested)
+			if pl.TestSkipped != "" {
+				test = "_skipped_"
+			}
+			fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n", img.ID, pl.Platform, check(pl.Scanned), test, vulnCell(pl.Vulns))
+		}
+	}
 }
 
 // WriteGitHubStepSummary appends the Markdown table to the file named by

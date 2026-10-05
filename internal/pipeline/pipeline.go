@@ -1255,7 +1255,7 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string, refs []str
 // the previous version's image) and diffs it against the current SBOM at
 // currentPath. Best-effort: if the previous image or SBOM is unavailable it logs
 // and returns "", rather than failing the release.
-func dependencyDiff(r *run.Runner, p *Prepared, plan ImagePlan, currentPath string) string {
+func dependencyDiff(r *run.Runner, p *Prepared, plan ImagePlan, currentPath, platform string) string {
 	format := p.Config.SBOM.Format
 	curData, err := os.ReadFile(filepath.Clean(currentPath))
 	if err != nil {
@@ -1264,7 +1264,11 @@ func dependencyDiff(r *run.Runner, p *Prepared, plan ImagePlan, currentPath stri
 	}
 	prevVersion := strings.TrimPrefix(p.Git.PreviousTag, "v")
 	prevRef := plan.Repos[0] + ":" + prevVersion
-	prevOut, err := r.Capture("syft", prevRef, "-o", format)
+	args := []string{prevRef}
+	if platform != "" {
+		args = append(args, "--platform", platform)
+	}
+	prevOut, err := r.Capture("syft", append(args, "-o", format)...)
 	if err != nil {
 		fmt.Fprintf(progress, "    (dependency diff skipped for %s: previous image %s not scannable)\n", plan.Image.ID, prevRef)
 		return ""
@@ -1554,19 +1558,20 @@ func buildOrMerge(o Options, p *Prepared, r *run.Runner, rep ImagePlan, label st
 func postBuild(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string, irs []summary.Image) (string, error) {
 	ref := digestRef(repos[0], digest)
 
-	// Scan before signing: never sign or ship an image that fails the gate. One
-	// artifact → scan once.
+	// Gate every platform of the artifact, not just the variant the host
+	// would pick: the scan and the smoke test run per platform.
+	plats := gatePlatforms(rep.Image.Platforms)
+
+	// Scan before signing: never sign or ship an image that fails the gate.
 	if !o.SkipScan && p.Config.Scan.Enabled {
-		if err := scanGate(o, p, r, rep.Image.ID, ref, irs); err != nil {
+		if err := scanGate(o, p, r, rep.Image.ID, ref, plats, irs); err != nil {
 			return "", err
 		}
 	}
 
-	// Smoke test the shared artifact once.
 	if !o.SkipTest && p.Config.Test.Enabled {
-		fmt.Fprintf(progress, "    smoke test %s: docker run %s\n", rep.Image.ID, strings.Join(p.Config.Test.Cmd, " "))
-		if err := tester.Run(r, p.Config.Test, ref); err != nil {
-			return "", fmt.Errorf("smoke test gate failed: %w", err)
+		if err := testGate(o, p, r, rep.Image.ID, ref, plats, irs); err != nil {
+			return "", err
 		}
 	}
 
@@ -1580,56 +1585,175 @@ func postBuild(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []str
 	if o.SkipSBOM || !p.Config.SBOM.Enabled {
 		return "", nil
 	}
-	return sbomStage(o, p, r, rep, repos, digest)
+	return sbomStage(o, p, r, rep, repos, digest, plats, irs)
 }
 
-// scanGate scans the artifact at ref, records the counts on every member's
-// summary, and fails when the findings breach scan.fail_on.
-func scanGate(o Options, p *Prepared, r *run.Runner, id, ref string, irs []summary.Image) error {
-	res, err := scanner.Scan(r, p.Config.Scan, filepath.Join(o.Dir, p.Config.Dist), id, ref)
-	if err != nil {
-		return err
-	}
-	if res == nil {
-		return nil
-	}
-	for _, w := range res.ExpiredWarnings() {
-		fmt.Fprintf(progress, "    warning: %s\n", w)
+// scanGate scans every platform of the artifact at ref, records the counts on
+// every member's summary — per platform, and the distinct findings across all
+// of them — and fails when any platform's findings breach scan.fail_on.
+func scanGate(o Options, p *Prepared, r *run.Runner, id, ref string, plats []string, irs []summary.Image) error {
+	dist := filepath.Join(o.Dir, p.Config.Dist)
+	var reports []*scanner.Report
+	var gateErrs []error
+	for n, plat := range plats {
+		res, err := scanner.Scan(r, p.Config.Scan, dist, artifactName(id, plat, len(plats)), ref, plat)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			// The ignores are the same for every platform: warn once.
+			for _, w := range res.ExpiredWarnings() {
+				fmt.Fprintf(progress, "    warning: %s\n", w)
+			}
+		}
+		if o.DryRun {
+			continue
+		}
+		reports = append(reports, res)
+		fmt.Fprintf(progress, "    scan %s%s (%s): %s\n", id, platformLabel(plat), res.Scanner, res.Summary())
+		counts := res.Counts
+		recordPlatform(irs, plat, func(e *summary.Platform) { e.Scanned, e.Vulns = true, counts })
+		if err := res.GateError(p.Config.Scan.FailOn); err != nil {
+			gateErrs = append(gateErrs, err)
+		}
 	}
 	if o.DryRun {
 		return nil
 	}
+	counts := scanner.DistinctCounts(reports...)
 	for i := range irs {
-		irs[i].Vulns = res.Counts
+		irs[i].Vulns = counts
 	}
-	fmt.Fprintf(progress, "    scan %s (%s): %s\n", id, res.Scanner, res.Summary())
-	if err := res.GateError(p.Config.Scan.FailOn); err != nil {
+	if err := errors.Join(gateErrs...); err != nil {
 		return fmt.Errorf("vulnerability gate failed: %w", err)
 	}
 	return nil
 }
 
-// sbomStage generates the SBOM, attests it when signing is on, and returns the
-// dependency diff against the previous release when one is configured.
-func sbomStage(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string) (string, error) {
-	ref := digestRef(repos[0], digest)
-	sbomPath, err := sbom.Generate(r, p.Config.SBOM, filepath.Join(o.Dir, p.Config.Dist), rep.Image.ID, ref)
+// testGate smoke tests each platform the docker host can run under
+// test.platforms, recording per platform what ran and what was skipped and
+// why. An image counts as tested only when every platform was.
+func testGate(o Options, p *Prepared, r *run.Runner, id, ref string, plats []string, irs []summary.Image) error {
+	targets, err := testTargets(o, p, r, plats)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if sbomPath == "" {
-		return "", nil
+	cmd := strings.Join(p.Config.Test.Cmd, " ")
+	ran := 0
+	for _, t := range targets {
+		if t.Skip != "" {
+			fmt.Fprintf(progress, "    warning: smoke test %s on %s skipped: %s\n", id, t.Platform, t.Skip)
+			skip := t.Skip
+			recordPlatform(irs, t.Platform, func(e *summary.Platform) { e.TestSkipped = skip })
+			continue
+		}
+		label := platformLabel(t.Platform)
+		if t.Emulated {
+			label = " (" + t.Platform + ", emulated)"
+		}
+		fmt.Fprintf(progress, "    smoke test %s%s: docker run %s\n", id, label, cmd)
+		if err := tester.Run(r, p.Config.Test, ref, t.Platform); err != nil {
+			return fmt.Errorf("smoke test gate failed: %w", err)
+		}
+		ran++
+		recordPlatform(irs, t.Platform, func(e *summary.Platform) { e.Tested = true })
 	}
-	if p.Config.SBOM.Attest && !o.SkipSign && p.Config.Sign.Cosign.Enabled {
-		pt := sbom.PredicateType(p.Config.SBOM.Format)
-		if err := signer.Attest(r, p.Config.Sign.Cosign, repos, digest, sbomPath, pt); err != nil {
+	if ran < len(targets) {
+		if ran == 0 {
+			fmt.Fprintf(progress, "    warning: no platform of %s could be smoke tested on this docker host\n", id)
+		}
+		for i := range irs {
+			irs[i].Tested = false
+		}
+	}
+	return nil
+}
+
+// testTargets plans the smoke test per platform. A dry run cannot rely on a
+// docker host, so it previews every platform.
+func testTargets(o Options, p *Prepared, r *run.Runner, plats []string) ([]tester.Target, error) {
+	if o.DryRun || len(plats) == 1 && plats[0] == "" {
+		targets := make([]tester.Target, 0, len(plats))
+		for _, pl := range plats {
+			targets = append(targets, tester.Target{Platform: pl})
+		}
+		return targets, nil
+	}
+	h, err := tester.DetectHost(r)
+	if err != nil {
+		return nil, fmt.Errorf("smoke test gate: %w", err)
+	}
+	return tester.Plan(h, p.Config.Test.Platforms, plats), nil
+}
+
+// sbomStage generates an SBOM per platform, attests each when signing is on,
+// and returns the dependency diff of the first platform against the previous
+// release when one is configured.
+func sbomStage(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string, plats []string, irs []summary.Image) (string, error) {
+	ref := digestRef(repos[0], digest)
+	dist := filepath.Join(o.Dir, p.Config.Dist)
+	var first string
+	for _, plat := range plats {
+		sbomPath, err := sbom.Generate(r, p.Config.SBOM, dist, artifactName(rep.Image.ID, plat, len(plats)), ref, plat)
+		if err != nil {
 			return "", err
+		}
+		if sbomPath == "" {
+			return "", nil
+		}
+		if first == "" {
+			first = sbomPath
+		}
+		if !o.DryRun {
+			recordPlatform(irs, plat, func(e *summary.Platform) { e.SBOM = sbomPath })
+		}
+		if p.Config.SBOM.Attest && !o.SkipSign && p.Config.Sign.Cosign.Enabled {
+			pt := sbom.PredicateType(p.Config.SBOM.Format)
+			if err := signer.Attest(r, p.Config.Sign.Cosign, repos, digest, sbomPath, pt); err != nil {
+				return "", err
+			}
 		}
 	}
 	if p.Config.Changelog.DependencyDiff && !o.DryRun && p.Git.PreviousTag != "" {
-		return dependencyDiff(r, p, rep, sbomPath), nil
+		return dependencyDiff(r, p, rep, first, plats[0]), nil
 	}
 	return "", nil
+}
+
+// recordPlatform applies set to platform's entry on every member's summary. A
+// gate run without a platform ("" — none configured) records nothing.
+func recordPlatform(irs []summary.Image, platform string, set func(*summary.Platform)) {
+	if platform == "" {
+		return
+	}
+	for i := range irs {
+		set(irs[i].PlatformEntry(platform))
+	}
+}
+
+// gatePlatforms is the platform list the gates iterate: the configured ones,
+// or a single "" (let the tool pick) when none are configured.
+func gatePlatforms(configured []string) []string {
+	if len(configured) == 0 {
+		return []string{""}
+	}
+	return configured
+}
+
+// artifactName names a per-platform dist file. A single-platform image keeps
+// the plain image ID, so its scan report and SBOM paths are unchanged.
+func artifactName(id, platform string, n int) string {
+	if n < 2 || platform == "" {
+		return id
+	}
+	return id + "-" + strings.ReplaceAll(platform, "/", "-")
+}
+
+func platformLabel(platform string) string {
+	if platform == "" {
+		return ""
+	}
+	return " (" + platform + ")"
 }
 
 // buildKey hashes the parts of an image plan that determine the built artifact,
