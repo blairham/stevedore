@@ -4,7 +4,9 @@
 package verifier
 
 import (
+	"errors"
 	"os"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -18,6 +20,44 @@ func TestAuthArgs(t *testing.T) {
 	got := authArgs(Options{Identity: "https://github.com/x/.+", Issuer: "https://token.actions.githubusercontent.com"})
 	if !slices.Contains(got, "--certificate-identity-regexp") || !slices.Contains(got, "--certificate-oidc-issuer-regexp") {
 		t.Errorf("keyless authArgs missing flags: %v", got)
+	}
+}
+
+// The identity and issuer reach cosign anchored at both ends, because cosign
+// matches its regexp flags anywhere in the value. Compile the regexps cosign
+// would receive and check what they accept.
+func TestAuthArgsAnchorsIdentityAndIssuer(t *testing.T) {
+	args := authArgs(Options{Identity: "release@acme.com", Issuer: "https://token.actions.githubusercontent.com|https://accounts.google.com"})
+	value := func(flag string) *regexp.Regexp {
+		i := slices.Index(args, flag)
+		if i < 0 || i+1 >= len(args) {
+			t.Fatalf("%s missing from %v", flag, args)
+		}
+		return regexp.MustCompile(args[i+1])
+	}
+	id := value("--certificate-identity-regexp")
+	if !id.MatchString("release@acme.com") {
+		t.Errorf("identity %q should accept the exact identity", id)
+	}
+	for _, bad := range []string{"release@acme.com.evil.io", "evil-release@acme.com"} {
+		if id.MatchString(bad) {
+			t.Errorf("identity %q accepts %q", id, bad)
+		}
+	}
+	iss := value("--certificate-oidc-issuer-regexp")
+	for _, ok := range []string{"https://token.actions.githubusercontent.com", "https://accounts.google.com"} {
+		if !iss.MatchString(ok) {
+			t.Errorf("issuer %q should accept %q", iss, ok)
+		}
+	}
+	// The alternation must not escape the anchors.
+	if iss.MatchString("https://token.actions.githubusercontent.com.evil.io") {
+		t.Errorf("issuer %q accepts a suffixed issuer", iss)
+	}
+	// A pattern the user already anchored keeps its meaning.
+	pre := regexp.MustCompile(anchor("^https://github\\.com/acme/.*$"))
+	if !pre.MatchString("https://github.com/acme/app/.github/workflows/r.yml@refs/tags/v1") {
+		t.Errorf("pre-anchored pattern %q stopped matching", pre)
 	}
 }
 
@@ -44,6 +84,11 @@ func TestOptionsValid(t *testing.T) {
 	}
 	if err := (Options{Identity: "id"}).Valid(); err != nil {
 		t.Errorf("keyless with identity should be valid: %v", err)
+	}
+	for _, o := range []Options{{Key: "k", Identity: "id"}, {Key: "k", Issuer: "iss"}} {
+		if err := o.Valid(); !errors.Is(err, ErrKeyAndIdentity) {
+			t.Errorf("%+v: key with identity flags should be refused, got %v", o, err)
+		}
 	}
 }
 

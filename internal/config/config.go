@@ -301,8 +301,12 @@ type Sign struct {
 // Cosign configures cosign signing. When Key is empty, keyless (OIDC) signing
 // is used.
 type Cosign struct {
-	Enabled bool   `yaml:"enabled"`
-	Key     string `yaml:"key"`
+	Enabled bool `yaml:"enabled"`
+	// Key is the cosign private signing key. It is never used to verify.
+	Key string `yaml:"key"`
+	// PublicKey is the cosign public key matching Key. `stevedore verify`
+	// defaults --key to it; signing ignores it.
+	PublicKey string `yaml:"public_key"`
 	// Args are extra flags passed to both `cosign sign` and `cosign attest`.
 	Args []string `yaml:"args"`
 }
@@ -569,6 +573,11 @@ func (c *Config) Validate() error {
 	if c.Sign.Cosign.Key != "" {
 		if _, err := os.Stat(c.Sign.Cosign.Key); err != nil {
 			return fmt.Errorf("sign.cosign.key %q not readable: %w", c.Sign.Cosign.Key, err)
+		}
+	}
+	if c.Sign.Cosign.PublicKey != "" {
+		if _, err := os.Stat(c.Sign.Cosign.PublicKey); err != nil {
+			return fmt.Errorf("sign.cosign.public_key %q not readable: %w", c.Sign.Cosign.PublicKey, err)
 		}
 	}
 	if err := c.Scan.validate(); err != nil {
