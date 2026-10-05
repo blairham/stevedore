@@ -107,6 +107,9 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Fixed
 
+- The GoReleaser import merges per-arch entries whatever order they list
+  their repositories in, maps `goarm` to the arm variant (`linux/arm/v7`), and
+  strips `-armv7`/`-arm64v8`-style tag suffixes. (#60)
 - `init` writes lowercase repository names, so a `src/MyCompany.Api`
   Dockerfile no longer scaffolds a repository Docker refuses. (#67)
 - Two images without an `id` under a `project_name` no longer collide:
