@@ -63,6 +63,71 @@ default it resolves to the newest release *in the action's own major line*, so
 | `install-cosign` / `install-syft` / `install-grype` | `true` | Install that tool. cosign is installed regardless whenever the action installs stevedore, because it verifies the download. |
 | `install-crane` | `false` | Install crane (enable for `versioning.strategy: registry`). |
 
+## Action outputs
+
+| Output | Set by | Value |
+|--------|--------|-------|
+| `refs` | `release`, `merge`, `publish` | JSON: image id → `repository@sha256:…` (first repository) for every image with a published digest — pushed this run, or already released from this commit |
+| `digests` | same | JSON: image id → `sha256:…` |
+| `ref` / `digest` | same | the one pinned image's `repository@sha256:…` / digest — only when exactly one image was pinned |
+| `summary` | `release`, `build` | the compact JSON release summary (each image also carries `digest_refs`) |
+| `plan` / `only` / `pins` | `plan` | matrix mode (see [Monorepos](monorepo.md)) |
+
+A dry run, a `--no-push` build and a split leg pin nothing: none of them has a digest a
+consumer can pull.
+
+## Feeding a GitOps repository
+
+Pin deployments to the digest, not the tag — the digest is what was scanned, tested
+and signed. For one image, `ref` is enough:
+
+```yaml
+- uses: blairham/stevedore@v1
+  id: release
+- run: yq -i '.image = "${{ steps.release.outputs.ref }}"' deploy/values.yaml
+```
+
+For several, have the release write the file itself with `outputs:` — a Go template
+over the pinned images (`ID`, `Version`, `Digest`, `Repository`, `Ref`,
+`Repositories`, `DigestRefs`, `Refs`), written only by a real run that pinned at
+least one image. A kustomize overlay whose `images:` pins every released image (kustomize
+matches `name` against the images in the base manifests and rewrites them to the
+digest):
+
+```yaml
+outputs:
+  file: deploy/overlays/prod/kustomization.yaml
+  template: |
+    apiVersion: kustomize.config.k8s.io/v1beta1
+    kind: Kustomization
+    resources: [../../base]
+    images:
+    {{- range .Images }}
+      - name: {{ .Repository }}
+        digest: {{ .Digest }}
+    {{- end }}
+```
+
+The step after the release commits that file to the deployment repository (or opens
+a PR with it). Only images this run pinned are in it — pushed, or already released
+from this commit — and if none was, no file is written. Under `--only-changed` that
+is a subset, and a template that renders a *whole* overlay would drop the pins of the
+images that did not change. For partial releases, render edits instead and apply them
+to the existing overlay:
+
+```yaml
+outputs:
+  file: dist/pin-images.sh
+  template: |
+    {{- range .Images }}
+    kustomize edit set image {{ .Ref }}
+    {{- end }}
+```
+
+```sh
+(cd deploy/overlays/prod && sh "$GITHUB_WORKSPACE/dist/pin-images.sh")
+```
+
 The action verifies the stevedore binary before running it: it checks the
 release's `checksums.txt` against its keyless cosign signature, which must come
 from this repository's `release.yml` for that tag (or for `main`, for a release

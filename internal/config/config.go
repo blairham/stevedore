@@ -90,7 +90,11 @@ type Config struct {
 	Release    Release    `yaml:"release"`
 	Announce   Announce   `yaml:"announce"`
 	Notify     Notify     `yaml:"notify"`
-	Policy     Policy     `yaml:"policy"`
+
+	// Outputs writes a file from the images a real release pushed, for a
+	// GitOps step to pick up (a kustomize images: stanza, Helm values).
+	Outputs Outputs `yaml:"outputs"`
+	Policy  Policy  `yaml:"policy"`
 }
 
 // Policy holds the rules a real (non-snapshot) release is held to.
@@ -140,6 +144,32 @@ type GitHubRelease struct {
 	// the version: a semver prerelease ("1.3.0-rc.1") is marked, a release is
 	// not. true or false forces it either way.
 	Prerelease *bool `yaml:"prerelease"`
+}
+
+// Outputs configures the digest-pinned file a release writes for its
+// consumers. Template is a Go template over {Project, Version, Images}, where
+// each image has ID, Version, Digest, Repository (its first), Ref
+// (Repository@Digest), Repositories, DigestRefs (every repository@Digest) and
+// Refs (the tagged references). Only images with a pushed digest are listed,
+// and the file is written only by a real (not dry-run, not --no-push, not
+// split-leg) run that has at least one.
+type Outputs struct {
+	// File is the path to write, relative to the repository root.
+	File string `yaml:"file"`
+	// Template renders the file's content.
+	Template string `yaml:"template"`
+}
+
+func (o Outputs) validate() error {
+	if (o.File == "") != (o.Template == "") {
+		return fmt.Errorf("outputs.file and outputs.template go together: set both, or neither")
+	}
+	if o.Template != "" {
+		if err := tmpl.Parse(o.Template); err != nil {
+			return fmt.Errorf("outputs.template: %w", err)
+		}
+	}
+	return nil
 }
 
 // Announce configures release notifications to chat webhooks.
@@ -717,6 +747,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Notify.Webhook.Enabled && c.Notify.Webhook.URLEnv == "" {
 		return fmt.Errorf("notify.webhook.enabled requires notify.webhook.url_env")
+	}
+	if err := c.Outputs.validate(); err != nil {
+		return err
 	}
 	if t := c.Notify.Webhook.PayloadTemplate; t != "" {
 		if err := tmpl.Parse(t); err != nil {

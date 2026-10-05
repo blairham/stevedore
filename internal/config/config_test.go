@@ -452,3 +452,23 @@ func TestValidateCache(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateOutputs(t *testing.T) {
+	base := func(o Outputs) *Config {
+		return &Config{Version: 1, Outputs: o, Images: []Image{{ID: "a", Repositories: []string{"r/a"}}}}
+	}
+	for _, c := range []struct {
+		o  Outputs
+		ok bool
+	}{
+		{Outputs{}, true},
+		{Outputs{File: "images.yaml", Template: "{{ range .Images }}{{ .Ref }}{{ end }}"}, true},
+		{Outputs{File: "images.yaml"}, false},
+		{Outputs{Template: "x"}, false},
+		{Outputs{File: "images.yaml", Template: "{{ range .Images }"}, false},
+	} {
+		if err := base(c.o).Validate(); (err == nil) != c.ok {
+			t.Errorf("%+v: Validate = %v, want ok=%v", c.o, err, c.ok)
+		}
+	}
+}

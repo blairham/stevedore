@@ -61,6 +61,18 @@ outputs:
   pins:
     description: "`command: plan` only: every planned image's `--pin-version id=ver`, space-joined, to go with `only`."
     value: ${{ steps.run.outputs.pins }}
+  refs:
+    description: "`command: release`/`merge`/`publish`: JSON object of image id → `repository@sha256:…` (its first repository) for every image whose digest was published this run or already released from this commit — `fromJSON(steps.<id>.outputs.refs).api`."
+    value: ${{ steps.run.outputs.refs }}
+  digests:
+    description: "As `refs`, but image id → `sha256:…` digest."
+    value: ${{ steps.run.outputs.digests }}
+  ref:
+    description: "The one pinned image's `repository@sha256:…`, set only when exactly one image was pinned (a single-image repo needs no fromJSON)."
+    value: ${{ steps.run.outputs.ref }}
+  digest:
+    description: "The one pinned image's `sha256:…` digest, set only when exactly one image was pinned."
+    value: ${{ steps.run.outputs.digest }}
   summary:
     description: "Compact JSON release summary ({project, images: [{id, version, digest, repositories, pushed, skipped, reason, …}]}) written by `command: release`/`build`; empty for other commands. Filter on `pushed` before notifying downstream systems."
     value: ${{ steps.run.outputs.summary }}
