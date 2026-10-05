@@ -42,6 +42,10 @@ type Image struct {
 	SBOM            bool `json:"sbom"`
 	Provenance      bool `json:"provenance"`
 	Tested          bool `json:"tested"`
+	// Scanned reports whether the vulnerability scan ran. It is what tells a
+	// clean image (scanned, no vulns) from an unscanned one: both have an empty
+	// Vulns, which is omitted from the JSON.
+	Scanned bool `json:"scanned"`
 	// Vulns counts the distinct findings across every scanned platform.
 	Vulns map[string]int `json:"vulns,omitempty"`
 	// Platforms records the gates per platform of the image, so a variant that
@@ -189,7 +193,7 @@ func (r Result) Markdown() string {
 		fmt.Fprintf(&b, "| `%s` | %s | `%s` | %s | %s | %s | %s | %s |\n",
 			img.ID, dash(img.Version), shortDigest(img.Digest),
 			check(img.Signed), check(img.SBOM), check(img.Provenance), check(img.Tested),
-			vulnCell(img.Vulns))
+			vulnCell(img.Scanned, img.Vulns))
 	}
 	platformTable(&b, r.Images)
 	return b.String()
@@ -213,7 +217,7 @@ func platformTable(b *strings.Builder, imgs []Image) {
 			if pl.TestSkipped != "" {
 				test = "_skipped_"
 			}
-			fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n", img.ID, pl.Platform, check(pl.Scanned), test, vulnCell(pl.Vulns))
+			fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n", img.ID, pl.Platform, check(pl.Scanned), test, vulnCell(pl.Scanned, pl.Vulns))
 		}
 	}
 }
@@ -258,9 +262,11 @@ func shortDigest(d string) string {
 	return d
 }
 
-// vulnCell renders the vulnerability tally most-severe first, or "clean".
-func vulnCell(counts map[string]int) string {
-	if len(counts) == 0 {
+// vulnCell renders the vulnerability tally most-severe first, "clean" for a
+// scan that found nothing, or "—" when no scan ran. The count map alone cannot
+// tell the last two apart: both are empty. Counts present prove a scan ran.
+func vulnCell(scanned bool, counts map[string]int) string {
+	if !scanned && len(counts) == 0 {
 		return "—"
 	}
 	order := []string{"critical", "high", "medium", "low", "negligible"}

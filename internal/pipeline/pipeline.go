@@ -1652,7 +1652,7 @@ func scanGate(o Options, p *Prepared, r *run.Runner, id, ref string, plats []str
 	}
 	counts := scanner.DistinctCounts(reports...)
 	for i := range irs {
-		irs[i].Vulns = counts
+		irs[i].Scanned, irs[i].Vulns = true, counts
 	}
 	if err := errors.Join(gateErrs...); err != nil {
 		return fmt.Errorf("vulnerability gate failed: %w", err)

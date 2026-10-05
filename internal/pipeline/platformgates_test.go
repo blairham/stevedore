@@ -43,6 +43,9 @@ func TestGatesCoverEveryPlatform(t *testing.T) {
 	if img.Tested {
 		t.Error("an image with an untested platform must not be reported as tested")
 	}
+	if !img.Scanned {
+		t.Error("a scanned image must be reported as scanned, so a clean one reads clean (#66)")
+	}
 	want := map[string]summary.Platform{
 		"linux/amd64": {Platform: "linux/amd64", Scanned: true, Tested: true},
 		"linux/arm64": {Platform: "linux/arm64", Scanned: true},
