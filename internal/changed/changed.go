@@ -276,10 +276,13 @@ func Match(patterns []string, path string) bool {
 	return ok
 }
 
+// matchAny tolerates a leading "./" on both sides: git reports paths without
+// one, but a config author may well write "./svc-a/**". It returns the pattern
+// as written, so a decision's reason quotes the config verbatim.
 func matchAny(patterns []string, path string) (string, bool) {
 	path = strings.TrimPrefix(path, "./")
 	for _, pat := range patterns {
-		if ok, err := doublestar.Match(pat, path); err == nil && ok {
+		if ok, err := doublestar.Match(strings.TrimPrefix(pat, "./"), path); err == nil && ok {
 			return pat, true
 		}
 	}
