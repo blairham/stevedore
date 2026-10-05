@@ -139,6 +139,11 @@ Two tools, one per artifact kind: **stevedore** releases its own container image
 publishes the CLI binary + Homebrew formula + GitHub release. See
 `.github/workflows/release.yml`.
 
+The image's `latest` tag and the moving git tags (`v1`, `v1.0`) share one rule:
+only a plain semver tag that is the newest moves them. For the image the
+workflow enforces it by releasing from a copy of `.stevedore.yaml` without the
+`- "latest"` line, so keep that line's spelling.
+
 ## Working agreements
 
 - Keep the tree `gofumpt`-clean; push and let CI run the full gate.
