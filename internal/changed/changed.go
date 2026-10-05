@@ -208,9 +208,20 @@ func short(sha string) string {
 	return sha
 }
 
+// hasOrigin reports whether dir has a remote named exactly "origin". `git
+// remote` prints one name per line; a substring test would also accept
+// "myorigin" or "origin-mirror" and then fail the fetch from "origin".
 func hasOrigin(ctx context.Context, dir string) bool {
 	out, err := git(ctx, dir, "remote")
-	return err == nil && strings.Contains(out, "origin")
+	if err != nil {
+		return false
+	}
+	for _, name := range strings.Split(out, "\n") {
+		if strings.TrimSpace(name) == "origin" {
+			return true
+		}
+	}
+	return false
 }
 
 // Decision explains why an image is (or isn't) considered changed.
