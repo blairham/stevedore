@@ -98,7 +98,7 @@ func buildReport(cfg config.Scan, ref string, vulns []Vuln) *Report {
 		ignore[strings.ToUpper(id)] = true
 	}
 	rep := &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}}
-	threshold := severityRank[cfg.FailOn] // 0 when FailOn is empty -> no gate
+	threshold := severityRank[cfg.FailOn] // 0 for "none" (or empty) -> no gate
 	for _, v := range vulns {
 		if ignore[strings.ToUpper(v.ID)] {
 			continue

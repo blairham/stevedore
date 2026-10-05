@@ -303,8 +303,9 @@ type Scan struct {
 	// Scanner is the CLI used: "grype" (default) or "trivy".
 	Scanner string `yaml:"scanner"`
 	// FailOn is the minimum severity that fails the release:
-	// negligible|low|medium|high|critical. Empty means scan-and-report without
-	// gating.
+	// negligible|low|medium|high|critical, or "none" to scan and report
+	// without gating. Left unset it defaults to critical; an explicit empty
+	// string is read as "none".
 	FailOn string `yaml:"fail_on"`
 	// Ignore lists vulnerability IDs (e.g. CVE-2023-1234) to exclude from the
 	// gate.
@@ -340,8 +341,34 @@ func Load(path string) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	if err := c.markExplicitEmpty(data); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
 	c.applyDefaults()
 	return &c, nil
+}
+
+// FailOnNone is the scan.fail_on value that scans and reports without gating.
+const FailOnNone = "none"
+
+// markExplicitEmpty rewrites settings whose explicit empty value means
+// something other than "unset" before applyDefaults can fill them. A plain
+// string cannot tell `fail_on: ""` from an absent key, and the default for an
+// absent key (critical) is the opposite of what the empty value documents
+// (report only).
+func (c *Config) markExplicitEmpty(data []byte) error {
+	var raw struct {
+		Scan struct {
+			FailOn *string `yaml:"fail_on"`
+		} `yaml:"scan"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Scan.FailOn != nil && *raw.Scan.FailOn == "" {
+		c.Scan.FailOn = FailOnNone
+	}
+	return nil
 }
 
 // ErrNoConfig is returned by Discover when dir holds none of DefaultFilenames.
@@ -379,7 +406,8 @@ func (c *Config) applyDefaults() {
 	orDefault(&c.Versioning.Initial, "0.1.0")
 	if c.Scan.Enabled {
 		orDefault(&c.Scan.Scanner, "grype")
-		// Secure-by-default: block on criticals unless told otherwise.
+		// Secure-by-default: block on criticals unless told otherwise
+		// ("none", or an explicit "", opts out).
 		orDefault(&c.Scan.FailOn, "critical")
 	}
 	for i := range c.Images {
@@ -474,7 +502,7 @@ func (s Scan) validate() error {
 		return fmt.Errorf("scan.scanner %q unsupported (want grype or trivy)", s.Scanner)
 	}
 	if !ValidSeverity(s.FailOn) {
-		return fmt.Errorf("scan.fail_on %q invalid (want one of: %s)", s.FailOn, strings.Join(Severities, ", "))
+		return fmt.Errorf("scan.fail_on %q invalid (want one of: %s, %s)", s.FailOn, strings.Join(Severities, ", "), FailOnNone)
 	}
 	for _, a := range s.Args {
 		if flag := outputFlag(s.Scanner, a); flag != "" {
@@ -554,10 +582,11 @@ func (v Versioning) validate() error {
 // Severities are the recognized vulnerability severities, ascending.
 var Severities = []string{"negligible", "low", "medium", "high", "critical"}
 
-// ValidSeverity reports whether s is a recognized severity (empty is allowed:
-// scan-and-report without gating).
+// ValidSeverity reports whether s is a recognized scan.fail_on value: a
+// severity, or "none" (and empty, its in-memory equivalent) to scan and report
+// without gating.
 func ValidSeverity(s string) bool {
-	if s == "" {
+	if s == "" || s == FailOnNone {
 		return true
 	}
 	return slices.Contains(Severities, s)

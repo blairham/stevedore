@@ -138,11 +138,11 @@ func TestBuildReportGating(t *testing.T) {
 	}
 
 	// no threshold -> report only, never blocks.
-	rep = buildReport(config.Scan{FailOn: ""}, "ref", vulns)
+	rep = buildReport(config.Scan{FailOn: config.FailOnNone}, "ref", vulns)
 	if len(rep.Blocking) != 0 {
-		t.Errorf("empty fail_on should not block, got %+v", rep.Blocking)
+		t.Errorf("fail_on=none should not block, got %+v", rep.Blocking)
 	}
-	if rep.GateError("") != nil {
+	if rep.GateError(config.FailOnNone) != nil {
 		t.Error("no threshold should yield no gate error")
 	}
 }
