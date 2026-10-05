@@ -10,6 +10,20 @@ they only publish on the **default branch** of a **non-snapshot** release. This 
 `latest` never accidentally moves from a feature branch or a snapshot build, while
 immutable tags like the version and commit SHA always publish.
 
+**Re-releasing a commit.** A tag that contains the commit SHA (`{{ .ShortCommit }}`,
+`{{ .Commit }}`, `main-{{ .ShortCommit }}`, …) names exactly one build of one
+commit, so before building, stevedore looks each one up (`docker buildx imagetools
+inspect`). If every commit tag of an image already exists and was built from this
+commit — its `org.opencontainers.image.revision` label matches, or it has none — the
+image is reported **already released**: nothing is rebuilt or re-tagged, and its
+release marker still advances. This is what makes re-running a release job safe against
+an immutable registry (ECR tag immutability and the like). A commit tag whose revision
+label names a *different* commit, or a set where only some commit tags exist (an
+earlier run that stopped partway), fails the run before anything is pushed. Images with
+no commit tag are unaffected. Within each repository, tags are applied commit tags
+first and floating tags last, so a collision the lookup could not see still fails before
+the version tag moves.
+
 Signing and SBOM generation happen **by digest** (`repo@sha256:…`), not by tag, so the
 exact artifact is pinned regardless of how many mutable tags point at it.
 
