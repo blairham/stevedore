@@ -91,7 +91,10 @@ type Options struct {
 	// groups. Either way, the groups that did push are recorded (markers,
 	// notifications, summary) before the run fails.
 	KeepGoing bool
-	Now       time.Time
+	// AllowNonDefaultBranch lets a real (non-snapshot) release publish from a
+	// commit that is not on the default branch.
+	AllowNonDefaultBranch bool
+	Now                   time.Time
 }
 
 // context returns the invocation's context. It carries a Runner with the
@@ -627,6 +630,9 @@ func Publish(o Options) error {
 		return err
 	}
 	err = guardReleasable(p.Git, p.Config.Versioning.Strategy)
+	if err == nil {
+		err = guardDefaultBranch(o, p.Config.DefaultBranch)
+	}
 	if err == nil && !o.DryRun {
 		err = checkTools(o.context(), p.Config, preflight.Opts{GitHubRelease: p.Config.Release.GitHub.Enabled})
 	}
@@ -743,6 +749,14 @@ func preflightRelease(o Options, p *Prepared) error {
 	if !o.Snapshot {
 		if err := guardReleasable(p.Git, p.Config.Versioning.Strategy); err != nil {
 			return err
+		}
+		// A split leg pushes only untagged digests; the merge run that
+		// tags them is held to the default branch instead. A --no-push run
+		// publishes nothing at all.
+		if !o.NoPush && len(o.SplitPlatforms) == 0 {
+			if err := guardDefaultBranch(o, p.Config.DefaultBranch); err != nil {
+				return err
+			}
 		}
 	}
 	if o.DryRun {
@@ -1647,6 +1661,27 @@ func guardReleasable(gi *gitinfo.Info, strategy string) error {
 		return fmt.Errorf("no git tag on HEAD; tag a release, switch versioning.strategy, or use --snapshot")
 	}
 	return nil
+}
+
+// guardDefaultBranch refuses a real release from a commit that is not on the
+// default branch. The tag and clean-tree guards say nothing about where a
+// commit came from, so without this a manual dispatch from a feature branch
+// publishes real versions of every image from code nobody merged.
+func guardDefaultBranch(o Options, branch string) error {
+	if o.AllowNonDefaultBranch {
+		return nil
+	}
+	ref, err := gitinfo.CheckReachable(o.context(), o.Dir, branch)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, gitinfo.ErrNotOnBranch):
+		return fmt.Errorf("HEAD is not on the default branch (%s); release from a merged commit, use --snapshot, or pass --allow-non-default-branch", ref)
+	case errors.Is(err, gitinfo.ErrShallow):
+		return fmt.Errorf("cannot tell whether HEAD is on the default branch (%s): the clone is shallow; fetch full history (actions/checkout `fetch-depth: 0`, or `git fetch --unshallow`), or pass --allow-non-default-branch", ref)
+	default:
+		return fmt.Errorf("check HEAD is on the default branch: %w; set default_branch, or pass --allow-non-default-branch", err)
+	}
 }
 
 func digestRef(repo, digest string) string {

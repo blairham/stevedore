@@ -27,22 +27,23 @@ func parsePins(pins []string) (map[string]string, error) {
 
 func newReleaseCmd() *cobra.Command {
 	var (
-		snapshot      bool
-		skipSign      bool
-		skipSBOM      bool
-		skipScan      bool
-		skipTest      bool
-		noPush        bool
-		parallel      int
-		skipChangelog bool
-		skipPublish   bool
-		onlyChanged   bool
-		changedSince  string
-		output        string
-		only          []string
-		pinVersions   []string
-		split         []string
-		keepGoing     bool
+		snapshot        bool
+		skipSign        bool
+		skipSBOM        bool
+		skipScan        bool
+		skipTest        bool
+		noPush          bool
+		parallel        int
+		skipChangelog   bool
+		skipPublish     bool
+		onlyChanged     bool
+		changedSince    string
+		output          string
+		only            []string
+		pinVersions     []string
+		split           []string
+		keepGoing       bool
+		allowNonDefault bool
 	)
 	cmd := &cobra.Command{
 		Use:   "release",
@@ -75,6 +76,7 @@ func newReleaseCmd() *cobra.Command {
 			o.PinVersions = pins
 			o.SplitPlatforms = split
 			o.KeepGoing = keepGoing
+			o.AllowNonDefaultBranch = allowNonDefault
 			return pipeline.Release(o)
 		},
 	}
@@ -94,5 +96,6 @@ func newReleaseCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation, announcements, and notify webhooks")
 	cmd.Flags().BoolVar(&keepGoing, "keep-going", false, "build every image even after one fails, then fail at the end (the ones that built are still tagged, recorded and notified)")
 	cmd.Flags().StringSliceVar(&split, "split", nil, "platform(s) to build natively on this runner, pushed untagged by digest for a later `stevedore merge` (native multi-arch CI: one matrix leg per arch)")
+	cmd.Flags().BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
 	return cmd
 }

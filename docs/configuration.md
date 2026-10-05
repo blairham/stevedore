@@ -9,7 +9,7 @@ stevedore looks for `.stevedore.yaml`, `.stevedore.yml`, `stevedore.yaml`, or
 version: 1
 
 project_name: myapp
-default_branch: main      # branch on which floating tags may publish
+default_branch: main      # branch real releases must be cut from; floating tags publish only here
 dist: dist                # output dir for SBOMs and the changelog
 
 images:
