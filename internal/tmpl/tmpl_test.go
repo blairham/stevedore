@@ -208,3 +208,18 @@ func TestSemverPartsOfSnapshot(t *testing.T) {
 		}
 	}
 }
+
+func TestCommitDate(t *testing.T) {
+	gi := &gitinfo.Info{Version: "1.0.0", CommitTime: time.Unix(1714979289, 0)}
+	ctx := NewContext("demo", "main", gi, false, time.Unix(1800000000, 0), nil)
+	got, err := Render("{{ .CommitDate }} {{ .CommitTimestamp }}", ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "2024-05-06T07:08:09Z 1714979289"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if c := NewContext("demo", "main", &gitinfo.Info{}, false, time.Now(), nil); c.CommitDate != "" || c.CommitTimestamp != 0 {
+		t.Errorf("no commit: CommitDate, CommitTimestamp = %q, %d", c.CommitDate, c.CommitTimestamp)
+	}
+}

@@ -36,12 +36,26 @@ func (r *Runner) Run(name string, args ...string) error {
 	return r.run(r.Context(), name, args)
 }
 
+// RunEnv is Run with env ("KEY=value" entries) added to the command's
+// environment, on top of this process's. The entries are echoed in front of
+// the command, as a shell would read them.
+func (r *Runner) RunEnv(env []string, name string, args ...string) error {
+	return r.runEnv(r.Context(), env, name, args)
+}
+
 func (r *Runner) run(ctx context.Context, name string, args []string) error {
-	r.echo(name, args)
+	return r.runEnv(ctx, nil, name, args)
+}
+
+func (r *Runner) runEnv(ctx context.Context, env []string, name string, args []string) error {
+	r.echo(strings.Join(append(quote(env), name), " "), args)
 	if r.DryRun {
 		return nil
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdout = r.out()
 	cmd.Stderr = r.err()
 	cmd.Stdin = os.Stdin

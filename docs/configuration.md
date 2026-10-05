@@ -12,6 +12,8 @@ project_name: myapp
 default_branch: main      # branch real releases must be cut from; floating tags publish only here
 prerelease_floating_tags: false   # let a prerelease (1.3.0-rc.1) move floating
                           # tags too; by default it publishes only immutable ones
+source_date_epoch: true   # pass SOURCE_DATE_EPOCH=<commit time> to every build
+                          # (build arg + buildx env); false to opt out
 dist: dist                # output dir for SBOMs and the changelog
 
 images:
@@ -37,7 +39,7 @@ images:
       org.opencontainers.image.source: "https://github.com/acme/myapp"
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.revision: "{{ .Commit }}"
-      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.created: "{{ .CommitDate }}"   # not .Date: see below
     secrets:              # BuildKit --secret entries. An env-backed secret
       - id: github_token  # whose variable is unset or empty is SKIPPED (like an
         env: GITHUB_TOKEN # empty cache entry), so a config can declare a
@@ -226,14 +228,35 @@ undefined field is an error (no silent empty strings). Available fields:
 | `.Commit` | full SHA |
 | `.ShortCommit` | `9f8e7d6` |
 | `.Branch` | `main` |
-| `.Date` | RFC 3339 build time (UTC) |
-| `.Timestamp` | Unix seconds |
+| `.Date` | RFC 3339 build time (UTC) — the wall clock, so it differs on every build |
+| `.Timestamp` | Unix seconds of `.Date` |
+| `.CommitDate` | RFC 3339 committer time of HEAD (UTC) — the same on every build of the commit; empty with no commits |
+| `.CommitTimestamp` | Unix seconds of `.CommitDate` (`0` with no commits) |
 | `.IsSnapshot` | `true` in a snapshot build |
 | `.IsDefault` | `true` when HEAD is on the default branch — including a tag checkout cut from it |
 | `.Detached` | `true` when HEAD points at a commit rather than a branch (any tag-triggered CI release) |
 | `.Env.NAME` | environment variable `NAME` |
 
 Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`.
+
+## Reproducible builds
+
+Rebuilding a commit should produce the same image digest. Two things work against
+that, and stevedore handles the one it controls:
+
+- **Timestamps.** By default every build gets `SOURCE_DATE_EPOCH` set to HEAD's commit
+  time, both as a `--build-arg` (for a Dockerfile that reads it) and in buildx's
+  environment, where BuildKit uses it for the image config's `created` time and its
+  history. A `SOURCE_DATE_EPOCH` already in the environment, or one set in an image's
+  `build_args`, wins over the commit time. Set `source_date_epoch: false` to pass none.
+- **Labels.** A label rendered from `.Date` bakes the wall clock into the image config
+  and changes the digest on every build. Use `.CommitDate` for
+  `org.opencontainers.image.created` instead.
+
+Layer file timestamps are a separate matter: BuildKit rewrites them to
+`SOURCE_DATE_EPOCH` only with the image exporter's `rewrite-timestamp=true` option
+(BuildKit 0.13+), and what the Dockerfile itself does (package-manager caches,
+generated files) is up to the Dockerfile.
 
 ## Changelog
 

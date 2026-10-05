@@ -108,3 +108,16 @@ func TestCaptureEchoesAsRanUnderDryRun(t *testing.T) {
 		t.Errorf("echo = %q, want %q", got, "+ echo hi\n")
 	}
 }
+
+// RunEnv shows the variables it adds in front of the command, as a shell
+// would read them.
+func TestRunEnvEchoesEnv(t *testing.T) {
+	f := stderrFile(t)
+	r := &Runner{DryRun: true, Stderr: f}
+	if err := r.RunEnv([]string{"SOURCE_DATE_EPOCH=5"}, "docker", "buildx", "build"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readAll(t, f), "[dry-run] SOURCE_DATE_EPOCH=5 docker buildx build\n"; got != want {
+		t.Errorf("echo = %q, want %q", got, want)
+	}
+}

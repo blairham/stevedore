@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	runner "github.com/blairham/stevedore/internal/run"
 	"github.com/blairham/stevedore/internal/semver"
@@ -34,6 +36,10 @@ type Info struct {
 	Commit string
 	// ShortCommit is the abbreviated HEAD SHA.
 	ShortCommit string
+	// CommitTime is HEAD's committer date; zero in a repository with no
+	// commits. Unlike the wall clock it is the same on every build of the
+	// commit, which is what makes it the reproducible-build timestamp.
+	CommitTime time.Time
 	// Branch is the current branch name, verbatim from git. On a detached HEAD
 	// — how every tag-triggered CI job checks a release out — git reports the
 	// literal string "HEAD", which is why Branches exists.
@@ -63,6 +69,9 @@ func Gather(ctx context.Context, dir string) (*Info, error) {
 
 	info.Commit = output(ctx, dir, "rev-parse", "HEAD")
 	info.ShortCommit = output(ctx, dir, "rev-parse", "--short", "HEAD")
+	if ct, err := strconv.ParseInt(output(ctx, dir, "log", "-1", "--format=%ct", "HEAD"), 10, 64); err == nil {
+		info.CommitTime = time.Unix(ct, 0).UTC()
+	}
 	info.Branch = output(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
 	info.Detached = info.Branch == "HEAD"
 	info.Branches = branchesContaining(ctx, dir)

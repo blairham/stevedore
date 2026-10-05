@@ -13,7 +13,7 @@ when it is:
   `{{ .Major }}`, `v{{ .Major }}.{{ .Minor }}`, `{{ .Major }}-alpine` are floating;
   `{{ .Major }}.{{ .Minor }}.{{ .Patch }}` or `{{ .Major }}-{{ .ShortCommit }}` are not
   (the pinning fields are `.Patch`, `.Prerelease`, `.Version`, `.Tag`, `.LatestTag`,
-  `.Commit`, `.ShortCommit`, `.Date`, `.Timestamp`);
+  `.Commit`, `.ShortCommit`, `.Date`, `.Timestamp`, `.CommitDate`, `.CommitTimestamp`);
 - or spelled as the version's own major or major.minor however it was produced
   (`1`, `v1.4` for `1.4.2`).
 

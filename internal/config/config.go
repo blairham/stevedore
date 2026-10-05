@@ -44,6 +44,13 @@ type Config struct {
 	// candidate never moves "latest" or "1".
 	PrereleaseFloatingTags bool `yaml:"prerelease_floating_tags"`
 
+	// SourceDateEpoch passes SOURCE_DATE_EPOCH — HEAD's commit time — to every
+	// build, as a build arg and in buildx's environment, so rebuilding a
+	// commit stamps the same timestamps into the image. On unless set to
+	// false. A SOURCE_DATE_EPOCH already in the environment, or one set in an
+	// image's build_args, wins over the commit time.
+	SourceDateEpoch *bool `yaml:"source_date_epoch"`
+
 	// Dist is the output directory for generated artifacts (SBOMs, changelog).
 	Dist string `yaml:"dist"`
 
@@ -577,6 +584,12 @@ func orDefault(field *string, value string) {
 }
 
 // Validate checks the config for internal consistency.
+// SourceDateEpochEnabled reports whether SOURCE_DATE_EPOCH is passed to builds
+// (source_date_epoch unset or true).
+func (c *Config) SourceDateEpochEnabled() bool {
+	return c.SourceDateEpoch == nil || *c.SourceDateEpoch
+}
+
 func (c *Config) Validate() error {
 	if c.Version != 1 {
 		return fmt.Errorf("unsupported config version %d (want 1)", c.Version)
