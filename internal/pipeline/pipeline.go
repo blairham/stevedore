@@ -534,9 +534,13 @@ func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result,
 		return err
 	}
 
-	// Publishing (GitHub release + announce) runs only for real releases.
+	// Publishing (GitHub release + announce) runs only for real releases, and
+	// only when this run built something: a run whose every image was skipped
+	// released no version, so there is nothing to name a release after.
 	if !o.NoPush && !o.Snapshot && !o.SkipPublish {
-		if err := publishRelease(r, p, changelogPath); err != nil {
+		if refs := builtRefs(result.Images); len(refs) == 0 {
+			fmt.Fprintln(progress, "==> nothing was built; no GitHub release or announcement")
+		} else if err := publishRelease(r, p, changelogPath, refs); err != nil {
 			return err
 		}
 	}
@@ -845,7 +849,8 @@ func emitSummary(o Options, p *Prepared, result summary.Result) error {
 }
 
 // publishRelease creates a GitHub release and posts announcements per config.
-func publishRelease(r *run.Runner, p *Prepared, changelogPath string) error {
+// refs are the references this run actually pushed.
+func publishRelease(r *run.Runner, p *Prepared, changelogPath string, refs []string) error {
 	// Named after the computed version, never after whatever tag git can
 	// reach: on an untagged HEAD that tag is a previous release, and a non-git
 	// strategy computes a version the tag on HEAD need not match.
@@ -873,7 +878,7 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string) error {
 			ProjectName: p.Config.ProjectName,
 			Version:     p.Ctx.Version,
 			Tag:         tag,
-			Refs:        allRefs(p.Plans),
+			Refs:        refs,
 			Body:        body,
 		}
 		if err := publish.Announce(r, p.Config.Announce, msg); err != nil {
@@ -1231,11 +1236,15 @@ func buildKey(dir string, plan ImagePlan) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// allRefs flattens the published references across all image plans.
-func allRefs(plans []ImagePlan) []string {
+// builtRefs flattens the published references of the images this run built.
+// A skipped image's plan still carries refs for the version it would have
+// had, but nothing was pushed under them.
+func builtRefs(images []summary.Image) []string {
 	var refs []string
-	for _, plan := range plans {
-		refs = append(refs, plan.Refs...)
+	for _, im := range images {
+		if !im.Skipped {
+			refs = append(refs, im.Refs...)
+		}
 	}
 	return refs
 }
