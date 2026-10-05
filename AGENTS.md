@@ -140,6 +140,14 @@ Two tools, one per artifact kind: **stevedore** releases its own container image
 publishes the CLI binary + Homebrew formula + GitHub release. See
 `.github/workflows/release.yml`.
 
+The GitHub release's notes are the tag's section of `CHANGELOG.md`, passed to
+GoReleaser as `--release-notes`; the `binary` job fails a tag whose section is
+missing or empty (tags from before the file existed fall back to GoReleaser's
+generated list). A user-visible change adds a line under `[Unreleased]`, and a
+release starts with a PR that moves those lines under `## [X.Y.Z] - <date>`.
+Never set `changelog.disable` in `.goreleaser.yaml`: it also skips the stage
+that loads `--release-notes`, and the release goes out with empty notes.
+
 The image's `latest` tag and the moving git tags (`v1`, `v1.0`) share one rule:
 only a plain semver tag that is the newest moves them. For the image the
 workflow enforces it by releasing from a copy of `.stevedore.yaml` without the

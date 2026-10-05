@@ -101,6 +101,11 @@ release:
     owner: blairham
     name: stevedore
 
+# The release notes are the tag's CHANGELOG.md section, passed by release.yml
+# with --release-notes, which replaces this generated list; the list is used
+# only for tags from before CHANGELOG.md existed. Do not set
+# `changelog.disable`: it also skips the stage that loads --release-notes, and
+# the release would go out with empty notes.
 changelog:
   use: github
   sort: asc

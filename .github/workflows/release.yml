@@ -157,10 +157,37 @@ jobs:
       # cosign v3 here, writing the .sigstore.json bundle format. The image job
       # keeps the installer major the composite action ships to users.
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      # The notes are the tag's section of CHANGELOG.md, written for people
+      # upgrading, rather than GoReleaser's list of commit subjects. A tag
+      # whose section is missing or empty fails here instead of publishing
+      # empty notes. A tag from before CHANGELOG.md existed (a dispatch
+      # re-run of v1.0.6 or older) keeps the generated list.
+      - name: Extract release notes
+        id: notes
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ ! -f CHANGELOG.md ]; then
+            echo "::notice::$TAG predates CHANGELOG.md; using GoReleaser's generated notes"
+            echo "args=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version="${TAG#v}"
+          awk -v head="## [$version]" '
+            index($0, head) == 1 { on = 1; next }
+            on && /^## \[/      { exit }
+            on                   { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::error::CHANGELOG.md has no section for $version; move [Unreleased] under '## [$version] - <date>' before tagging"
+            exit 1
+          fi
+          echo "args=--release-notes $RUNNER_TEMP/notes.md" >> "$GITHUB_OUTPUT"
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean ${{ steps.notes.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # A PAT with contents:write on blairham/homebrew-tap, so the formula can
