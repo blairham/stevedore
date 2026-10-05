@@ -158,6 +158,20 @@ func TestValidate(t *testing.T) {
 			}},
 			wantErr: false,
 		},
+		{
+			name: "policy requires every known stage",
+			cfg: Config{Version: 1, Images: []Image{
+				{ID: "a", Repositories: []string{"r1"}},
+			}, Policy: Policy{Require: []string{"scan", "test", "sign", "sbom"}}},
+			wantErr: false,
+		},
+		{
+			name: "policy requires an unknown stage",
+			cfg: Config{Version: 1, Images: []Image{
+				{ID: "a", Repositories: []string{"r1"}},
+			}, Policy: Policy{Require: []string{"scna"}}},
+			wantErr: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

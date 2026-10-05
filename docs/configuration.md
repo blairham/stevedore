@@ -141,7 +141,19 @@ notify:                   # machine-readable post-push notification (CD trigger)
     # bearer_env: DEPLOY_WEBHOOK_TOKEN   # sent as "Authorization: Bearer <token>"
     # hmac_env: DEPLOY_WEBHOOK_SECRET    # body signed with HMAC-SHA256, sent as
     #                                    # "X-Stevedore-Signature: sha256=<hex>"
+
+policy:
+  require: [scan, test, sign, sbom]  # stages a real release may not go without
 ```
+
+`policy.require` holds real releases to their gates. A required stage that is
+skipped with its flag (`--skip-scan`, `--skip-test`, `--skip-sign`,
+`--skip-sbom`) or disabled in the config (`scan.enabled: false`, …) refuses a
+real `release` or `merge` before anything is built. `--snapshot`, `--no-push`
+and `--split` legs are not real releases and are exempt. Whether or not a
+policy is set, a real release that ran without any of these stages is marked
+**degraded** in the release summary (`"degraded": ["scan", …]` in the JSON, and a
+banner over the job-summary table).
 
 Publishing (`release.github` + `announce`) runs only on real releases, never on
 `--snapshot`, and can be turned off per-run with `--skip-publish`. It also needs

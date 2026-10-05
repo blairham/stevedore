@@ -128,6 +128,11 @@ since its release marker") or why it was skipped ("inputs unchanged"). Under
 GitHub Actions the compact JSON is also written as a `summary` step output
 (republished by the composite action), so workflows can drive per-image
 follow-ups — e.g. deploy notifications — filtered on `pushed`.
+A real release that ran without scan, smoke test, signing or SBOM — skipped by
+flag or disabled in the config — lists those stages in a top-level `degraded`
+array, and the job summary opens with a "Degraded release" banner.
+`policy.require` turns them into a refusal instead (see
+[Configuration](configuration.md)).
 
 ## Editor support
 

@@ -57,6 +57,40 @@ type Config struct {
 	Release    Release    `yaml:"release"`
 	Announce   Announce   `yaml:"announce"`
 	Notify     Notify     `yaml:"notify"`
+	Policy     Policy     `yaml:"policy"`
+}
+
+// Policy holds the rules a real (non-snapshot) release is held to.
+type Policy struct {
+	// Require names the stages a real release may not go without: any of
+	// scan, test, sign and sbom. A required stage that is disabled in the
+	// config, or skipped with its --skip-* flag, refuses the release.
+	Require []string `yaml:"require"`
+}
+
+// The stages policy.require can name.
+const (
+	StageScan = "scan"
+	StageTest = "test"
+	StageSign = "sign"
+	StageSBOM = "sbom"
+)
+
+// PolicyStages lists the stages policy.require accepts, in pipeline order.
+var PolicyStages = []string{StageScan, StageTest, StageSign, StageSBOM}
+
+// Requires reports whether policy.require names stage.
+func (p Policy) Requires(stage string) bool {
+	return slices.Contains(p.Require, stage)
+}
+
+func (p Policy) validate() error {
+	for _, s := range p.Require {
+		if !slices.Contains(PolicyStages, s) {
+			return fmt.Errorf("policy.require: unknown stage %q (want one of %s)", s, strings.Join(PolicyStages, ", "))
+		}
+	}
+	return nil
 }
 
 // Release configures post-build publishing steps.
@@ -541,6 +575,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.Provenance.validate(); err != nil {
+		return err
+	}
+	if err := c.Policy.validate(); err != nil {
 		return err
 	}
 	if c.Notify.Webhook.Enabled && c.Notify.Webhook.URLEnv == "" {

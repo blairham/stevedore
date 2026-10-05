@@ -43,9 +43,12 @@ type Image struct {
 
 // Result is the whole release outcome.
 type Result struct {
-	Project  string  `json:"project"`
-	Snapshot bool    `json:"snapshot"`
-	Images   []Image `json:"images"`
+	Project  string `json:"project"`
+	Snapshot bool   `json:"snapshot"`
+	// Degraded names the stages (scan, test, sign, sbom) a real release ran
+	// without — skipped by flag or disabled in the config.
+	Degraded []string `json:"degraded,omitempty"`
+	Images   []Image  `json:"images"`
 }
 
 // JSON renders the result as indented JSON.
@@ -83,6 +86,9 @@ func (r Result) Markdown() string {
 		title = "release"
 	}
 	fmt.Fprintf(&b, "## stevedore release — %s\n\n", title)
+	if len(r.Degraded) > 0 {
+		fmt.Fprintf(&b, "> **Degraded release:** ran without %s (skipped or disabled).\n\n", strings.Join(r.Degraded, ", "))
+	}
 	b.WriteString("| image | version | digest | signed | sbom | prov | test | vulns |\n")
 	b.WriteString("|-------|---------|--------|:------:|:----:|:----:|:----:|-------|\n")
 	for _, img := range r.Images {

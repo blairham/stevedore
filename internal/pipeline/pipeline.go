@@ -525,7 +525,7 @@ func Release(o Options) error {
 // always runs for whatever was built, and the build failure is returned with
 // whatever else went wrong.
 func buildAndFinish(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, skipped []imageEval, fpPath string, state fingerprint.State) error {
-	result := summary.Result{Project: p.Config.ProjectName, Snapshot: o.Snapshot}
+	result := summary.Result{Project: p.Config.ProjectName, Snapshot: o.Snapshot, Degraded: degradedStages(o, p.Config)}
 	result.Images = reportGroups(toBuild, skipped)
 
 	built, depDiffSections, buildErr := buildGroups(o, p, r, toBuild, state)
@@ -758,6 +758,9 @@ func preflightRelease(o Options, p *Prepared) error {
 				return err
 			}
 		}
+	}
+	if err := enforcePolicy(o, p.Config); err != nil {
+		return err
 	}
 	if o.DryRun {
 		return nil
