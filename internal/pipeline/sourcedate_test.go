@@ -42,3 +42,24 @@ func TestSourceDateEpochPlan(t *testing.T) {
 		}
 	}
 }
+
+// {{ .ID }} names the image in its repositories, build args and tags — what
+// makes one image_defaults block serve many images.
+func TestResolvePlans_ImageID(t *testing.T) {
+	img := func(id string) config.Image {
+		return config.Image{
+			ID: id, Repositories: []string{"reg/{{ .ID }}"},
+			Tags: []string{"{{ .ID }}-{{ .Version }}"}, BuildArgs: []string{"SERVICE={{ .ID }}"},
+		}
+	}
+	plans, err := resolvePlans(&config.Config{Images: []config.Image{img("api"), img("worker")}}, newCtx("main", false), false, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{"api", "worker"} {
+		p := plans[i]
+		if p.Repos[0] != "reg/"+id || p.Refs[0] != "reg/"+id+":"+id+"-1.2.3" || p.BuildArgs[0] != "SERVICE="+id {
+			t.Errorf("%s: repos %v refs %v args %v", id, p.Repos, p.Refs, p.BuildArgs)
+		}
+	}
+}

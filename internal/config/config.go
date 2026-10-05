@@ -68,6 +68,13 @@ type Config struct {
 	// ChangeDetection tunes --only-changed / --changed-since.
 	ChangeDetection ChangeDetection `yaml:"change_detection"`
 
+	// ImageDefaults is merged under every entry of Images before anything
+	// else reads them: a field an image sets wins, a field it leaves out is
+	// taken from here. Maps (labels, annotations) merge key by key, the
+	// image's keys winning; lists (tags, platforms, build_args, …) and
+	// scalars are replaced whole, never concatenated. It may not set id.
+	ImageDefaults Image `yaml:"image_defaults" jsonschema:"without=id"`
+
 	Images     []Image    `yaml:"images"`
 	Sign       Sign       `yaml:"sign"`
 	SBOM       SBOM       `yaml:"sbom"`
@@ -533,6 +540,20 @@ func Load(path string) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	// The strict decode above has checked every field, image_defaults
+	// included, against the file as written (so its line numbers are the
+	// user's); the merged document is decoded again only to pick up the
+	// merge.
+	doc, merged, err := mergeImageDefaults(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if merged {
+		c = Config{}
+		if err := doc.Decode(&c); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+	}
 	if err := c.markExplicitEmpty(data); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -629,7 +650,6 @@ func orDefault(field *string, value string) {
 	}
 }
 
-// Validate checks the config for internal consistency.
 // DefaultLabelsEnabled reports whether the default OCI labels are set
 // (default_labels unset or true).
 func (c *Config) DefaultLabelsEnabled() bool {
@@ -642,9 +662,14 @@ func (c *Config) SourceDateEpochEnabled() bool {
 	return c.SourceDateEpoch == nil || *c.SourceDateEpoch
 }
 
+// Validate checks the config for internal consistency. It runs on the merged
+// images, so a field image_defaults supplies counts as the image's own.
 func (c *Config) Validate() error {
 	if c.Version != 1 {
 		return fmt.Errorf("unsupported config version %d (want 1)", c.Version)
+	}
+	if c.ImageDefaults.ID != "" {
+		return fmt.Errorf("image_defaults.id: an id names one image and cannot be a default")
 	}
 	if err := c.validateImages(); err != nil {
 		return err

@@ -21,6 +21,9 @@ import (
 // build args). Field names mirror goreleaser where practical.
 type Context struct {
 	ProjectName string
+	// ID is the id of the image being rendered; empty outside one (an
+	// announcement, the release-wide versioning repo).
+	ID          string
 	Version     string
 	Tag         string // the tag on HEAD; empty on an untagged commit
 	LatestTag   string // the most recent tag reachable from HEAD (Tag when HEAD is tagged)
@@ -69,6 +72,14 @@ func NewContext(projectName, defaultBranch string, gi *gitinfo.Info, snapshot bo
 		c.CommitTimestamp = gi.CommitTime.Unix()
 	}
 	return c
+}
+
+// WithImage returns a shallow copy of the context for rendering image id's
+// fields, so {{ .ID }} names it.
+func (c *Context) WithImage(id string) *Context {
+	clone := *c
+	clone.ID = id
+	return &clone
 }
 
 // WithVersion returns a shallow copy of the context with Version overridden.

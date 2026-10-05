@@ -109,6 +109,12 @@ images:
     paths: ["Reports/**"]       # this image depends only on these (+ shared_paths)
 ```
 
+Many near-identical images are also where copy-paste bites: a copied block that
+drops one build arg ships the wrong binary. Put the shared part in
+[`image_defaults:`](configuration.md#image-defaults) and let `{{ .ID }}` fill in the
+per-image names, so each image states only what is its own (see
+`examples/monorepo`).
+
 ## Auto-deriving paths from a project graph
 
 Hand-maintaining `paths` gets ugly once shared libraries and transitive
