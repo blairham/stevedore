@@ -4,6 +4,8 @@
 package pipeline
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -219,5 +221,28 @@ func TestGuardReleasable_UntaggedHEAD(t *testing.T) {
 	}
 	if err := guardReleasable(&gitinfo.Info{Tag: "v1.4.0", LatestTag: "v1.4.0"}, "git"); err != nil {
 		t.Errorf("git strategy on a tagged HEAD: %v", err)
+	}
+}
+
+// The release version anchors on the first image's repository; when that is
+// spelled with {{ .ID }} it must name the image, not render to "reg/".
+func TestResolveVersion_AnchorRepoUsesImageID(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\n[ \"$2\" = reg/api ] || { echo \"unexpected repo $2\" >&2; exit 1; }\necho 1.4.0\n"
+	if err := os.WriteFile(filepath.Join(bin, "crane"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cfg := &config.Config{
+		Versioning: config.Versioning{Strategy: "registry", Lister: "crane", Bump: "patch", Initial: "0.1.0"},
+		Images:     []config.Image{{ID: "api", Repositories: []string{"reg/{{ .ID }}"}}},
+	}
+	gi := &gitinfo.Info{Commit: "deadbeefcafe", ShortCommit: "deadbee", Branch: "main"}
+	ver, err := resolveVersion(cfg, gi, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ver != "1.4.1" {
+		t.Errorf("version = %q, want 1.4.1 from reg/api", ver)
 	}
 }

@@ -433,7 +433,10 @@ func (fp floatingPolicy) withholdReason(ctx *tmpl.Context) string {
 		return reasonSnapshot
 	case !ctx.IsDefault:
 		return reasonOffDefault
-	case ctx.IsPrerelease() && !fp.onPrerelease:
+	case ctx.IsPrerelease() && !fp.onPrerelease && ctx.Version != unresolvedVersion:
+		// The placeholder `check` shows for a version it could not read is
+		// spelled as a prerelease, but it is no version at all: previewing
+		// the tags should not hide latest on its account.
 		return reasonPrerelease
 	}
 	return ""
@@ -465,8 +468,9 @@ func (w *withheldTags) add(tag, reason, version string) {
 
 // resolvePlan renders one image's plan; see resolvePlans.
 func resolvePlan(img config.Image, ctx *tmpl.Context, fp floatingPolicy, versionFor func(string) (string, error), pins map[string]string, withheld *withheldTags) (ImagePlan, error) {
-	// Repositories are rendered with the release context (they key on .Env,
-	// not .Version), and drive per-image version resolution.
+	// Repositories are rendered with the release context (they key on .Env
+	// and .ID, not .Version), and drive per-image version resolution.
+	ctx = ctx.WithImage(img.ID)
 	repos, err := tmpl.RenderAll(img.Repositories, ctx)
 	if err != nil {
 		return ImagePlan{}, fmt.Errorf("image %s repositories: %w", img.ID, err)
@@ -1761,6 +1765,10 @@ func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, er
 			now = time.Now()
 		}
 		rctx := tmpl.NewContext(cfg.ProjectName, cfg.DefaultBranch, gi, o.Snapshot, now, envMap())
+		if vcfg.Repo == "" && first != nil {
+			// The anchor image's own repository, which may spell its id.
+			rctx = rctx.WithImage(first.ID)
+		}
 		rendered, err := tmpl.Render(repo, rctx)
 		if err != nil {
 			return "", fmt.Errorf("render versioning repo %q: %w", repo, err)

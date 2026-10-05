@@ -69,13 +69,40 @@ func structSchema(t reflect.Type) map[string]any {
 		if name == "" || name == "-" {
 			continue
 		}
-		props[name] = schemaFor(f.Type)
+		props[name] = without(schemaFor(f.Type), f.Tag.Get("jsonschema"))
 	}
 	return map[string]any{
 		typeKey:                "object",
 		"properties":           props,
 		"additionalProperties": false,
 	}
+}
+
+// without applies a field's `jsonschema:"without=a,b"` tag: the named
+// properties are dropped from the field's object schema. It is how a field
+// reusing a struct (image_defaults, an Image) leaves out what it cannot set.
+func without(s map[string]any, tag string) map[string]any {
+	names, ok := strings.CutPrefix(tag, "without=")
+	if !ok {
+		return s
+	}
+	props, ok := s["properties"].(map[string]any)
+	if !ok {
+		return s
+	}
+	trimmed := make(map[string]any, len(props))
+	for k, v := range props {
+		trimmed[k] = v
+	}
+	for _, n := range strings.Split(names, ",") {
+		delete(trimmed, n)
+	}
+	out := make(map[string]any, len(s))
+	for k, v := range s {
+		out[k] = v
+	}
+	out["properties"] = trimmed
+	return out
 }
 
 func yamlName(f reflect.StructField) string {

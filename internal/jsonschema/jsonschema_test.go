@@ -41,6 +41,19 @@ func TestGenerateConfig(t *testing.T) {
 	if _, ok := itemProps["build_args"]; !ok {
 		t.Errorf("image items should have build_args: %v", itemProps)
 	}
+
+	// image_defaults is an image without an id — and leaves images' id alone.
+	defaults, _ := props["image_defaults"].(map[string]any)
+	defProps, _ := defaults["properties"].(map[string]any)
+	if _, ok := defProps["build_args"]; !ok {
+		t.Errorf("image_defaults should have build_args: %v", defProps)
+	}
+	if _, ok := defProps["id"]; ok {
+		t.Error("image_defaults must not offer id")
+	}
+	if _, ok := itemProps["id"]; !ok {
+		t.Error("dropping id from image_defaults dropped it from images too")
+	}
 }
 
 func TestTypeMapping(t *testing.T) {

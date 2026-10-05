@@ -18,6 +18,9 @@ source_date_epoch: true   # pass SOURCE_DATE_EPOCH=<commit time> to every build
                           # (build arg + buildx env); false to opt out
 dist: dist                # output dir for SBOMs and the changelog
 
+image_defaults:           # merged under every image (see "Image defaults")
+  platforms: [linux/amd64, linux/arm64]
+
 images:
   - id: myapp             # stable identifier used in logs/artifact names
     dockerfile: Dockerfile
@@ -258,6 +261,7 @@ undefined field is an error (no silent empty strings). Available fields:
 | Field | Example |
 |-------|---------|
 | `.ProjectName` | `myapp` |
+| `.ID` | `api` — the image being rendered (its `repositories`, `tags`, `build_args`, labels, …); empty outside one |
 | `.Version` | `1.4.0` |
 | `.Major` / `.Minor` / `.Patch` | `1` / `4` / `0` — the parts of `.Version`; an error when the version is not semver |
 | `.Prerelease` | `rc.1` for `1.5.0-rc.1`; empty for a release. A snapshot version is read as its base, so `.Major`…`.Prerelease` of `1.4.0-SNAPSHOT-9f8e7d6` are those of `1.4.0` |
@@ -278,6 +282,38 @@ undefined field is an error (no silent empty strings). Available fields:
 | `.Env.NAME` | environment variable `NAME` |
 
 Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`, `json` (encodes a value as JSON).
+
+## Image defaults
+
+`image_defaults:` takes any image field except `id` and is merged under every entry
+of `images:` before anything else reads them — validation included, so a required
+field (`repositories`) supplied only by the defaults is satisfied. The rules:
+
+- **A field the image sets wins**, whatever its value: `tags: []` on an image means
+  "no tags of my own" (and then the usual `{{ .Version }}` default), not "inherit".
+- **Maps merge** key by key — `labels`, `annotations` — with the image's key winning.
+- **Lists replace**, never concatenate — `tags`, `platforms`, `build_args`, `paths`,
+  `secrets`, `cache_from`, … An image that adds one build arg restates the rest.
+- Scalars (`dockerfile`, `context`, `target`) replace.
+
+`{{ .ID }}` in templated fields is each image's own id, so one block can name every
+repository:
+
+```yaml
+image_defaults:
+  platforms: [linux/amd64, linux/arm64]
+  repositories: ["ghcr.io/acme/{{ .ID }}"]
+  tags: ["{{ .Version }}", "{{ .ShortCommit }}", latest]
+  build_args: ["SERVICE={{ .ID }}"]
+images:
+  - id: api
+    dockerfile: services/api/Dockerfile
+  - id: worker
+    dockerfile: services/worker/Dockerfile
+    build_args: ["SERVICE=worker", "REGION=eu"]   # replaces the default list
+```
+
+`dockerfile`, `context` and `paths` are not templated, so they stay per image.
 
 ## Default labels
 

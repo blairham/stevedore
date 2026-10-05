@@ -153,3 +153,15 @@ func TestResolvePlans_UntaggedMainKeepsFloating(t *testing.T) {
 		}
 	}
 }
+
+// check's placeholder for a version it could not read is not a prerelease.
+func TestResolvePlans_UnresolvedPlaceholderKeepsFloating(t *testing.T) {
+	ctx := newCtx("main", false).WithVersion(unresolvedVersion)
+	plans, err := resolvePlans(semverCfg(false), ctx, false, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(plans[0].Refs, "reg/app:latest") {
+		t.Errorf("latest hidden behind the placeholder: %v", plans[0].Refs)
+	}
+}

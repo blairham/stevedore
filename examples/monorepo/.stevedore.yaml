@@ -6,23 +6,27 @@ version: 1
 
 project_name: acme-platform
 
+# Merged under every image: an image's own field wins, maps (labels,
+# annotations) merge key by key, and lists (tags, platforms, build_args, …)
+# replace rather than append. {{ .ID }} is the image's id, so one block names
+# every repository — the copy-one-block-edit-one-line step is where a dropped
+# build arg ships the wrong binary.
+image_defaults:
+  context: .
+  platforms: [linux/amd64, linux/arm64]
+  repositories: ["ghcr.io/acme/{{ .ID }}"]
+  tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
+  build_args: ["SERVICE={{ .ID }}"]
+
 images:
   - id: api
     dockerfile: services/api/Dockerfile
-    context: .
-    platforms: [linux/amd64, linux/arm64]
-    repositories: [ghcr.io/acme/api]
-    tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
     paths:
       - "services/api/**"
       - "libs/shared/**" # api depends on it, so a change here rebuilds api
 
   - id: worker
     dockerfile: services/worker/Dockerfile
-    context: .
-    platforms: [linux/amd64, linux/arm64]
-    repositories: [ghcr.io/acme/worker]
-    tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
     paths:
       - "services/worker/**"
       - "libs/shared/**"
@@ -30,13 +34,10 @@ images:
   # Same Dockerfile and context as `worker`, differing only by a build arg, so
   # these two are NOT built once — a differing build arg makes them distinct
   # builds. Two images differing only by destination WOULD share one build.
+  # build_args replaces the default list, so it restates SERVICE.
   - id: worker-eu
     dockerfile: services/worker/Dockerfile
-    context: .
-    platforms: [linux/amd64, linux/arm64]
-    repositories: [ghcr.io/acme/worker-eu]
-    tags: ["{{ .Version }}", "{{ .ShortCommit }}", "latest"]
-    build_args: ["REGION=eu"]
+    build_args: ["SERVICE=worker", "REGION=eu"]
     paths:
       - "services/worker/**"
       - "libs/shared/**"
