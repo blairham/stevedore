@@ -7,7 +7,7 @@ branding:
 
 inputs:
   command:
-    description: "stevedore subcommand to run (release, merge, publish, plan, build, check, verify, doctor)."
+    description: "stevedore subcommand to run (release, merge, publish, plan, build, check, verify, promote, doctor)."
     required: false
     default: "release"
   args:
@@ -74,7 +74,7 @@ outputs:
     description: "The one pinned image's `sha256:…` digest, set only when exactly one image was pinned."
     value: ${{ steps.run.outputs.digest }}
   summary:
-    description: "Compact JSON release summary ({project, images: [{id, version, digest, repositories, pushed, skipped, reason, …}]}) written by `command: release`/`build`; empty for other commands. Filter on `pushed` before notifying downstream systems."
+    description: "Compact JSON release summary ({project, images: [{id, version, digest, repositories, pushed, skipped, reason, …}]}) written by `command: release`/`merge` and `build --push`; empty for other commands. Filter on `pushed` before notifying downstream systems."
     value: ${{ steps.run.outputs.summary }}
 
 runs:

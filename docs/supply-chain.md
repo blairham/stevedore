@@ -2,9 +2,11 @@
 
 Signing, SBOMs, provenance, and the gates that run before any of it.
 
-stevedore is secure-by-default: every release is signed, gets an SBOM, and (when
-enabled) carries SLSA build provenance. The pipeline runs in this order so a bad
-image never gets signed or tagged:
+Signing, the SBOM, provenance, the scan and the smoke test are each opt-in in
+the config (`enabled: true`); the config `stevedore init` writes turns on
+signing, the SBOM, provenance and the scan. `policy.require` makes a release
+refuse to run without the ones you name. Whatever is enabled runs in this
+order, so a bad image never gets signed or tagged:
 
 ```
 build + push by digest → scan (gate) → smoke test (gate) → sign → SBOM + attest

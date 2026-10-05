@@ -37,7 +37,8 @@ CI pipelines for container images tend to be a pile of bespoke shell: compute a 
 from the git ref, `docker buildx` with the right flags, remember to sign, remember
 the SBOM, hand-maintain a changelog. stevedore turns all of that into one config
 file you check in — so `stevedore release` does the same thing on your laptop and in
-CI, and every image ships signed and attested by default.
+CI, and the config `stevedore init` writes turns on signing, SBOMs, provenance
+and the vulnerability gate from the start.
 
 ## Is this just `X`?
 
@@ -87,7 +88,7 @@ docker run --rm -v "$PWD:/src" -w /src ghcr.io/blairham/stevedore release
 ### Requirements
 
 stevedore orchestrates other tools rather than reimplementing them — the same
-design goreleaser uses — which keeps the binary tiny (~4.5 MB) instead of bundling
+design goreleaser uses — which keeps the binary tiny (~9 MB, a 3.5–4 MB download) instead of bundling
 their combined ~900 dependencies. Depending on which features you enable, you'll
 need:
 
@@ -136,7 +137,8 @@ stevedore release
 
 ## Examples
 
-Working configs, each validated in CI against the real binary:
+Working configs. CI loads and validates each one with `stevedore check`, built
+from the same commit (a full plan or dry run would need the registries they name):
 
 | | |
 |---|---|

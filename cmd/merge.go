@@ -68,7 +68,7 @@ func newMergeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipScan, "skip-scan", false, "skip vulnerability scanning")
 	cmd.Flags().BoolVar(&skipTest, "skip-test", false, "skip the post-build smoke test")
 	cmd.Flags().BoolVar(&skipChangelog, "skip-changelog", false, "skip changelog generation")
-	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation, announcements, and notify webhooks")
+	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip the GitHub/GitLab release, announcements, and notify webhooks")
 	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to merge (matrix mode: match the split legs' --only); 'all' selects every image")
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; match the split legs' pins)")
 	cmd.Flags().BoolVar(&keepGoing, "keep-going", false, "merge every image whose digests are complete even after one fails, then fail at the end (the ones that merged are still tagged, recorded and notified)")

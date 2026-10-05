@@ -50,7 +50,7 @@ mitigation, which is real: the config is a YAML file describing docker commands,
 so the exit cost is reading it and writing the shell you would have written
 anyway. Nothing is stored, nothing is proprietary, nothing is locked in.
 
-**Lead the ~4.5 MB binary as a *dependency* story, not a size flex.** The
+**Lead the ~9 MB binary (a 3.5–4 MB download) as a *dependency* story, not a size flex.** The
 interesting part is not that it is small, it is *why*: it orchestrates cosign,
 syft, grype and crane rather than vendoring them, which means you pin those
 tools' versions yourself and a CVE in one of them is patched by upgrading that
@@ -71,7 +71,7 @@ not, and it matters more than anything in the post itself.
 **Never argue with someone who says they will keep their shell script.** They
 are right. Say so.
 
-## Honest state, as of v1.0.0
+## Honest state, as of v1.0.6
 
 Keep this section current; it is what stops the post from overclaiming.
 
@@ -84,7 +84,8 @@ Keep this section current; it is what stops the post from overclaiming.
 | Windows | Not supported. `release` shells out to docker; nobody has tried it. Say so if asked. |
 | Registries tested | ghcr.io and ECR for real. Docker Hub, GAR, Quay should work and have not been verified — say "should work, untested" rather than listing them. |
 | Non-Docker builders | None. No ko, no buildah, no kaniko backend. |
-| Version | v1.0.0, with a published stability contract (`docs/stability.md`). The contract is the answer to "0.x means unfinished". |
+| Version | v1.0.6 (v1.0.0 onward carry the published stability contract, `docs/stability.md`). The contract is the answer to "0.x means unfinished". |
+| CI systems | GitHub Actions through the action; GitLab CI documented with an example pipeline and a `release.gitlab` target, not yet run in a real GitLab pipeline. Others: the binary and the `STEVEDORE_*` sink variables, untested. |
 
 ## What we will not claim
 
@@ -101,13 +102,14 @@ Nothing gets posted until every one of these is true. A broken copy-paste path
 in the first hour costs the whole launch.
 
 - [x] `brew install blairham/tap/stevedore` works from a clean machine —
-      installed from the tap (1.0.4) and runs; the tap now carries 1.0.5
+      installed from the tap (1.0.4) and runs; the tap now carries 1.0.6
 - [x] `go install github.com/blairham/stevedore@latest` works — installs
-      v1.0.5, and `--version` reports 1.0.5 (it said `dev` before #24)
+      v1.0.5, and `--version` reports 1.0.5 (it said `dev` before #24); the
+      module proxy's latest is now v1.0.6
 - [x] `docker run --rm ghcr.io/blairham/stevedore --version` works — i.e. the
       `:latest` tag actually exists (it did not, for ten releases; see #20) —
-      `:latest` reports 1.0.4
-- [x] `uses: blairham/stevedore@v1` resolves (see #21) — `v1` → v1.0.3
+      `:latest` reported 1.0.4, and is now labelled 1.0.6
+- [x] `uses: blairham/stevedore@v1` resolves (see #21) — `v1` → v1.0.6
 - [x] Every command in the README quick start, run in order, in a scratch repo
       — against a local registry, with sign and SBOM skipped (keyless signing
       needs a browser). It failed at step 6 until `init` learned to ignore

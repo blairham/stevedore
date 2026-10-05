@@ -64,8 +64,9 @@ That works. What it costs:
   resolution on your laptop and prints every command without running one.
 - Tag logic drifts between repos, and the floating-tag rule ("`latest` only from
   the default branch of a real release") is the one everybody gets wrong.
-- Signing and SBOM are steps you can forget. Here they are defaults, and the
-  gates are ordered so a bad image cannot reach them.
+- Signing and SBOM are steps you can forget. Here they are one `enabled: true`
+  each (on in the config `stevedore init` writes, and enforceable with
+  `policy.require`), and the gates are ordered so a bad image cannot reach them.
 - Nothing validates it until it runs. `stevedore check` resolves the whole plan —
   the exact refs that would publish — without building.
 
@@ -79,7 +80,7 @@ Stated plainly, because a tool that is unclear about this wastes your afternoon:
   digest. What happens next is your CD system's job.
 - **Not a registry, a scanner, or a signer.** It orchestrates `cosign`, `syft`,
   `grype`/`trivy`, `crane`, `aws` and `gh` rather than embedding them — which is
-  why the binary is ~4.5 MB instead of carrying their combined dependency trees,
+  why the binary is ~9 MB (a 3.5–4 MB download) instead of carrying their combined dependency trees,
   and why you can pin those tools' versions yourself.
 - **Not a way to avoid learning Docker.** It assumes you have a Dockerfile that
   works.

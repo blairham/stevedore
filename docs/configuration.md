@@ -108,7 +108,7 @@ scan:
 
 provenance:
   enabled: true           # emit a SLSA build-provenance attestation (push only)
-  mode: max               # min | max (max records the full build definition)
+  mode: max               # min | max (default max: records the full build definition)
 
 test:
   enabled: true           # smoke-test the built image before signing/tagging
@@ -129,6 +129,13 @@ versioning:
   # repo: ghcr.io/acme/myapp   # defaults to each image's own repository
   # region: us-east-1     # ecr only; inferred from the ECR host otherwise
   # initial: "0.1.0"      # when the repo has no semver tags yet
+  # lister: crane         # registry only; the tool that lists tags (only crane)
+  # static strategy:
+  # value: "1.2.3"        # the version (may contain templates)
+  # env strategy:
+  # env: RELEASE_VERSION  # the environment variable holding the version
+  # command strategy:
+  # command: ./scripts/version.sh   # its trimmed stdout is the version
   # require_tag: true    # tag on HEAD = release every image; untagged = validate-only build
 
 change_detection:         # scope --only-changed / --changed-since for monorepos
@@ -136,6 +143,10 @@ change_detection:         # scope --only-changed / --changed-since for monorepos
   shared_paths:           # a change here rebuilds every image
     - "Dockerfile"
     - "*.sln"
+  marker_refs: false      # advance a per-image git ref after each release and
+                          # diff each image from its own last release (stateless;
+                          # needs permission to push refs)
+  marker_prefix: refs/releases/image/   # marker ref namespace (default shown)
 
 changelog:
   enabled: true

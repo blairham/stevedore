@@ -17,7 +17,7 @@ func newPublishCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "publish",
-		Short: "Create the GitHub release and announce, once, after a matrix release",
+		Short: "Create the GitHub or GitLab release and announce, once, after a matrix release",
 		Long: "publish is the last step of a matrix release. Each matrix job runs\n" +
 			"`release --only <entry.only> <entry.pins>`, which builds, gates, signs,\n" +
 			"tags, notifies and advances its markers but — like a split leg — creates\n" +
@@ -41,7 +41,7 @@ func newPublishCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) the matrix built (the plan step's flat only output); default every image, as does 'all'")
-	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; the plan entries' `pins`), so the release is named after what was pushed")
+	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; the plan entries' pins), so the release is named after what was pushed")
 	cmd.Flags().BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
 	return cmd
 }

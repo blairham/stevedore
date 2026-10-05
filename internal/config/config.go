@@ -244,9 +244,10 @@ type Webhook struct {
 // and pushed alongside the image. Only takes effect when pushing.
 type Provenance struct {
 	Enabled bool `yaml:"enabled"`
-	// Mode is "min" (default) or "max". max records the full build definition
-	// (Dockerfile, build args, source) rather than just materials.
-	Mode string `yaml:"mode"`
+	// Mode is "min" or "max" (the default when provenance is enabled). max
+	// records the full build definition (Dockerfile, build args, source)
+	// rather than just materials.
+	Mode string `yaml:"mode" enum:"min,max"`
 }
 
 // ChangeDetection configures which files each image depends on for
@@ -284,11 +285,11 @@ type Versioning struct {
 	//   static   use an explicit value
 	//   env      read the version from an environment variable
 	//   command  run a command and use its stdout as the version
-	Strategy string `yaml:"strategy"`
+	Strategy string `yaml:"strategy" enum:"git,registry,ecr,static,env,command"`
 
 	// Bump is how much to increment for the registry/ecr strategies:
 	// patch (default), minor, or major.
-	Bump string `yaml:"bump"`
+	Bump string `yaml:"bump" enum:"patch,minor,major"`
 
 	// Repo is the repository queried by the registry strategy. Defaults to the
 	// first repository of the first image (per-image under multi-image configs).
@@ -301,7 +302,7 @@ type Versioning struct {
 	// Lister is the tool used to list registry tags: "crane" (default). crane
 	// authenticates via the docker keychain, so it works with ghcr, Docker Hub,
 	// and ECR.
-	Lister string `yaml:"lister"`
+	Lister string `yaml:"lister" enum:"crane"`
 
 	// Initial is the version used by the registry strategy when the repository
 	// has no existing semver tags. Defaults to 0.1.0.
@@ -437,7 +438,7 @@ type Cosign struct {
 type SBOM struct {
 	Enabled bool `yaml:"enabled"`
 	// Generator is the CLI used to produce the SBOM. Only "syft" is supported.
-	Generator string `yaml:"generator"`
+	Generator string `yaml:"generator" enum:"syft"`
 	// Format is the syft output format, e.g. spdx-json, cyclonedx-json.
 	Format string `yaml:"format"`
 	// Attest, when true and cosign signing is enabled, attaches the SBOM as a
@@ -462,7 +463,7 @@ type Test struct {
 	// (binfmt/QEMU) where the host has an emulator for them. When no
 	// configured platform is native, "native" tests under emulation too, so
 	// an amd64-only image is still tested on an arm64 host.
-	Platforms string `yaml:"platforms"`
+	Platforms string `yaml:"platforms" enum:"native,all"`
 }
 
 // Test platform modes.
@@ -476,12 +477,12 @@ const (
 type Scan struct {
 	Enabled bool `yaml:"enabled"`
 	// Scanner is the CLI used: "grype" (default) or "trivy".
-	Scanner string `yaml:"scanner"`
+	Scanner string `yaml:"scanner" enum:"grype,trivy"`
 	// FailOn is the minimum severity that fails the release:
 	// negligible|low|medium|high|critical, or "none" to scan and report
 	// without gating. Left unset it defaults to critical; an explicit empty
 	// string is read as "none".
-	FailOn string `yaml:"fail_on"`
+	FailOn string `yaml:"fail_on" enum:"negligible,low,medium,high,critical,none,"`
 	// Ignore lists vulnerabilities to exclude from the gate. Each entry is a
 	// bare ID (e.g. CVE-2023-1234) or an {id, reason, expires} mapping; an
 	// entry past its expiry date stops applying and is reported as a warning.
@@ -872,13 +873,13 @@ type Cache struct {
 	// Type is gha (the GitHub Actions cache), registry (a cache image per
 	// scope, tagged <ref>:<scope>), local (a directory per scope,
 	// <ref>/<scope>) or none. Empty is none.
-	Type string `yaml:"type"`
+	Type string `yaml:"type" enum:"gha,registry,local,none"`
 	// Ref is where the cache lives: a repository for registry, a directory
 	// for local. Not used by gha. May contain templates.
 	Ref string `yaml:"ref"`
 	// Mode is the cache-to mode, min or max (default max: cache every
 	// intermediate layer, which is what makes a multi-stage build cheap).
-	Mode string `yaml:"mode"`
+	Mode string `yaml:"mode" enum:"min,max"`
 }
 
 // Cache types.
