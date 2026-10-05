@@ -296,3 +296,34 @@ func TestDiscover(t *testing.T) {
 		t.Errorf("Discover picked %q, want .stevedore.yaml (highest priority)", filepath.Base(got))
 	}
 }
+
+// scan.fail_on defaults to critical only when it is absent: "none" and an
+// explicit "" both mean scan and report without gating (#46), and must survive
+// Load's defaulting and pass validation.
+func TestLoadScanFailOn(t *testing.T) {
+	cases := []struct {
+		name, line, want string
+	}{
+		{"absent", "", "critical"},
+		{"null", "  fail_on:\n", "critical"},
+		{"explicit empty", "  fail_on: \"\"\n", FailOnNone},
+		{"none", "  fail_on: none\n", FailOnNone},
+		{"high", "  fail_on: high\n", "high"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := writeTemp(t, ".stevedore.yaml", "project_name: demo\nscan:\n  enabled: true\n"+tc.line+
+				"images:\n  - repositories: [ghcr.io/x/demo]\n")
+			c, err := Load(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Scan.FailOn != tc.want {
+				t.Errorf("FailOn = %q, want %q", c.Scan.FailOn, tc.want)
+			}
+			if err := c.Validate(); err != nil {
+				t.Errorf("Validate: %v", err)
+			}
+		})
+	}
+}

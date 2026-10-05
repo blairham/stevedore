@@ -69,7 +69,8 @@ scan:
   enabled: true
   scanner: grype          # grype (default) | trivy
   fail_on: high           # block the release at this severity or above;
-                          # negligible|low|medium|high|critical. Empty = report only.
+                          # negligible|low|medium|high|critical, or none to
+                          # scan and report without gating (default: critical)
   ignore:                 # vulnerability IDs to exclude from the gate
     - CVE-2024-0000
   args: []                # extra flags passed to the scanner; output flags
