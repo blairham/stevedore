@@ -111,7 +111,7 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
   (`--split stevedore merge`, `--pin-version pins`); docs/cli.md lists every
   command's flags, and the docs no longer claim signing, SBOMs and the scan
   are on by default (they are on in the config `stevedore init` writes).
-  (#68)
+  (#143)
 - `merge` refuses when it resolves a different version than the split legs
   built, or (without `--only`) skips an image the legs pushed digests for;
   the documented split workflow passes the plan's `only`/`pins` to `merge`.
