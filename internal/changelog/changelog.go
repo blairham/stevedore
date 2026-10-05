@@ -64,9 +64,12 @@ func Generate(ctx context.Context, cfg config.Changelog, gi *gitinfo.Info, dir s
 	}
 
 	var b strings.Builder
-	header := gi.Tag
-	if header == "" {
-		header = gi.Version
+	// The tag on HEAD heads the changelog only when it names this release;
+	// otherwise (untagged HEAD, or a non-git strategy's own version) the
+	// version does. A tag merely reachable from HEAD is a past release.
+	header := gi.Version
+	if gi.Tag != "" && strings.TrimPrefix(gi.Tag, "v") == gi.Version {
+		header = gi.Tag
 	}
 	fmt.Fprintf(&b, "## %s\n\n", header)
 	if gi.PreviousTag != "" {

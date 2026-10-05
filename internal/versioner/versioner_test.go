@@ -12,7 +12,7 @@ import (
 )
 
 func gi() *gitinfo.Info {
-	return &gitinfo.Info{Version: "1.2.3", Tag: "v1.2.3", ShortCommit: "abc1234"}
+	return &gitinfo.Info{Version: "1.2.3", Tag: "v1.2.3", LatestTag: "v1.2.3", ShortCommit: "abc1234"}
 }
 
 func TestParseSemver(t *testing.T) {
@@ -196,5 +196,30 @@ func TestResolveRegistrySnapshotBumpsThenSuffixes(t *testing.T) {
 	}
 	if got != "1.0.1-SNAPSHOT-abc1234" {
 		t.Errorf("registry snapshot = %q, want 1.0.1-SNAPSHOT-abc1234", got)
+	}
+}
+
+// --snapshot under the git strategy must not publish the clean tag version,
+// even when HEAD carries that tag.
+func TestResolveGitSnapshotOfTaggedHEAD(t *testing.T) {
+	got, err := Resolve(Input{Cfg: config.Versioning{Strategy: "git"}, Git: gi(), Snapshot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "1.2.3-SNAPSHOT-abc1234" {
+		t.Errorf("git snapshot = %q, want 1.2.3-SNAPSHOT-abc1234", got)
+	}
+}
+
+// An untagged HEAD already carries a snapshot version; --snapshot must not
+// suffix it twice.
+func TestResolveGitSnapshotOfUntaggedHEAD(t *testing.T) {
+	g := &gitinfo.Info{Version: "1.2.3-SNAPSHOT-abc1234", LatestTag: "v1.2.3", ShortCommit: "abc1234"}
+	got, err := Resolve(Input{Cfg: config.Versioning{Strategy: "git"}, Git: g, Snapshot: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "1.2.3-SNAPSHOT-abc1234" {
+		t.Errorf("git snapshot = %q, want 1.2.3-SNAPSHOT-abc1234", got)
 	}
 }

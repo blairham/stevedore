@@ -14,11 +14,18 @@ import (
 
 // Info is the git-derived state used to build the template context.
 type Info struct {
-	// Version is the semver-ish version without a leading "v". For a tagged
-	// clean checkout this is the tag minus "v"; otherwise a snapshot version.
+	// Version is the semver-ish version without a leading "v". For a clean
+	// checkout with a tag on HEAD this is the tag minus "v"; otherwise a
+	// snapshot version based on LatestTag.
 	Version string
-	// Tag is the most recent tag reachable from HEAD (may be empty).
+	// Tag is the tag pointing exactly at HEAD, or empty when HEAD is untagged.
+	// It is the only tag a release may be named after: a tag further back
+	// names a release that was already cut from a different commit.
 	Tag string
+	// LatestTag is the most recent tag reachable from HEAD — Tag when HEAD is
+	// tagged, otherwise the last release before it (may be empty). It seeds
+	// snapshot versions and the changelog range, never a release name.
+	LatestTag string
 	// Commit is the full HEAD SHA.
 	Commit string
 	// ShortCommit is the abbreviated HEAD SHA.
@@ -36,7 +43,10 @@ type Info struct {
 	Branches []string
 	// Dirty reports whether the working tree has uncommitted changes.
 	Dirty bool
-	// PreviousTag is the tag before Tag, used for changelog ranges (may be empty).
+	// PreviousTag is the last release before this one, used for changelog
+	// ranges and the SBOM dependency diff (may be empty). With a tag on HEAD
+	// it is the tag before Tag; on an untagged HEAD it is LatestTag, since the
+	// commits being released are exactly those since that tag.
 	PreviousTag string
 }
 
@@ -54,18 +64,23 @@ func Gather(ctx context.Context, dir string) (*Info, error) {
 	info.Branches = branchesContaining(ctx, dir)
 	info.Dirty = output(ctx, dir, "status", "--porcelain") != ""
 
-	// Exact tag on HEAD, if any.
+	// The exact tag on HEAD and the latest reachable tag are kept apart: only
+	// the former may become a clean release version. Collapsing them released
+	// an untagged commit under the previous release's version.
 	if tag, err := run(ctx, dir, "describe", "--tags", "--exact-match"); err == nil {
 		info.Tag = tag
-	} else if tag, err := run(ctx, dir, "describe", "--tags", "--abbrev=0"); err == nil {
-		// Most recent tag reachable from HEAD (not necessarily on HEAD).
-		info.Tag = tag
+	}
+	if tag, err := run(ctx, dir, "describe", "--tags", "--abbrev=0"); err == nil {
+		info.LatestTag = tag
 	}
 
-	if info.Tag != "" {
+	switch {
+	case info.Tag != "":
 		if prev, err := run(ctx, dir, "describe", "--tags", "--abbrev=0", info.Tag+"^"); err == nil {
 			info.PreviousTag = prev
 		}
+	default:
+		info.PreviousTag = info.LatestTag
 	}
 
 	info.Version = deriveVersion(info)
@@ -134,25 +149,56 @@ func (i *Info) OnBranch(branch string) bool {
 	return i.Branch == branch
 }
 
-// deriveVersion produces a clean version string for a tagged clean checkout, or
-// a snapshot version otherwise.
+// deriveVersion produces a clean version string only for a clean checkout with a
+// tag on HEAD, and a snapshot version otherwise.
 func deriveVersion(i *Info) string {
 	if i.Tag != "" && !i.Dirty {
 		return strings.TrimPrefix(i.Tag, "v")
 	}
-	base := "0.0.0"
-	if i.Tag != "" {
-		base = strings.TrimPrefix(i.Tag, "v")
+	return i.SnapshotVersion()
+}
+
+// SnapshotBase is the version a snapshot is built on: the latest reachable tag
+// minus any leading "v", or "0.0.0" in a repository with no tags.
+func (i *Info) SnapshotBase() string {
+	if i.LatestTag != "" {
+		return strings.TrimPrefix(i.LatestTag, "v")
 	}
-	sc := i.ShortCommit
+	return "0.0.0"
+}
+
+// SnapshotVersion is the snapshot form of the version,
+// "<base>-SNAPSHOT-<short sha>[-dirty]", whatever the state of HEAD.
+func (i *Info) SnapshotVersion() string {
+	return SnapshotOf(i.SnapshotBase(), i)
+}
+
+// SnapshotOf appends the snapshot suffix for HEAD to base. It is shared with
+// the non-git versioning strategies so every snapshot reads the same way.
+func SnapshotOf(base string, i *Info) string {
+	sc := ""
+	if i != nil {
+		sc = i.ShortCommit
+	}
 	if sc == "" {
 		sc = "unknown"
 	}
 	v := fmt.Sprintf("%s-SNAPSHOT-%s", base, sc)
-	if i.Dirty {
+	if i != nil && i.Dirty {
 		v += "-dirty"
 	}
 	return v
+}
+
+// ReleaseTag is the git tag a release of version is published under: the tag
+// on HEAD when it names that version, otherwise "v"+version. A tag on HEAD
+// that names some other version (a non-git strategy computed its own) is not
+// this release's name.
+func (i *Info) ReleaseTag(version string) string {
+	if i != nil && i.Tag != "" && strings.TrimPrefix(i.Tag, "v") == version {
+		return i.Tag
+	}
+	return "v" + version
 }
 
 // CommitsSince returns commit subjects (and bodies) reachable from HEAD but not

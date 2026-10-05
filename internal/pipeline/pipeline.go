@@ -833,10 +833,10 @@ func emitSummary(o Options, p *Prepared, result summary.Result) error {
 
 // publishRelease creates a GitHub release and posts announcements per config.
 func publishRelease(r *run.Runner, p *Prepared, changelogPath string) error {
-	tag := p.Git.Tag
-	if tag == "" {
-		tag = "v" + p.Ctx.Version
-	}
+	// Named after the computed version, never after whatever tag git can
+	// reach: on an untagged HEAD that tag is a previous release, and a non-git
+	// strategy computes a version the tag on HEAD need not match.
+	tag := p.Git.ReleaseTag(p.Ctx.Version)
 
 	if p.Config.Release.GitHub.Enabled {
 		notes := changelogPath
@@ -845,7 +845,7 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string) error {
 		}
 		var assets []string // SBOMs, if generated, make good release assets
 		title := fmt.Sprintf("%s %s", p.Config.ProjectName, p.Ctx.Version)
-		if err := publish.GitHubRelease(r, p.Config.Release.GitHub, tag, title, notes, assets); err != nil {
+		if err := publish.GitHubRelease(r, p.Config.Release.GitHub, tag, p.Git.Commit, title, notes, assets); err != nil {
 			return err
 		}
 		fmt.Fprintf(progress, "==> GitHub release %s created\n", tag)
@@ -1390,8 +1390,13 @@ func guardReleasable(gi *gitinfo.Info, strategy string) error {
 		return fmt.Errorf("working tree is dirty; commit changes or use --snapshot")
 	}
 	// Only the git strategy needs a tag on HEAD to source the version; the other
-	// strategies derive it elsewhere (registry, static, env, command).
-	if strategy == "git" && gi.Tag == "" {
+	// strategies derive it elsewhere (registry, static, env, command). A tag
+	// further back does not count: it names a release already cut from another
+	// commit, and reusing it would overwrite that release's image tags.
+	if (strategy == "git" || strategy == "") && gi.Tag == "" {
+		if gi.LatestTag != "" {
+			return fmt.Errorf("no git tag on HEAD (latest reachable tag %s is on an earlier commit); tag a release, switch versioning.strategy, or use --snapshot", gi.LatestTag)
+		}
 		return fmt.Errorf("no git tag on HEAD; tag a release, switch versioning.strategy, or use --snapshot")
 	}
 	return nil

@@ -19,7 +19,8 @@ import (
 type Context struct {
 	ProjectName string
 	Version     string
-	Tag         string
+	Tag         string // the tag on HEAD; empty on an untagged commit
+	LatestTag   string // the most recent tag reachable from HEAD (Tag when HEAD is tagged)
 	Commit      string
 	ShortCommit string
 	Branch      string
@@ -37,6 +38,7 @@ func NewContext(projectName, defaultBranch string, gi *gitinfo.Info, snapshot bo
 		ProjectName: projectName,
 		Version:     gi.Version,
 		Tag:         gi.Tag,
+		LatestTag:   gi.LatestTag,
 		Commit:      gi.Commit,
 		ShortCommit: gi.ShortCommit,
 		Branch:      gi.Branch,
