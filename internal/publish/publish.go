@@ -12,9 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	neturl "net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/blairham/stevedore/internal/config"
@@ -153,18 +155,37 @@ func bodyPrefix(body io.Reader) string {
 	return string(b)
 }
 
-// redact hides all but the scheme+host of a webhook URL for log output.
 // checkWebhookURL rejects a webhook URL that is not absolute http(s), so a
 // mis-set variable fails here rather than as a request to somewhere odd. The
 // error names the variable, never the URL: webhook URLs are credentials.
+//
+// Plain http is refused unless the host is loopback: the URL itself, and for
+// notify the bearer token beside it, would otherwise cross the network in
+// cleartext. Loopback stays open so a local receiver can be tested without a
+// certificate; nothing on the wire leaves the machine.
 func checkWebhookURL(env, raw string) error {
 	u, err := neturl.Parse(raw)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 		return fmt.Errorf("%s is not an absolute http(s) URL", env)
 	}
+	if u.Scheme == "http" && !isLoopback(u.Hostname()) {
+		return fmt.Errorf("%s is a plain http URL; webhooks must use https (http is allowed only for localhost, 127.0.0.0/8 and [::1])", env)
+	}
 	return nil
 }
 
+// isLoopback reports whether host names this machine: "localhost" or a
+// loopback IP literal. Other names are not resolved — a DNS answer is not a
+// promise that the request stays local.
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// redact hides all but the scheme+host of a webhook URL for log output.
 func redact(url string) string {
 	for i := 0; i < len(url); i++ {
 		if url[i] == '/' && i > 0 && url[i-1] == '/' {

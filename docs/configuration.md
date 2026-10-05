@@ -176,6 +176,13 @@ they fire from the `merge` run, once the manifest lists are gated and tagged. Th
 and credentials come from environment variables; a missing variable or a
 non-2xx response fails the release rather than silently skipping the trigger.
 
+Webhook URLs — `notify.webhook` and both `announce` targets — must be `https://`.
+A plain `http://` URL would send the URL, and for `notify` the bearer token, in
+cleartext, so it fails the release. The one exception is a loopback host
+(`localhost`, `127.0.0.0/8`, `[::1]`), so a local receiver can be tested
+without a certificate; other hostnames are refused even if they happen to
+resolve to loopback.
+
 ## Template context
 
 Tags, labels, and build args are rendered with Go's `text/template`. Referencing an
