@@ -77,3 +77,17 @@ func TestRenderMultiImage(t *testing.T) {
 		t.Error("frontend dockerfile path missing")
 	}
 }
+
+// A repository path must be lowercase, whatever the directory is called (#67);
+// the id keeps the directory's spelling.
+func TestRenderLowercasesRepository(t *testing.T) {
+	out := Render("Proj", "Acme", []Image{
+		{ID: "MyCompany.Api", Dockerfile: "src/MyCompany.Api/Dockerfile", Context: "src/MyCompany.Api"},
+	})
+	if !strings.Contains(out, `repositories: ["ghcr.io/acme/mycompany.api"]`) {
+		t.Errorf("repository not lowercased:\n%s", out)
+	}
+	if !strings.Contains(out, "id: MyCompany.Api") {
+		t.Errorf("id should keep its spelling:\n%s", out)
+	}
+}

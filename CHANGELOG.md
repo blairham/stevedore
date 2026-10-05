@@ -107,6 +107,8 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Fixed
 
+- `init` writes lowercase repository names, so a `src/MyCompany.Api`
+  Dockerfile no longer scaffolds a repository Docker refuses. (#67)
 - Two images without an `id` under a `project_name` no longer collide:
   `project_name` names an id-less image only when it is the only one. (#65)
 - Config validation refuses an unknown `changelog.sort` or
