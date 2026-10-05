@@ -66,7 +66,7 @@ func TestFinishReleaseRecordsFingerprintsOnlyForARealPublish(t *testing.T) {
 			fpPath := filepath.Join(dir, "dist", "fingerprints.json")
 			state := fingerprint.State{"app": "abc123"}
 			result := summary.Result{Project: "proj", Images: []summary.Image{{ID: "app", Version: "1.0.0"}}}
-			if err := finishRelease(o, p, quietRunner(t), result, fpPath, state, nil); err != nil {
+			if err := finishRelease(o, p, quietRunner(t), result, fpPath, state, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			_, err := os.Stat(fpPath)
@@ -117,7 +117,7 @@ func TestFinishReleasePublishesOnlyWhenSomethingWasBuilt(t *testing.T) {
 			dir, p := finishHarness(t)
 			posts := announceServer(t, p)
 			result := summary.Result{Project: "proj", Images: tc.images}
-			if err := finishRelease(Options{Dir: dir}, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil); err != nil {
+			if err := finishRelease(Options{Dir: dir}, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			if got := posts.Load(); got != tc.want {
@@ -147,7 +147,7 @@ func TestFinishReleaseOnlyRunDoesNotPublish(t *testing.T) {
 	posts := announceServer(t, p)
 	result := summary.Result{Project: "proj", Images: []summary.Image{{ID: "checkout", Refs: []string{"r/checkout:1.0.0"}}}}
 	o := Options{Dir: dir, Only: []string{"checkout"}}
-	if err := finishRelease(o, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil); err != nil {
+	if err := finishRelease(o, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := posts.Load(); got != 0 {
@@ -172,7 +172,7 @@ func TestFinishReleaseReportsEverythingWhenPublishFails(t *testing.T) {
 	p.Config.ChangeDetection.MarkerPrefix = "refs/releases/image/"
 	result := summary.Result{Project: "proj", Images: []summary.Image{{ID: "checkout", Refs: []string{"r/checkout:1.0.0"}}}}
 
-	err := finishRelease(Options{Dir: dir}, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil)
+	err := finishRelease(Options{Dir: dir}, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil, nil)
 	if err == nil {
 		t.Fatal("want the failed announcement to fail the release")
 	}

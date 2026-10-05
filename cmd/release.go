@@ -42,6 +42,7 @@ func newReleaseCmd() *cobra.Command {
 		only          []string
 		pinVersions   []string
 		split         []string
+		keepGoing     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "release",
@@ -73,6 +74,7 @@ func newReleaseCmd() *cobra.Command {
 			}
 			o.PinVersions = pins
 			o.SplitPlatforms = split
+			o.KeepGoing = keepGoing
 			return pipeline.Release(o)
 		},
 	}
@@ -90,6 +92,7 @@ func newReleaseCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; from the plan's `pins`)")
 	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
 	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation, announcements, and notify webhooks")
+	cmd.Flags().BoolVar(&keepGoing, "keep-going", false, "build every image even after one fails, then fail at the end (the ones that built are still tagged, recorded and notified)")
 	cmd.Flags().StringSliceVar(&split, "split", nil, "platform(s) to build natively on this runner, pushed untagged by digest for a later `stevedore merge` (native multi-arch CI: one matrix leg per arch)")
 	return cmd
 }

@@ -81,6 +81,17 @@ It still notifies `notify.webhook` and advances its own release markers. Run
 `stevedore publish` once after the matrix to publish. (`merge --only` behaves
 the same way.)
 
+When an image fails — its build, a gate, signing — the release stops building
+further images and fails, but the images that already finished are not
+forgotten: they are pushed, signed and tagged, so their release markers advance,
+`notify.webhook` fires for them and the release summary records them, exactly as
+in a release that succeeded. Otherwise the next run would see their new tags and
+release them again as a new version. A release that lost an image writes no
+changelog and creates no GitHub release or announcement; the re-run does.
+`--keep-going` builds every image even after one fails, and fails at the end, so
+one broken image does not hold back every healthy one. `merge --keep-going`
+likewise merges and publishes every image whose split digests are all present.
+
 `--split <platform>` builds only that platform, natively, and pushes it
 **untagged, by digest** — no tags, no sign/scan/SBOM/publish. The digest lands
 under `<dist>/digests/<image-id>/` for a later `stevedore merge`, which
