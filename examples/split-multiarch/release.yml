@@ -33,7 +33,10 @@ jobs:
     # An empty plan (nothing changed) would otherwise fail the matrix.
     if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
     strategy:
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+      matrix:
+        # The include list, not the whole plan: the plan's other top-level key
+        # (`skipped`) would become a matrix dimension and break the fan-out.
+        include: ${{ fromJson(needs.plan.outputs.matrix).include }}
     runs-on: ${{ matrix.runner }} # ubuntu-24.04 / ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v6
