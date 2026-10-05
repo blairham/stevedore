@@ -97,6 +97,14 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Fixed
 
+- `merge` refuses when it resolves a different version than the split legs
+  built, or (without `--only`) skips an image the legs pushed digests for;
+  the documented split workflow passes the plan's `only`/`pins` to `merge`.
+  Legs now record the built version under `dist/digests/<id>/version`. (#134)
+- The documented matrix workflows build the matrix from the plan's `include`
+  list: the whole plan document made `skipped` a matrix dimension, which
+  failed the workflow when empty and otherwise built only the last planned
+  image, once per skipped one. (#133)
 - Smoke-test containers are named and removed when a run times out or is
   canceled, instead of being left running. (#132)
 - `doctor` and preflight report `docker buildx` missing when the plugin is
