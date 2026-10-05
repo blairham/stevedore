@@ -414,7 +414,20 @@ type Test struct {
 	ExpectExit int `yaml:"expect_exit"`
 	// Timeout is a Go duration string (e.g. "30s"); empty means 60s.
 	Timeout string `yaml:"timeout"`
+	// Platforms chooses which of the image's platforms are smoke tested:
+	// "native" (default) runs those the docker host runs natively and skips
+	// the rest with a warning; "all" also runs the others under emulation
+	// (binfmt/QEMU) where the host has an emulator for them. When no
+	// configured platform is native, "native" tests under emulation too, so
+	// an amd64-only image is still tested on an arm64 host.
+	Platforms string `yaml:"platforms"`
 }
+
+// Test platform modes.
+const (
+	TestPlatformsNative = "native"
+	TestPlatformsAll    = "all"
+)
 
 // Scan configures vulnerability scanning of built images. When FailOn is set,
 // a release is blocked if any vulnerability at or above that severity is found.
@@ -709,6 +722,11 @@ func (c *Config) Validate() error {
 		if err := tmpl.Parse(t); err != nil {
 			return fmt.Errorf("notify.webhook.payload_template: %w", err)
 		}
+	}
+	switch c.Test.Platforms {
+	case "", TestPlatformsNative, TestPlatformsAll:
+	default:
+		return fmt.Errorf("test.platforms %q invalid (want %s or %s)", c.Test.Platforms, TestPlatformsNative, TestPlatformsAll)
 	}
 	if c.Test.Enabled && c.Test.Timeout != "" {
 		if _, err := time.ParseDuration(c.Test.Timeout); err != nil {

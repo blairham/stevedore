@@ -135,7 +135,10 @@ A real release that ran without scan, smoke test, signing or SBOM — skipped by
 flag or disabled in the config — lists those stages in a top-level `degraded`
 array, and the job summary opens with a "Degraded release" banner.
 `policy.require` turns them into a refusal instead (see
-[Configuration](configuration.md)).
+[Configuration](configuration.md)). Each gated image also carries
+`platforms`: per platform, whether it was `scanned`, its `vulns`, whether it was `tested` (or `test_skipped` with the
+reason), and its `sbom` path; its top-level `vulns` counts the distinct
+findings across platforms, and `tested` is true only when every platform was.
 
 ## Editor support
 

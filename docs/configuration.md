@@ -115,6 +115,11 @@ test:
   cmd: ["/usr/bin/myapp", "--version"]   # run inside the container
   expect_exit: 0          # required exit code
   timeout: 30s            # Go duration; default 60s
+  platforms: native       # native (default): test the platforms the docker
+                          # host runs natively, skip the rest with a warning
+                          # (if none is native, test under emulation);
+                          # all: also run the others under emulation where
+                          # the host has an emulator (binfmt/QEMU) for them
 
 versioning:
   strategy: git           # git (default) | registry | ecr | static | env | command

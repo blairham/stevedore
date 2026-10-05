@@ -126,3 +126,24 @@ func TestMarkdownDegraded(t *testing.T) {
 		t.Errorf("degraded stages missing from the summary:\n%s", md)
 	}
 }
+
+// A multi-platform image gets a per-platform table, so a skipped smoke test on
+// one variant is visible; a single-platform image does not.
+func TestMarkdownPlatforms(t *testing.T) {
+	r := Result{Images: []Image{
+		{ID: "app", Platforms: []Platform{
+			{Platform: "linux/amd64", Scanned: true, Tested: true},
+			{Platform: "linux/arm64", Scanned: true, TestSkipped: "no emulator"},
+		}},
+		{ID: "solo", Platforms: []Platform{{Platform: "linux/amd64", Scanned: true}}},
+	}}
+	md := r.Markdown()
+	for _, want := range []string{"| platform |", "| `app` | linux/arm64 | ✓ | _skipped_ |"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown missing %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "| `solo` | linux/amd64") {
+		t.Errorf("single-platform image should not get platform rows:\n%s", md)
+	}
+}

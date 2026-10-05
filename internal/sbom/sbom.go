@@ -26,9 +26,11 @@ func PredicateType(format string) string {
 	}
 }
 
-// Generate produces an SBOM file for ref and returns its path. The image must
-// already be pushed so the generator can pull it by digest.
-func Generate(r *run.Runner, cfg config.SBOM, distDir, imageID, ref string) (string, error) {
+// Generate produces an SBOM file, sbom-<name>.<ext>, for ref and returns its
+// path. A non-empty platform selects that variant of a multi-platform image;
+// without one syft picks the host's. The image must already be pushed so the
+// generator can pull it by digest.
+func Generate(r *run.Runner, cfg config.SBOM, distDir, name, ref, platform string) (string, error) {
 	if !cfg.Enabled {
 		return "", nil
 	}
@@ -42,9 +44,13 @@ func Generate(r *run.Runner, cfg config.SBOM, distDir, imageID, ref string) (str
 	if PredicateType(cfg.Format) == cyclonedx {
 		ext = "cdx.json"
 	}
-	out := filepath.Join(distDir, fmt.Sprintf("sbom-%s.%s", imageID, ext))
-	// syft <ref> -o <format>=<file>
-	if err := r.Run("syft", ref, "-o", cfg.Format+"="+out); err != nil {
+	out := filepath.Join(distDir, fmt.Sprintf("sbom-%s.%s", name, ext))
+	// syft <ref> [--platform <platform>] -o <format>=<file>
+	args := []string{ref}
+	if platform != "" {
+		args = append(args, "--platform", platform)
+	}
+	if err := r.Run("syft", append(args, "-o", cfg.Format+"="+out)...); err != nil {
 		return "", fmt.Errorf("syft %s: %w", ref, err)
 	}
 	return out, nil
