@@ -71,7 +71,10 @@ scan:
                           # negligible|low|medium|high|critical. Empty = report only.
   ignore:                 # vulnerability IDs to exclude from the gate
     - CVE-2024-0000
-  args: []                # extra flags passed to the scanner
+  args: []                # extra flags passed to the scanner; output flags
+                          # (trivy -f/--format/-o/--output/-t/--template,
+                          # grype -o/--output/--file/-t/--template) are
+                          # rejected: the gate must read the JSON report
 
 provenance:
   enabled: true           # emit a SLSA build-provenance attestation (push only)

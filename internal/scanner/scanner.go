@@ -170,7 +170,31 @@ func parse(scanner string, data []byte) ([]Vuln, error) {
 	}
 }
 
+// requireKeys fails unless data is a JSON object carrying every key in keys
+// with a non-null value. Decoding into a struct alone cannot tell "the scanner
+// found nothing" from "this is not the scanner's JSON report at all": a SARIF
+// or CycloneDX document (an overridden output format) or a future schema
+// change unmarshals cleanly into an empty struct, and an empty report passes
+// the gate. Requiring the report's identifying keys makes that fail closed.
+func requireKeys(scanner string, data []byte, keys ...string) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return fmt.Errorf("parse %s output: %w", scanner, err)
+	}
+	for _, k := range keys {
+		v, ok := top[k]
+		if !ok || string(v) == "null" {
+			return fmt.Errorf("parse %s output: not a %s JSON report (no %q key); is the output format overridden in scan.args?", scanner, scanner, k)
+		}
+	}
+	return nil
+}
+
 func parseGrype(data []byte) ([]Vuln, error) {
+	// grype always emits "matches", as [] when the image is clean.
+	if err := requireKeys("grype", data, "matches"); err != nil {
+		return nil, err
+	}
 	var doc struct {
 		Matches []struct {
 			Vulnerability struct {
@@ -198,9 +222,18 @@ func parseGrype(data []byte) ([]Vuln, error) {
 	return vulns, nil
 }
 
+// trivySchemaVersion is the trivy JSON report schema this parser understands.
+const trivySchemaVersion = 2
+
 func parseTrivy(data []byte) ([]Vuln, error) {
+	// trivy omits "Results" entirely for a clean image, so its presence cannot
+	// be required; "SchemaVersion" is always present and identifies the report.
+	if err := requireKeys(trivy, data, "SchemaVersion"); err != nil {
+		return nil, err
+	}
 	var doc struct {
-		Results []struct {
+		SchemaVersion int `json:"SchemaVersion"`
+		Results       []struct {
 			Vulnerabilities []struct {
 				VulnerabilityID  string `json:"VulnerabilityID"`
 				Severity         string `json:"Severity"`
@@ -211,6 +244,9 @@ func parseTrivy(data []byte) ([]Vuln, error) {
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("parse trivy output: %w", err)
+	}
+	if doc.SchemaVersion != trivySchemaVersion {
+		return nil, fmt.Errorf("parse trivy output: unsupported SchemaVersion %d (want %d)", doc.SchemaVersion, trivySchemaVersion)
 	}
 	var vulns []Vuln
 	for _, r := range doc.Results {

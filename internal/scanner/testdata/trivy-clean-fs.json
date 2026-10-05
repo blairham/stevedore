@@ -1,0 +1,10 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.75.0"
+  },
+  "ReportID": "01a1098a-9bbf-7a29-b068-77c8a5319a92",
+  "CreatedAt": "2026-10-04T20:50:41.215667-04:00",
+  "ArtifactName": "empty",
+  "ArtifactType": "filesystem"
+}

@@ -309,7 +309,9 @@ type Scan struct {
 	// Ignore lists vulnerability IDs (e.g. CVE-2023-1234) to exclude from the
 	// gate.
 	Ignore []string `yaml:"ignore"`
-	// Args are extra flags passed verbatim to the scanner.
+	// Args are extra flags passed verbatim to the scanner. Flags that change
+	// its output format or destination are rejected at validation: the gate
+	// parses the JSON report, and any other document would read as clean.
 	Args []string `yaml:"args"`
 }
 
@@ -474,7 +476,36 @@ func (s Scan) validate() error {
 	if !ValidSeverity(s.FailOn) {
 		return fmt.Errorf("scan.fail_on %q invalid (want one of: %s)", s.FailOn, strings.Join(Severities, ", "))
 	}
+	for _, a := range s.Args {
+		if flag := outputFlag(s.Scanner, a); flag != "" {
+			return fmt.Errorf("scan.args: %q changes the %s output format or destination, which stevedore must control to read the JSON report; remove it (the raw JSON report is saved under dist/)", flag, s.Scanner)
+		}
+	}
 	return nil
+}
+
+// scanOutputFlags are, per scanner, the flags that change what the scanner
+// prints. stevedore appends scan.args after its own "--format json" / "-o json",
+// and the last one wins, so any of these would hand the parser a document it
+// cannot gate on.
+var scanOutputFlags = map[string][]string{
+	"trivy": {"-f", "--format", "-o", "--output", "-t", "--template"},
+	"grype": {"-o", "--output", "--file", "-t", "--template"},
+}
+
+// outputFlag reports which output-changing flag arg is ("" when none),
+// recognizing "--flag value", "--flag=value", and the attached short form
+// "-ojson".
+func outputFlag(scanner, arg string) string {
+	for _, f := range scanOutputFlags[scanner] {
+		switch {
+		case arg == f, strings.HasPrefix(arg, f+"="):
+			return f
+		case len(f) == 2 && strings.HasPrefix(arg, f):
+			return f
+		}
+	}
+	return ""
 }
 
 func (p Provenance) validate() error {

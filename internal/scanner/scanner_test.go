@@ -4,6 +4,8 @@
 package scanner
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,6 +21,7 @@ const grypeJSON = `{
 }`
 
 const trivyJSON = `{
+  "SchemaVersion": 2,
   "Results": [
     {"Vulnerabilities": [
       {"VulnerabilityID": "CVE-1", "Severity": "CRITICAL", "PkgName": "openssl", "InstalledVersion": "1.0"},
@@ -50,6 +53,69 @@ func TestParseTrivy(t *testing.T) {
 	}
 	if vulns[0].Severity != "critical" || vulns[1].Severity != "low" {
 		t.Errorf("severities not normalized: %+v", vulns)
+	}
+}
+
+// The fixtures in testdata are real scanner output, captured from trivy 0.75.0
+// and grype 0.120.0 (local paths rewritten). The clean ones are the shape a
+// vulnerability-free image produces; the sarif/cyclonedx ones are what the
+// scanner prints when scan.args overrides the output format.
+func fixture(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// A clean scan must parse as zero vulnerabilities, not as an error: trivy
+// omits "Results" entirely for a clean target and grype emits "matches": [].
+func TestParseCleanReports(t *testing.T) {
+	cases := []struct{ scanner, file string }{
+		{"trivy", "trivy-clean-image.json"},
+		{"trivy", "trivy-clean-fs.json"},
+		{"grype", "grype-clean.json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			vulns, err := parse(tc.scanner, fixture(t, tc.file))
+			if err != nil {
+				t.Fatalf("parse(%s) = %v, want a clean report", tc.file, err)
+			}
+			if len(vulns) != 0 {
+				t.Fatalf("parse(%s) = %d vulns, want 0", tc.file, len(vulns))
+			}
+		})
+	}
+}
+
+// Valid JSON that is not the scanner's report must fail, never read as clean:
+// an empty report passes the gate and the image gets signed (#37).
+func TestParseRejectsForeignDocuments(t *testing.T) {
+	cases := []struct {
+		name, scanner string
+		data          []byte
+	}{
+		{"trivy sarif", "trivy", fixture(t, "trivy-sarif.json")},
+		{"trivy cyclonedx", "trivy", fixture(t, "trivy-cyclonedx.json")},
+		{"grype sarif", "grype", fixture(t, "grype-sarif.json")},
+		{"grype cyclonedx", "grype", fixture(t, "grype-cyclonedx.json")},
+		{"grype report fed to trivy", "trivy", fixture(t, "grype-clean.json")},
+		{"trivy report fed to grype", "grype", fixture(t, "trivy-clean-image.json")},
+		{"trivy empty object", "trivy", []byte(`{}`)},
+		{"grype empty object", "grype", []byte(`{}`)},
+		{"grype null matches", "grype", []byte(`{"matches": null}`)},
+		{"trivy future schema", "trivy", []byte(`{"SchemaVersion": 3, "Findings": []}`)},
+		{"trivy json array", "trivy", []byte(`[]`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vulns, err := parse(tc.scanner, tc.data)
+			if err == nil {
+				t.Fatalf("parse = %d vulns and no error, want an error", len(vulns))
+			}
+		})
 	}
 }
 

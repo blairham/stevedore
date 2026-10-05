@@ -4,8 +4,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -191,6 +193,53 @@ func TestValidateVersioning(t *testing.T) {
 			cfg := base(tc.v)
 			if err := cfg.Validate(); (err != nil) != tc.wantErr {
 				t.Errorf("Validate() err = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateScanArgs(t *testing.T) {
+	base := func(scanner string, args ...string) Config {
+		return Config{
+			Version: 1, Images: []Image{{ID: "a", Repositories: []string{"r"}}},
+			Scan: Scan{Enabled: true, Scanner: scanner, FailOn: "high", Args: args},
+		}
+	}
+	cases := []struct {
+		name     string
+		cfg      Config
+		wantFlag string // "" means valid
+	}{
+		{"trivy harmless args", base("trivy", "--skip-dirs", "/tmp", "--ignore-unfixed"), ""},
+		{"grype harmless args", base("grype", "--only-fixed", "--scope", "all-layers"), ""},
+		{"grype -f is fail-on, not format", base("grype", "-f", "high"), ""},
+		{"trivy --format sarif", base("trivy", "--format", "sarif"), "--format"},
+		{"trivy --format=cyclonedx", base("trivy", "--format=cyclonedx"), "--format"},
+		{"trivy -f sarif", base("trivy", "-f", "sarif"), "-f"},
+		{"trivy -fsarif", base("trivy", "-fsarif"), "-f"},
+		{"trivy -o file", base("trivy", "-o", "out.json"), "-o"},
+		{"trivy --output=file", base("trivy", "--output=out.json"), "--output"},
+		{"trivy --template", base("trivy", "--template", "@x.tpl"), "--template"},
+		{"grype -o sarif", base("grype", "-o", "sarif"), "-o"},
+		{"grype -o=sarif", base("grype", "-o=sarif"), "-o"},
+		{"grype --output cyclonedx-json", base("grype", "--output", "cyclonedx-json"), "--output"},
+		{"grype --file", base("grype", "--file", "out.json"), "--file"},
+		{"grype -t", base("grype", "-t", "x.tpl"), "-t"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cfg.Validate()
+			if tc.wantFlag == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() = nil, want an error naming %q", tc.wantFlag)
+			}
+			if !strings.Contains(err.Error(), "scan.args") || !strings.Contains(err.Error(), fmt.Sprintf("%q", tc.wantFlag)) {
+				t.Errorf("Validate() = %v, want it to name scan.args and %q", err, tc.wantFlag)
 			}
 		})
 	}
