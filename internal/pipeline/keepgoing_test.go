@@ -90,6 +90,7 @@ func summaryMentions(t *testing.T, dir, id string) bool {
 // the next run would republish them as a new version.
 func TestReleaseRecordsGroupsPushedBeforeAFailure(t *testing.T) {
 	dir, _, o, p, g, notified := keepGoingHarness(t)
+	posts := announceServer(t, p)
 	toBuild := [][]imageEval{g["good"], g["bad"]}
 	err := buildAndFinish(o, p, quietRunner(t), toBuild, nil, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{})
 	if err == nil || !strings.Contains(err.Error(), "bad") {
@@ -100,6 +101,10 @@ func TestReleaseRecordsGroupsPushedBeforeAFailure(t *testing.T) {
 	}
 	if !summaryMentions(t, dir, "good") {
 		t.Error("release summary does not record the pushed image")
+	}
+	// The release as a whole is incomplete: it is not announced.
+	if got := posts.Load(); got != 0 {
+		t.Errorf("an incomplete release posted %d announcement(s), want 0", got)
 	}
 }
 
