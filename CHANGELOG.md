@@ -12,6 +12,8 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-05
+
 ### Security
 
 - Tags are applied only after the scan and smoke-test gates pass. Previously
