@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/blairham/stevedore/internal/config"
@@ -146,5 +147,15 @@ func TestNotifyDryRunDoesNotPost(t *testing.T) {
 func TestNotifyDisabledIsNoop(t *testing.T) {
 	if err := Notify(&run.Runner{}, config.NotifyWebhook{}, []Notification{{Image: "api"}}); err != nil {
 		t.Errorf("disabled notify should be a no-op, got %v", err)
+	}
+}
+
+func TestNotifyRefusesCleartextBearer(t *testing.T) {
+	t.Setenv("TEST_NOTIFY_URL", "http://deploy.example.com/hook")
+	t.Setenv("TEST_NOTIFY_TOKEN", "tok3n")
+	cfg := config.NotifyWebhook{Enabled: true, URLEnv: "TEST_NOTIFY_URL", BearerEnv: "TEST_NOTIFY_TOKEN"}
+	err := Notify(&run.Runner{}, cfg, []Notification{{Image: "api"}})
+	if err == nil || !strings.Contains(err.Error(), "must use https") {
+		t.Fatalf("a plain-http notify URL off loopback should be refused, got %v", err)
 	}
 }

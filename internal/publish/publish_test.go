@@ -113,6 +113,41 @@ func TestAnnounceRejectsNonHTTPWebhook(t *testing.T) {
 	}
 }
 
+func TestWebhookRefusesPlainHTTPOffLoopback(t *testing.T) {
+	for _, hook := range []string{
+		"http://hooks.slack.com/services/T00/B00/XXXXSECRET",
+		"http://10.0.0.5/services/T00/B00/XXXXSECRET",
+		"http://localhost.example.com/XXXXSECRET", // a name that merely starts with localhost
+		"HTTP://hooks.slack.com/XXXXSECRET",       // scheme case does not slip past
+	} {
+		t.Setenv("TEST_SLACK_HOOK", hook)
+		cfg := config.Announce{Slack: config.Webhook{Enabled: true, WebhookEnv: "TEST_SLACK_HOOK"}}
+		err := Announce(&run.Runner{DryRun: true}, cfg, Message{Body: "x"})
+		if err == nil || !strings.Contains(err.Error(), "must use https") {
+			t.Errorf("%q should be refused as cleartext, got %v", hook, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("error leaks the webhook URL: %v", err)
+		}
+	}
+}
+
+func TestWebhookAllowsPlainHTTPOnLoopback(t *testing.T) {
+	for _, hook := range []string{
+		"http://localhost:8080/hook",
+		"http://LOCALHOST/hook",
+		"http://127.0.0.1:9/hook",
+		"http://127.1.2.3/hook",
+		"http://[::1]:8080/hook",
+		"https://hooks.slack.com/services/T00/B00/XXXXSECRET",
+	} {
+		if err := checkWebhookURL("TEST_SLACK_HOOK", hook); err != nil {
+			t.Errorf("%q should be accepted, got %v", hook, err)
+		}
+	}
+}
+
 func TestWebhookTransportErrorIsRedacted(t *testing.T) {
 	// Port 1 on localhost refuses the connection, so client.Do fails.
 	t.Setenv("TEST_SLACK_HOOK", "http://127.0.0.1:1/services/T00/B00/XXXXSECRET")
