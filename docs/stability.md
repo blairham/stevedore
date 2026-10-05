@@ -16,7 +16,7 @@ means a new major version.
 | Published refs | The tags stevedore computes from a given config and git state do not change. This is the one people forget: a "better" tag scheme is a breaking change, because it silently stops overwriting what a deployment pulls. |
 | `plan --output json` and the release summary | Field names and types are stable; new fields may appear. Consume it by key, not by position. |
 | The GitHub Action's inputs and outputs | Stable, and the moving `v1` tag never crosses a major. |
-| The `latest`-style floating-tag rule | Floating tags publish on the default branch of a real release, and never from a snapshot. |
+| The `latest`-style floating-tag rule | Floating tags (`latest`, `*-latest`, major and major.minor tags) publish on the default branch of a real release, never from a snapshot, and not from a prerelease unless `prerelease_floating_tags` is set. |
 
 ## Not covered
 

@@ -145,7 +145,9 @@ func memberReleased(r *run.Runner, plan ImagePlan, commit, short string) (releas
 	var have, missing []string
 	var digest string
 	for _, ref := range plan.Refs {
-		if !isCommitTag(ref, commit, short) {
+		// A floating tag moves by design; it is never evidence that this
+		// commit was released, however it is spelled.
+		if plan.Floating[ref] || !isCommitTag(ref, commit, short) {
 			continue
 		}
 		got, found, err := inspectTag(r, ref)
@@ -179,22 +181,24 @@ func memberReleased(r *run.Runner, plan ImagePlan, commit, short string) (releas
 // tagRank orders a repository's tags for applyTags: commit tags first (the
 // ones an immutable registry is most likely to refuse on a re-run), floating
 // tags last. A refused tag then fails the call before the others move.
-func tagRank(ref, commit, short string) int {
+// floating is the plan's set of floating refs; a ref outside it still counts
+// as floating when it is named like one ("latest").
+func tagRank(ref string, floating map[string]bool, commit, short string) int {
 	switch {
+	case floating[ref] || isFloating(ref[strings.LastIndex(ref, ":")+1:]):
+		return 2
 	case isCommitTag(ref, commit, short):
 		return 0
-	case isFloating(ref[strings.LastIndex(ref, ":")+1:]):
-		return 2
 	default:
 		return 1
 	}
 }
 
 // orderRefsForTagging stable-sorts refs by tagRank.
-func orderRefsForTagging(refs []string, commit, short string) []string {
+func orderRefsForTagging(refs []string, floating map[string]bool, commit, short string) []string {
 	out := append([]string(nil), refs...)
 	sort.SliceStable(out, func(i, j int) bool {
-		return tagRank(out[i], commit, short) < tagRank(out[j], commit, short)
+		return tagRank(out[i], floating, commit, short) < tagRank(out[j], floating, commit, short)
 	})
 	return out
 }

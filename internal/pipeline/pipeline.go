@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	"github.com/blairham/stevedore/internal/sbom"
 	"github.com/blairham/stevedore/internal/sbomdiff"
 	"github.com/blairham/stevedore/internal/scanner"
+	"github.com/blairham/stevedore/internal/semver"
 	"github.com/blairham/stevedore/internal/signer"
 	"github.com/blairham/stevedore/internal/summary"
 	"github.com/blairham/stevedore/internal/tester"
@@ -111,9 +113,12 @@ func (o Options) context() context.Context {
 
 // ImagePlan is a fully-resolved plan for one image.
 type ImagePlan struct {
-	Image     config.Image
-	Repos     []string
-	Refs      []string // repo:tag cartesian product actually published
+	Image config.Image
+	Repos []string
+	Refs  []string // repo:tag cartesian product actually published
+	// Floating is the subset of Refs that are floating tags (see
+	// floatingTag): applied last, and never looked up as commit tags.
+	Floating  map[string]bool
 	BuildArgs []string
 	Labels    map[string]string
 	CacheFrom []string
@@ -318,11 +323,13 @@ func firstSelectedImage(cfg *config.Config, only []string) *config.Image {
 }
 
 // resolvePlans renders tags/repos/build-args/labels and computes the published
-// references. Floating "latest" tags are dropped off the default branch or in a
-// snapshot build. A pinned version (pins[id]) overrides resolution for that
-// image entirely. A non-empty `only` restricts plans to those image IDs (config
-// order preserved) — excluded images are skipped before version resolution, so
-// a matrix job's credentials only need registry access to its own repositories.
+// references. Floating tags (see floatingTag) are dropped off the default
+// branch, in a snapshot build, and on a prerelease version unless
+// prerelease_floating_tags allows them. A pinned version (pins[id]) overrides
+// resolution for that image entirely. A non-empty `only` restricts plans to
+// those image IDs (config order preserved) — excluded images are skipped
+// before version resolution, so a matrix job's credentials only need registry
+// access to its own repositories.
 func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error), pins map[string]string, only []string) ([]ImagePlan, error) {
 	selected := map[string]bool{}
 	for _, id := range only {
@@ -332,12 +339,12 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 	// Floating tags withheld this run, reported once at the end rather than
 	// once per image x repository.
 	withheld := &withheldTags{seen: map[string]bool{}}
-	defer func() { warnWithheldFloating(withheld.order, cfg.DefaultBranch, ctx) }()
+	defer func() { warnWithheldFloating(withheld, cfg.DefaultBranch, ctx) }()
 	for _, img := range cfg.Images {
 		if len(selected) > 0 && !selected[img.ID] {
 			continue
 		}
-		plan, err := resolvePlan(img, ctx, snapshot, versionFor, pins, withheld)
+		plan, err := resolvePlan(img, ctx, floatingPolicy{snapshot: snapshot, onPrerelease: cfg.PrereleaseFloatingTags}, versionFor, pins, withheld)
 		if err != nil {
 			return nil, err
 		}
@@ -346,22 +353,52 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 	return plans, nil
 }
 
-// withheldTags collects the floating tags a run declined to publish, in the
-// order first seen.
-type withheldTags struct {
-	seen  map[string]bool
-	order []string
+// floatingPolicy is what decides whether a floating tag may publish this run.
+type floatingPolicy struct {
+	snapshot     bool
+	onPrerelease bool // prerelease_floating_tags
 }
 
-func (w *withheldTags) add(tag string) {
-	if !w.seen[tag] {
-		w.seen[tag] = true
-		w.order = append(w.order, tag)
+// withholdReason says why floating tags may not publish for an image whose
+// template context is ctx, or "" when they may.
+func (fp floatingPolicy) withholdReason(ctx *tmpl.Context) string {
+	switch {
+	case fp.snapshot:
+		return reasonSnapshot
+	case !ctx.IsDefault:
+		return reasonOffDefault
+	case ctx.IsPrerelease() && !fp.onPrerelease:
+		return reasonPrerelease
+	}
+	return ""
+}
+
+const (
+	reasonSnapshot   = "snapshot"
+	reasonOffDefault = "off-default-branch"
+	reasonPrerelease = "prerelease"
+)
+
+// withheldTags collects the floating tags a run declined to publish, in the
+// order first seen, with why.
+type withheldTags struct {
+	seen  map[string]bool
+	order []withheldTag
+}
+
+type withheldTag struct {
+	tag, reason, version string
+}
+
+func (w *withheldTags) add(tag, reason, version string) {
+	if key := reason + "\x00" + tag; !w.seen[key] {
+		w.seen[key] = true
+		w.order = append(w.order, withheldTag{tag: tag, reason: reason, version: version})
 	}
 }
 
 // resolvePlan renders one image's plan; see resolvePlans.
-func resolvePlan(img config.Image, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error), pins map[string]string, withheld *withheldTags) (ImagePlan, error) {
+func resolvePlan(img config.Image, ctx *tmpl.Context, fp floatingPolicy, versionFor func(string) (string, error), pins map[string]string, withheld *withheldTags) (ImagePlan, error) {
 	// Repositories are rendered with the release context (they key on .Env,
 	// not .Version), and drive per-image version resolution.
 	repos, err := tmpl.RenderAll(img.Repositories, ctx)
@@ -399,12 +436,20 @@ func resolvePlan(img config.Image, ctx *tmpl.Context, snapshot bool, versionFor 
 		plan.Labels[k] = rv
 	}
 
-	plan.Refs = publishedRefs(repos, tags, snapshot || !imgCtx.IsDefault, func(tag string) {
+	floating := make([]bool, len(tags))
+	for i, tag := range tags {
+		if floating[i], err = floatingTag(img.Tags[i], tag, imgCtx); err != nil {
+			return ImagePlan{}, fmt.Errorf("image %s tags: %w", img.ID, err)
+		}
+	}
+	reason := fp.withholdReason(imgCtx)
+	plan.Refs, plan.Floating = publishedRefs(repos, tags, floating, reason != "", func(tag string) {
 		// A snapshot withholding "latest" is the point of a snapshot; off
-		// the default branch it is a decision the user needs to see, because
-		// the alternative is finding out from the registry weeks later.
-		if !snapshot {
-			withheld.add(tag)
+		// the default branch or on a prerelease it is a decision the user
+		// needs to see, because the alternative is finding out from the
+		// registry weeks later.
+		if reason != reasonSnapshot {
+			withheld.add(tag, reason, imgVersion)
 		}
 	})
 	if len(plan.Refs) == 0 {
@@ -431,35 +476,56 @@ func imageVersion(id string, repos []string, ctx *tmpl.Context, versionFor func(
 	return ctx.Version, ctx, nil
 }
 
-// publishedRefs is the repo:tag product, minus floating tags when
-// withholdFloating is set; each withheld tag is passed to onWithheld.
-func publishedRefs(repos, tags []string, withholdFloating bool, onWithheld func(string)) []string {
+// publishedRefs is the repo:tag product, minus floating tags (floating[i] for
+// tags[i]) when withholdFloating is set; each withheld tag is passed to
+// onWithheld. The floating refs that are published are returned as a set.
+func publishedRefs(repos, tags []string, floating []bool, withholdFloating bool, onWithheld func(string)) ([]string, map[string]bool) {
 	var refs []string
+	floatingRefs := map[string]bool{}
 	for _, repo := range repos {
-		for _, tag := range tags {
-			if withholdFloating && isFloating(tag) {
-				onWithheld(tag)
-				continue
+		for i, tag := range tags {
+			if floating[i] {
+				if withholdFloating {
+					onWithheld(tag)
+					continue
+				}
+				floatingRefs[repo+":"+tag] = true
 			}
 			refs = append(refs, repo+":"+tag)
 		}
 	}
-	return refs
+	return refs, floatingRefs
 }
 
 // warnWithheldFloating explains, once per run, why floating tags are not being
 // published. It writes to stderr rather than the progress writer so that `plan`
 // and `--output json` keep a clean stdout.
-func warnWithheldFloating(tags []string, defaultBranch string, ctx *tmpl.Context) {
-	if len(tags) == 0 {
+func warnWithheldFloating(w *withheldTags, defaultBranch string, ctx *tmpl.Context) {
+	var offDefault, prerelease []string
+	var preVersion string
+	for _, t := range w.order {
+		switch t.reason {
+		case reasonOffDefault:
+			offDefault = append(offDefault, strconv.Quote(t.tag))
+		case reasonPrerelease:
+			prerelease = append(prerelease, strconv.Quote(t.tag))
+			if preVersion == "" {
+				preVersion = t.version
+			}
+		}
+	}
+	if len(prerelease) > 0 {
+		// Expected and by design, so a note rather than a warning — but named,
+		// so nobody wonders why :latest did not move.
+		fmt.Fprintf(os.Stderr, "note: not publishing floating tag(s) %s: %s is a prerelease "+
+			"(set prerelease_floating_tags: true to publish them anyway)\n",
+			strings.Join(prerelease, ", "), preVersion)
+	}
+	if len(offDefault) == 0 {
 		return
 	}
-	quoted := make([]string, len(tags))
-	for i, t := range tags {
-		quoted[i] = strconv.Quote(t)
-	}
 	fmt.Fprintf(os.Stderr, "warning: not publishing floating tag(s) %s: HEAD is not on the default branch %q\n",
-		strings.Join(quoted, ", "), defaultBranch)
+		strings.Join(offDefault, ", "), defaultBranch)
 	if ctx.Detached {
 		// The common cause, and the one with a one-line fix. A shallow clone
 		// has no branch refs for the commit to be reachable from, so a detached
@@ -469,11 +535,46 @@ func warnWithheldFloating(tags []string, defaultBranch string, ctx *tmpl.Context
 	}
 }
 
-// isFloating reports whether a tag is a mutable pointer that should only move on
-// the default branch of a real release.
+// isFloating reports whether a rendered tag is named as a mutable pointer:
+// "latest" or anything ending in "-latest".
 func isFloating(tag string) bool {
 	t := strings.ToLower(tag)
 	return t == "latest" || strings.HasSuffix(t, "-latest")
+}
+
+// pinningFields are the template fields that make a tag name one release
+// rather than a line of them: a tag that uses any of these is never floating
+// on account of also using .Major or .Minor ("{{ .Major }}.{{ .Minor }}.{{
+// .Patch }}" is a version tag, not a pointer).
+var pinningFields = []string{"Patch", "Prerelease", "Version", "Tag", "LatestTag", "Commit", "ShortCommit", "Date", "Timestamp"}
+
+// floatingTag reports whether the tag rendered as tag from the template src is
+// floating — a pointer that moves from release to release, so it may only
+// publish on the default branch of a real, non-prerelease release, and is
+// applied last. That is:
+//   - a tag named like one: "latest", "*-latest";
+//   - a template built on .Major or .Minor without anything that pins a single
+//     release ("{{ .Major }}", "v{{ .Major }}.{{ .Minor }}", "{{ .Major }}-alpine");
+//   - a tag that spells the version's own major or major.minor ("1", "v1.2"
+//     for 1.2.3), however the template produced it.
+func floatingTag(src, tag string, ctx *tmpl.Context) (bool, error) {
+	if isFloating(tag) {
+		return true, nil
+	}
+	fields, err := tmpl.Fields(src)
+	if err != nil {
+		return false, err
+	}
+	if (fields["Major"] || fields["Minor"]) && !slices.ContainsFunc(pinningFields, func(f string) bool { return fields[f] }) {
+		return true, nil
+	}
+	if v, ok := semver.Parse(ctx.Version); ok {
+		t := strings.TrimPrefix(tag, "v")
+		if t == strconv.Itoa(v.Major) || t == fmt.Sprintf("%d.%d", v.Major, v.Minor) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Release runs the full pipeline: build+push, sign, SBOM, changelog. With
@@ -1011,7 +1112,7 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string, refs []str
 		}
 		var assets []string // SBOMs, if generated, make good release assets
 		title := fmt.Sprintf("%s %s", p.Config.ProjectName, p.Ctx.Version)
-		if err := publish.GitHubRelease(r, p.Config.Release.GitHub, tag, p.Git.Commit, title, notes, assets); err != nil {
+		if err := publish.GitHubRelease(r, p.Config.Release.GitHub, tag, p.Git.Commit, title, notes, p.Ctx.IsPrerelease(), assets); err != nil {
 			return err
 		}
 		fmt.Fprintf(progress, "==> GitHub release %s created\n", tag)
@@ -1137,6 +1238,7 @@ func buildGroupMembers(o Options, p *Prepared, r *run.Runner, grp []imageEval) (
 	}
 	rep := plans[0]
 	refs, repos := unionRefsRepos(plans)
+	floating := unionFloating(plans)
 	irs := groupSummaries(o, p, grp)
 
 	label := rep.Image.ID
@@ -1174,7 +1276,7 @@ func buildGroupMembers(o Options, p *Prepared, r *run.Runner, grp []imageEval) (
 	// digest alone, so a failed gate leaves nothing for a consumer to pull by
 	// name.
 	commit, short := headCommit(p)
-	return irs, depSection, applyTags(r, repos, orderRefsForTagging(refs, commit, short), digest)
+	return irs, depSection, applyTags(r, repos, orderRefsForTagging(refs, floating, commit, short), digest)
 }
 
 // applyTags points every published tag at the already-pushed digest, one
@@ -1219,6 +1321,17 @@ func unionRefsRepos(plans []ImagePlan) (refs, repos []string) {
 		repos = append(repos, plan.Repos...)
 	}
 	return dedupeStrings(refs), dedupeStrings(repos)
+}
+
+// unionFloating is the set of floating refs across a group's plans.
+func unionFloating(plans []ImagePlan) map[string]bool {
+	out := map[string]bool{}
+	for _, plan := range plans {
+		for ref := range plan.Floating {
+			out[ref] = true
+		}
+	}
+	return out
 }
 
 // groupSummaries returns the summary entry for each group member, recording

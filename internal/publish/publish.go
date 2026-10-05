@@ -29,7 +29,10 @@ import (
 // target is the commit the tag is created at when it does not exist yet (gh
 // otherwise tags the default branch's tip, which need not be what was built);
 // it is ignored by gh when the tag already exists, and omitted when empty.
-func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, target, title, notesPath string, assets []string) error {
+//
+// prerelease is whether the version is a semver prerelease; it marks the
+// release as one unless cfg.Prerelease says otherwise.
+func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, target, title, notesPath string, prerelease bool, assets []string) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -46,7 +49,10 @@ func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, target, title, 
 	if cfg.Draft {
 		args = append(args, "--draft")
 	}
-	if cfg.Prerelease {
+	if cfg.Prerelease != nil {
+		prerelease = *cfg.Prerelease
+	}
+	if prerelease {
 		args = append(args, "--prerelease")
 	}
 	args = append(args, assets...)
