@@ -283,3 +283,15 @@ jobs:
           # parse as one — it lives outside that directory precisely so GitHub
           # does not try to run it here.
           python3 -c "import yaml,sys; yaml.safe_load(open('examples/split-multiarch/release.yml'))"
+      - name: No matrix built from the whole plan document
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          # `matrix: ${{ fromJson(plan) }}` makes the plan's `skipped` list a
+          # matrix dimension: GitHub rejects it when empty and, when not, runs
+          # one job per skipped image carrying only the last include entry.
+          # The documented form takes `.include` alone.
+          if grep -rnE '^[[:space:]]*matrix:[[:space:]]*\$\{\{[[:space:]]*fromJson\([^)]*\)[[:space:]]*\}\}' \
+              README.md action.yml docs examples; then
+            echo "::error::build the matrix from the plan's include list: matrix: {include: \${{ fromJson(...).include }}}"
+            exit 1
+          fi

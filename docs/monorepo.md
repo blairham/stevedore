@@ -202,7 +202,8 @@ jobs:
     needs: plan
     if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
     strategy:
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix).include }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -234,8 +235,17 @@ jobs:
 The `plan` step's `only` and `pins` outputs are every entry's `only` and `pins`
 flattened (each image once, even under `--split-platforms`), so the final step
 needs no `jq` or `join`. They are step outputs rather than keys of the plan
-document because the document is used whole as the matrix, where every
-top-level key would become a matrix dimension.
+document for the reason below.
+
+Build the matrix from the plan's `include` list, never from the whole
+document: `matrix: ${{ fromJson(...) }}` makes every top-level key a matrix
+dimension, and the document also carries an informational `skipped` list.
+GitHub then fails the workflow when `skipped` is empty (`Matrix vector
+'skipped' does not contain any values` — every image built), and when it is
+not, it runs one job per *skipped* image with the last `include` entry merged
+into each, so the other planned images are never built. The `if:` guard is
+needed too: an empty `include` (nothing changed) fails with `matrix must
+define at least one vector` rather than running no jobs.
 
 An `--only` run reports each image's reason as `selected via --only` — it knows
 nothing else. Give it the plan in `STEVEDORE_PLAN` (as above; `merge` reads it
@@ -278,7 +288,8 @@ jobs:
     needs: plan
     if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
     strategy:
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix).include }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6

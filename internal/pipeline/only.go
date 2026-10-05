@@ -93,9 +93,10 @@ func (r *PlanResult) FlatPins() string {
 
 // WriteGitHubOutput appends the flat `only` and `pins` as step outputs to the
 // file named by $GITHUB_OUTPUT, if set. They are outputs rather than keys of
-// the plan document because the document is used whole as a matrix
-// (`matrix: ${{ fromJson(plan) }}`), where every top-level key is a matrix
-// dimension. No-op outside GitHub Actions.
+// the plan document: a workflow that builds its matrix from the whole
+// document (`matrix: ${{ fromJson(plan) }}`) turns every top-level key into a
+// matrix dimension. The documented form is `matrix: {include: ${{
+// fromJson(plan).include }}}`. No-op outside GitHub Actions.
 func (r *PlanResult) WriteGitHubOutput() error {
 	path := os.Getenv("GITHUB_OUTPUT")
 	if path == "" {

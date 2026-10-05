@@ -271,8 +271,10 @@ type PlanSkip struct {
 }
 
 // PlanResult is the resolved build plan. Include is in GitHub Actions matrix
-// `include` shape: `strategy: matrix: ${{ fromJson(plan) }}` fans one job out
-// per build group. Skipped is informational.
+// `include` shape: `strategy: matrix: include: ${{ fromJson(plan).include }}`
+// fans one job out per build group. Skipped is informational — and is why the
+// matrix must be built from Include alone: as a top-level matrix key it would
+// become a dimension (an error when empty, one job per skipped image when not).
 type PlanResult struct {
 	Include []PlanEntry `json:"include"`
 	Skipped []PlanSkip  `json:"skipped"`
