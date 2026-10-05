@@ -77,3 +77,20 @@ func object(t *testing.T, m map[string]any, key string) map[string]any {
 	}
 	return v
 }
+
+// scan.ignore entries accept a bare ID or a mapping, so the schema must offer
+// both; the struct-derived object schema alone would flag the original form.
+func TestScanIgnoreSchemaAcceptsBothForms(t *testing.T) {
+	props := object(t, Generate(config.Config{}, "x"), "properties")
+	scan, _ := props["scan"].(map[string]any)
+	item := object(t, object(t, object(t, scan, "properties"), "ignore"), "items")
+	alts, _ := item["oneOf"].([]any)
+	if len(alts) != 2 {
+		t.Fatalf("ignore items = %v, want oneOf string|object", item)
+	}
+	first, _ := alts[0].(map[string]any)
+	second, _ := alts[1].(map[string]any)
+	if first["type"] != "string" || second["type"] != "object" {
+		t.Errorf("oneOf = %v", alts)
+	}
+}

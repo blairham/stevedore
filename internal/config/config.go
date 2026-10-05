@@ -309,13 +309,98 @@ type Scan struct {
 	// without gating. Left unset it defaults to critical; an explicit empty
 	// string is read as "none".
 	FailOn string `yaml:"fail_on"`
-	// Ignore lists vulnerability IDs (e.g. CVE-2023-1234) to exclude from the
-	// gate.
-	Ignore []string `yaml:"ignore"`
+	// Ignore lists vulnerabilities to exclude from the gate. Each entry is a
+	// bare ID (e.g. CVE-2023-1234) or an {id, reason, expires} mapping; an
+	// entry past its expiry date stops applying and is reported as a warning.
+	Ignore []ScanIgnore `yaml:"ignore"`
+	// VEX lists OpenVEX/CSAF/CycloneDX VEX documents passed to the scanner as
+	// --vex, so statements such as "not_affected" filter its findings.
+	VEX []string `yaml:"vex"`
 	// Args are extra flags passed verbatim to the scanner. Flags that change
 	// its output format or destination are rejected at validation: the gate
 	// parses the JSON report, and any other document would read as clean.
 	Args []string `yaml:"args"`
+}
+
+// ScanIgnoreDateLayout is the format of scan.ignore[].expires.
+const ScanIgnoreDateLayout = "2006-01-02"
+
+// ScanIgnore is one scan.ignore entry. In YAML it is either a bare
+// vulnerability ID or a mapping that records why the finding is accepted and
+// until when, so an ignore is auditable and cannot outlive its justification.
+type ScanIgnore struct {
+	// ID is the vulnerability ID, matched case-insensitively.
+	ID string `yaml:"id"`
+	// Reason records why the finding is accepted.
+	Reason string `yaml:"reason"`
+	// Expires (YYYY-MM-DD) is the last day the ignore applies; from the next
+	// day (UTC) the finding counts against the gate again.
+	Expires string `yaml:"expires"`
+}
+
+// UnmarshalYAML accepts both the bare-ID form and the mapping form. The
+// mapping's keys are checked by hand: a custom unmarshaler decodes with a
+// fresh decoder that does not inherit KnownFields, and a misspelled "expires"
+// must not silently become an ignore that never expires.
+func (s *ScanIgnore) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		*s = ScanIgnore{ID: n.Value}
+		return nil
+	case yaml.MappingNode:
+		var out ScanIgnore
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if v.Kind != yaml.ScalarNode {
+				return fmt.Errorf("line %d: scan.ignore %s must be a string", v.Line, k.Value)
+			}
+			switch k.Value {
+			case "id":
+				out.ID = v.Value
+			case "reason":
+				out.Reason = v.Value
+			case "expires":
+				out.Expires = v.Value
+			default:
+				return fmt.Errorf("line %d: field %s not found in scan.ignore entry (want id, reason, expires)", k.Line, k.Value)
+			}
+		}
+		*s = out
+		return nil
+	default:
+		return fmt.Errorf("line %d: scan.ignore entry must be an ID or an {id, reason, expires} mapping", n.Line)
+	}
+}
+
+// JSONSchema describes both accepted forms for editors.
+func (ScanIgnore) JSONSchema() map[string]any {
+	str := func() map[string]any { return map[string]any{"type": "string"} }
+	date := str()
+	date["pattern"] = `^\d{4}-\d{2}-\d{2}$`
+	return map[string]any{
+		"oneOf": []any{
+			str(),
+			map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"id": str(), "reason": str(), "expires": date},
+				"required":             []any{"id"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}
+
+// ExpiresAt returns the instant the ignore stops applying (the start of the
+// day after Expires, UTC) and whether it has an expiry at all.
+func (s ScanIgnore) ExpiresAt() (time.Time, bool) {
+	if s.Expires == "" {
+		return time.Time{}, false
+	}
+	d, err := time.Parse(ScanIgnoreDateLayout, s.Expires)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return d.AddDate(0, 0, 1), true
 }
 
 // Changelog configures release-note generation from conventional commits.
@@ -505,6 +590,21 @@ func (s Scan) validate() error {
 	}
 	if !ValidSeverity(s.FailOn) {
 		return fmt.Errorf("scan.fail_on %q invalid (want one of: %s, %s)", s.FailOn, strings.Join(Severities, ", "), FailOnNone)
+	}
+	for i, ig := range s.Ignore {
+		if strings.TrimSpace(ig.ID) == "" {
+			return fmt.Errorf("scan.ignore[%d]: id is required", i)
+		}
+		if ig.Expires != "" {
+			if _, err := time.Parse(ScanIgnoreDateLayout, ig.Expires); err != nil {
+				return fmt.Errorf("scan.ignore[%d] (%s): expires %q is not a YYYY-MM-DD date", i, ig.ID, ig.Expires)
+			}
+		}
+	}
+	for _, v := range s.VEX {
+		if _, err := os.Stat(v); err != nil {
+			return fmt.Errorf("scan.vex %q not readable: %w", v, err)
+		}
 	}
 	for _, a := range s.Args {
 		if flag := outputFlag(s.Scanner, a); flag != "" {

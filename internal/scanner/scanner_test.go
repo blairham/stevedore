@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blairham/stevedore/internal/config"
 )
@@ -123,7 +124,7 @@ func TestBuildReportGating(t *testing.T) {
 	vulns, _ := parse("grype", []byte(grypeJSON))
 
 	// fail_on high -> critical + high block, low does not.
-	rep := buildReport(config.Scan{FailOn: "high"}, "ref", vulns)
+	rep := buildReport(config.Scan{FailOn: "high"}, "ref", vulns, time.Now())
 	if len(rep.Blocking) != 2 {
 		t.Errorf("fail_on=high should block 2 (critical+high), got %d: %+v", len(rep.Blocking), rep.Blocking)
 	}
@@ -132,13 +133,13 @@ func TestBuildReportGating(t *testing.T) {
 	}
 
 	// fail_on critical -> only critical blocks.
-	rep = buildReport(config.Scan{FailOn: "critical"}, "ref", vulns)
+	rep = buildReport(config.Scan{FailOn: "critical"}, "ref", vulns, time.Now())
 	if len(rep.Blocking) != 1 || rep.Blocking[0].ID != "CVE-1" {
 		t.Errorf("fail_on=critical should block only CVE-1, got %+v", rep.Blocking)
 	}
 
 	// no threshold -> report only, never blocks.
-	rep = buildReport(config.Scan{FailOn: config.FailOnNone}, "ref", vulns)
+	rep = buildReport(config.Scan{FailOn: config.FailOnNone}, "ref", vulns, time.Now())
 	if len(rep.Blocking) != 0 {
 		t.Errorf("fail_on=none should not block, got %+v", rep.Blocking)
 	}
@@ -150,7 +151,7 @@ func TestBuildReportGating(t *testing.T) {
 func TestBuildReportIgnore(t *testing.T) {
 	vulns, _ := parse("grype", []byte(grypeJSON))
 	// Ignore the critical (case-insensitive) so it neither counts nor blocks.
-	rep := buildReport(config.Scan{FailOn: "high", Ignore: []string{"cve-1"}}, "ref", vulns)
+	rep := buildReport(config.Scan{FailOn: "high", Ignore: []config.ScanIgnore{{ID: "cve-1"}}}, "ref", vulns, time.Now())
 	if rep.Counts["critical"] != 0 {
 		t.Errorf("ignored CVE-1 should not be counted: %+v", rep.Counts)
 	}
@@ -161,14 +162,14 @@ func TestBuildReportIgnore(t *testing.T) {
 
 func TestSummary(t *testing.T) {
 	vulns, _ := parse("grype", []byte(grypeJSON))
-	rep := buildReport(config.Scan{FailOn: "critical"}, "ref", vulns)
+	rep := buildReport(config.Scan{FailOn: "critical"}, "ref", vulns, time.Now())
 	got := rep.Summary()
 	// Most severe first.
 	if got != "1 critical, 1 high, 1 low" {
 		t.Errorf("Summary() = %q", got)
 	}
 
-	empty := buildReport(config.Scan{}, "ref", nil)
+	empty := buildReport(config.Scan{}, "ref", nil, time.Now())
 	if empty.Summary() != "no vulnerabilities found" {
 		t.Errorf("empty Summary() = %q", empty.Summary())
 	}
@@ -176,7 +177,7 @@ func TestSummary(t *testing.T) {
 
 func TestGateErrorMentionsSeverityAndCVE(t *testing.T) {
 	vulns, _ := parse("grype", []byte(grypeJSON))
-	rep := buildReport(config.Scan{FailOn: "critical"}, "myimg@sha256:abc", vulns)
+	rep := buildReport(config.Scan{FailOn: "critical"}, "myimg@sha256:abc", vulns, time.Now())
 	msg := rep.GateError("critical").Error()
 	for _, want := range []string{"CRITICAL", "CVE-1", "myimg@sha256:abc"} {
 		if !strings.Contains(msg, want) {
@@ -200,5 +201,55 @@ func TestCommand(t *testing.T) {
 	}
 	if args[len(args)-1] != "img:tag" {
 		t.Errorf("trivy ref should be last: %v", args)
+	}
+}
+
+// An ignore applies through its expiry date and stops applying the next day
+// (UTC): the finding it named counts and blocks again, and the expired entry is
+// reported so it can be renewed or removed.
+func TestBuildReportIgnoreExpiry(t *testing.T) {
+	vulns, _ := parse("grype", []byte(grypeJSON))
+	cfg := config.Scan{FailOn: "critical", Ignore: []config.ScanIgnore{
+		{ID: "CVE-1", Reason: "no fix upstream", Expires: "2026-03-31"},
+		{ID: "CVE-3"}, // no expiry: applies forever
+	}}
+
+	lastDay := time.Date(2026, 3, 31, 23, 59, 0, 0, time.UTC)
+	rep := buildReport(cfg, "ref", vulns, lastDay)
+	if len(rep.Blocking) != 0 || len(rep.Expired) != 0 {
+		t.Fatalf("on its last day the ignore must still apply: blocking=%+v expired=%+v", rep.Blocking, rep.Expired)
+	}
+
+	dayAfter := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	rep = buildReport(cfg, "ref", vulns, dayAfter)
+	if len(rep.Blocking) != 1 || rep.Blocking[0].ID != "CVE-1" {
+		t.Errorf("an expired ignore must stop applying: blocking=%+v", rep.Blocking)
+	}
+	if rep.Counts["low"] != 0 {
+		t.Errorf("an ignore without expiry must keep applying: %+v", rep.Counts)
+	}
+	if len(rep.Expired) != 1 || rep.Expired[0].ID != "CVE-1" {
+		t.Fatalf("expired = %+v, want CVE-1", rep.Expired)
+	}
+	w := rep.ExpiredWarnings()
+	if len(w) != 1 || !strings.Contains(w[0], "CVE-1") || !strings.Contains(w[0], "2026-03-31") || !strings.Contains(w[0], "no fix upstream") {
+		t.Errorf("warning = %q", w)
+	}
+}
+
+// Every scan.vex document reaches the scanner as its own --vex flag, ahead of
+// scan.args, with the ref still last for trivy.
+func TestCommandVEX(t *testing.T) {
+	cfg := config.Scan{VEX: []string{"a.vex.json", "b.vex.json"}, Args: []string{"--x"}}
+	for _, sc := range []string{"grype", "trivy"} {
+		cfg.Scanner = sc
+		_, args, _ := command(cfg, "img@sha256:d", "dist", "app")
+		got := strings.Join(args, " ")
+		if !strings.Contains(got, "--vex a.vex.json --vex b.vex.json --x") {
+			t.Errorf("%s args = %q", sc, got)
+		}
+		if sc == "trivy" && args[len(args)-1] != "img@sha256:d" {
+			t.Errorf("trivy ref should be last: %q", got)
+		}
 	}
 }

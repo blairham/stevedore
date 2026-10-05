@@ -1355,7 +1355,13 @@ func scanGate(o Options, p *Prepared, r *run.Runner, id, ref string, irs []summa
 	if err != nil {
 		return err
 	}
-	if res == nil || o.DryRun {
+	if res == nil {
+		return nil
+	}
+	for _, w := range res.ExpiredWarnings() {
+		fmt.Fprintf(progress, "    warning: %s\n", w)
+	}
+	if o.DryRun {
 		return nil
 	}
 	for i := range irs {

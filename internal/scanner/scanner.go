@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/run"
@@ -44,6 +45,40 @@ type Report struct {
 	Counts map[string]int
 	// Blocking are the vulns at or above the fail_on threshold.
 	Blocking []Vuln
+	// Expired are the scan.ignore entries past their expiry date. They no
+	// longer apply: the findings they named count against the gate again.
+	Expired []config.ScanIgnore
+}
+
+// now is the clock that decides whether an ignore has expired; tests pin it.
+var now = time.Now
+
+// ExpiredWarnings renders one line per expired ignore, for the release log.
+func (rep *Report) ExpiredWarnings() []string {
+	out := make([]string, 0, len(rep.Expired))
+	for _, ig := range rep.Expired {
+		line := fmt.Sprintf("scan.ignore %s expired on %s and no longer applies", ig.ID, ig.Expires)
+		if ig.Reason != "" {
+			line += fmt.Sprintf(" (reason: %s)", ig.Reason)
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// activeIgnores splits the configured ignores at t into the set of IDs that
+// still apply (upper-cased) and the entries that have expired.
+func activeIgnores(ignores []config.ScanIgnore, t time.Time) (map[string]bool, []config.ScanIgnore) {
+	active := map[string]bool{}
+	var expired []config.ScanIgnore
+	for _, ig := range ignores {
+		if at, ok := ig.ExpiresAt(); ok && !t.Before(at) {
+			expired = append(expired, ig)
+			continue
+		}
+		active[strings.ToUpper(ig.ID)] = true
+	}
+	return active, expired
 }
 
 // trivy is both the scanner name in config and its executable.
@@ -59,7 +94,8 @@ func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report
 	name, args, raw := command(cfg, ref, distDir, imageID)
 	if r.DryRun {
 		r.Preview(name, args...)
-		return &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}}, nil
+		_, expired := activeIgnores(cfg.Ignore, now())
+		return &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}, Expired: expired}, nil
 	}
 	out, err := r.Capture(name, args...)
 	if err != nil {
@@ -75,29 +111,33 @@ func Scan(r *run.Runner, cfg config.Scan, distDir, imageID, ref string) (*Report
 	if err != nil {
 		return nil, err
 	}
-	return buildReport(cfg, ref, vulns), nil
+	return buildReport(cfg, ref, vulns, now()), nil
 }
 
 // command returns the scanner invocation and the path its JSON is saved to.
+// Both grype and trivy take one --vex flag per document.
 func command(cfg config.Scan, ref, distDir, imageID string) (name string, args []string, rawPath string) {
 	rawPath = filepath.Join(distDir, fmt.Sprintf("scan-%s.json", imageID))
+	vex := make([]string, 0, 2*len(cfg.VEX))
+	for _, v := range cfg.VEX {
+		vex = append(vex, "--vex", v)
+	}
 	switch cfg.Scanner {
 	case trivy:
-		args = append([]string{"image", "--quiet", "--format", "json"}, cfg.Args...)
+		args = append([]string{"image", "--quiet", "--format", "json"}, vex...)
+		args = append(args, cfg.Args...)
 		return trivy, append(args, ref), rawPath
 	default: // grype
-		args = append([]string{ref, "-o", "json"}, cfg.Args...)
-		return "grype", args, rawPath
+		args = append([]string{ref, "-o", "json"}, vex...)
+		return "grype", append(args, cfg.Args...), rawPath
 	}
 }
 
-// buildReport applies ignores, tallies counts, and computes the blocking set.
-func buildReport(cfg config.Scan, ref string, vulns []Vuln) *Report {
-	ignore := map[string]bool{}
-	for _, id := range cfg.Ignore {
-		ignore[strings.ToUpper(id)] = true
-	}
-	rep := &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}}
+// buildReport applies the ignores still in force at t, tallies counts, and
+// computes the blocking set.
+func buildReport(cfg config.Scan, ref string, vulns []Vuln, t time.Time) *Report {
+	ignore, expired := activeIgnores(cfg.Ignore, t)
+	rep := &Report{Scanner: cfg.Scanner, Ref: ref, Counts: map[string]int{}, Expired: expired}
 	threshold := severityRank[cfg.FailOn] // 0 for "none" (or empty) -> no gate
 	for _, v := range vulns {
 		if ignore[strings.ToUpper(v.ID)] {
