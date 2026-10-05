@@ -112,7 +112,9 @@ build → scan (gate) → smoke test (gate) → sign → SBOM + attest → prove
 The version feeding the tags is resolved first (`internal/versioner`); under the
 `registry`/`ecr` strategies each image is versioned independently from its own
 repo. Change detection (`--only-changed` / `--changed-since`) can skip images
-whose scoped paths didn't change, using per-image globs or the `.csproj` graph.
+whose scoped paths didn't change, using per-image globs or the `.csproj` graph;
+an image with neither is scoped to its build context minus its dockerignore
+(`internal/changed/scope.go`, Docker's own `moby/patternmatcher`).
 
 Split mode spreads the build across native-arch CI runners: `release --split
 <platform>` legs push untagged by digest (recorded under `dist/digests/`), and

@@ -47,8 +47,9 @@ images:
     cache_to:             # buildx --cache-to destinations (same skip rule)
       - "type=registry,ref=ghcr.io/acme/myapp:buildcache,mode=max"
       # - '{{ index .Env "STEVEDORE_CACHE_TO" }}'
-    paths:                # change-detection globs (see Monorepos); ** supported
-      - "services/myapp/**"
+    paths:                # change-detection globs (see Monorepos); ** supported.
+      - "services/myapp/**"   # omitted: the build context minus .dockerignore,
+                              # plus the Dockerfile and this config
     project: ""           # or a .csproj to auto-derive paths from its graph
     extra_flags: []       # passed verbatim to `docker buildx build`
 

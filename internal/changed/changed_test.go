@@ -171,8 +171,9 @@ func TestMatch(t *testing.T) {
 }
 
 func TestEvaluateUnscoped(t *testing.T) {
-	// No paths -> always changed (can't prove it's safe to skip).
-	d := Evaluate(nil, []string{"Dockerfile"}, []string{"anything.txt"})
+	// No paths and no local context -> always changed (can't prove it's safe
+	// to skip).
+	d := Evaluate(Scope{}, []string{"Dockerfile"}, []string{"anything.txt"})
 	if !d.Changed || d.Scoped {
 		t.Errorf("unscoped image should be changed & unscoped: %+v", d)
 	}
@@ -183,18 +184,18 @@ func TestEvaluateScoped(t *testing.T) {
 	shared := []string{"Dockerfile", "*.sln"}
 
 	// A file under one of its dependency dirs -> changed.
-	d := Evaluate(scoped, shared, []string{"Acme.Fix/FixEngine.cs"})
+	d := Evaluate(Scope{Paths: scoped}, shared, []string{"Acme.Fix/FixEngine.cs"})
 	if !d.Changed || !d.Scoped {
 		t.Errorf("should be changed via Fix dep: %+v", d)
 	}
 
 	// A shared file -> changed.
-	if d := Evaluate(scoped, shared, []string{"Dockerfile"}); !d.Changed {
+	if d := Evaluate(Scope{Paths: scoped}, shared, []string{"Dockerfile"}); !d.Changed {
 		t.Errorf("shared Dockerfile change should rebuild: %+v", d)
 	}
 
 	// An unrelated service -> not changed.
-	if d := Evaluate(scoped, shared, []string{"Acme.Billing/Client.cs"}); d.Changed {
+	if d := Evaluate(Scope{Paths: scoped}, shared, []string{"Acme.Billing/Client.cs"}); d.Changed {
 		t.Errorf("unrelated Billing change should NOT rebuild PaymentsGateway: %+v", d)
 	}
 }

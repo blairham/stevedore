@@ -222,24 +222,50 @@ func hasOrigin(ctx context.Context, dir string) bool {
 // Decision explains why an image is (or isn't) considered changed.
 type Decision struct {
 	Changed bool
-	// Scoped is false when the image declares no Paths, so it can't be narrowed
-	// and is treated as always-changed.
+	// Scoped is false when the image's inputs could not be narrowed at all (no
+	// paths and a context git cannot see), so it is treated as always-changed.
 	Scoped bool
-	// Reason is a short human explanation (a matching file, "unscoped", or
-	// "no matching files").
+	// Reason is a short human explanation (a matching file and the scope it
+	// matched, "unscoped", or "no matching files in <scope>").
 	Reason string
 }
 
-// Evaluate decides whether an image is affected by the given changed files.
-// scopedPaths are the image's resolved dependency globs; when empty the image is
-// unscoped and always rebuilds (we can't prove it's safe to skip). Otherwise it
-// changes when a file matches its scoped globs or the shared globs.
-func Evaluate(scopedPaths, shared, files []string) Decision {
-	if len(scopedPaths) == 0 {
-		return Decision{Changed: true, Scoped: false, Reason: "no paths declared (unscoped)"}
+// Scope is what an image is built from, for change detection. Paths, when
+// set, are the image's resolved dependency globs and are the whole scope.
+// Otherwise Context is its default scope (see ContextScope). With neither the
+// image is unscoped.
+type Scope struct {
+	Paths   []string
+	Context *ContextScope
+}
+
+// Evaluate decides whether an image is affected by the given changed files. An
+// empty change set means nothing changed, whatever the scope. Otherwise the
+// image changes when a file matches the shared globs or falls in its scope: its
+// Paths globs when it declares them, else its build context. Only an image with
+// neither (a remote context) is unscoped and always rebuilds, since we cannot
+// prove it is safe to skip.
+func Evaluate(scope Scope, shared, files []string) Decision {
+	if len(scope.Paths) == 0 && scope.Context == nil {
+		return Decision{Changed: true, Scoped: false, Reason: "no paths declared and no local build context (unscoped)"}
 	}
-	patterns := make([]string, 0, len(scopedPaths)+len(shared))
-	patterns = append(patterns, scopedPaths...)
+	if len(files) == 0 {
+		return Decision{Changed: false, Scoped: true, Reason: "no files changed"}
+	}
+	if len(scope.Paths) == 0 {
+		desc := scope.Context.Describe()
+		for _, f := range files {
+			if p, ok := matchAny(shared, f); ok {
+				return Decision{Changed: true, Scoped: true, Reason: fmt.Sprintf("%s (matched %q)", f, p)}
+			}
+			if scope.Context.Contains(f) {
+				return Decision{Changed: true, Scoped: true, Reason: fmt.Sprintf("%s (in %s)", f, desc)}
+			}
+		}
+		return Decision{Changed: false, Scoped: true, Reason: "no matching files in " + desc}
+	}
+	patterns := make([]string, 0, len(scope.Paths)+len(shared))
+	patterns = append(patterns, scope.Paths...)
 	patterns = append(patterns, shared...)
 	for _, f := range files {
 		if p, ok := matchAny(patterns, f); ok {
