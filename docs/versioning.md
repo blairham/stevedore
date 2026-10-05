@@ -69,7 +69,9 @@ default is `git`; the others let you avoid relying on git tags entirely.
 In a multi-image config, `registry`/`ecr` version **each image independently from
 its own repo**, preserving per-service versions. Set `repo:` to pin one repo for a
 single unified version instead. A repo with no semver tags starts at
-`versioning.initial` (default `0.1.0`). `stevedore check` never hard-fails on an
+`versioning.initial` (default `0.1.0`). A run in which every image's version is
+pinned (`--pin-version`, as split legs and matrix jobs get from the plan) reads
+no registry, and does not need `crane` or `aws`. `stevedore check` never hard-fails on an
 unreachable registry — it warns and shows a placeholder so the rest of the config
 still validates offline.
 

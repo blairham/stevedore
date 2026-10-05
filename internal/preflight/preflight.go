@@ -43,6 +43,9 @@ type Opts struct {
 	Scan bool
 	// GitHubRelease is true when a GitHub release will be created.
 	GitHubRelease bool
+	// VersionsPinned is true when every image's version is pinned
+	// (--pin-version), so no registry is read to derive one.
+	VersionsPinned bool
 }
 
 // Result is the outcome of probing a single requirement.
@@ -129,7 +132,7 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 			Probe:    []string{subcommandVersion},
 			Reason:   "list registry tags to derive the next version",
 			Install:  "brew install crane  •  https://github.com/google/go-containerregistry/tree/main/cmd/crane#installation",
-			Required: true,
+			Required: !o.VersionsPinned,
 		})
 	}
 	if cfg.Versioning.Strategy == "ecr" {
@@ -139,7 +142,7 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 			Probe:    []string{flagVersion},
 			Reason:   "list ECR tags to derive the next version",
 			Install:  "brew install awscli  •  https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
-			Required: true,
+			Required: !o.VersionsPinned,
 		})
 	}
 	return reqs

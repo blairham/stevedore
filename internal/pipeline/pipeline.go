@@ -769,7 +769,10 @@ func Publish(o Options) error {
 		err = guardDefaultBranch(o, p.Config.DefaultBranch)
 	}
 	if err == nil && !o.DryRun {
-		err = checkTools(o.context(), p.Config, preflight.Opts{GitHubRelease: p.Config.Release.GitHub.Enabled})
+		err = checkTools(o.context(), p.Config, preflight.Opts{GitHubRelease: p.Config.Release.GitHub.Enabled, VersionsPinned: allPinned(p.Plans, o.PinVersions)})
+	}
+	if err == nil && !o.DryRun && p.Config.Release.GitHub.Enabled {
+		err = checkGitHubAuth(o)
 	}
 	if err != nil {
 		return err
@@ -900,15 +903,27 @@ func preflightRelease(o Options, p *Prepared) error {
 	if o.DryRun {
 		return nil
 	}
+	if !o.Snapshot {
+		if err := checkSecrets(p.Plans); err != nil {
+			return err
+		}
+	}
 	ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && len(o.Only) == 0 && p.Config.Release.GitHub.Enabled
+	pinned := allPinned(p.Plans, o.PinVersions)
 	// --no-push builds only; none of the push-dependent tools are required.
-	opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease}
+	opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease, VersionsPinned: pinned}
 	if len(o.SplitPlatforms) > 0 {
 		// A split leg needs only the build toolchain — the merge run
 		// carries the sign/scan/sbom/publish requirements.
-		opts = preflight.Opts{}
+		opts = preflight.Opts{VersionsPinned: pinned}
 	}
-	return checkTools(o.context(), p.Config, opts)
+	if err := checkTools(o.context(), p.Config, opts); err != nil {
+		return err
+	}
+	if ghRelease {
+		return checkGitHubAuth(o)
+	}
+	return nil
 }
 
 // buildGroups builds each group, up to o.Parallel groups at a time, recording
@@ -1675,9 +1690,10 @@ func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, er
 	}
 
 	vcfg := cfg.Versioning
-	// Per-image registry mode with the anchor image pinned: the pin is the
-	// release version — no registry read needed at all.
-	if isRegistryStrategy(vcfg.Strategy) && vcfg.Repo == "" && first != nil {
+	// Registry versioning with the anchor image pinned: the pin is the
+	// release version — no registry read needed at all. Under a pinned
+	// versioning.repo every image shares one version, so the pins agree.
+	if isRegistryStrategy(vcfg.Strategy) && first != nil {
 		if pin, ok := o.PinVersions[first.ID]; ok {
 			return pin, nil
 		}
