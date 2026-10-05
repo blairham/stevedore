@@ -21,7 +21,11 @@ images:
       - "{{ .Version }}"
       - "{{ .ShortCommit }}"
       # Floating: publishes only on the default branch of a real release, so a
-      # feature branch or a --snapshot can never move what production pulls.
+      # feature branch, a --snapshot or a release candidate (v1.1.0-rc.1) can
+      # never move what production pulls. 1.0 and 1 follow the newest patch
+      # and minor.
+      - "{{ .Major }}.{{ .Minor }}"
+      - "{{ .Major }}"
       - "latest"
     build_args:
       - "VERSION={{ .Version }}"

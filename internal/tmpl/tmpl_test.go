@@ -136,3 +136,75 @@ func TestNewContextDetachedHEAD(t *testing.T) {
 		t.Error("IsDefault = true with no branch refs to go on")
 	}
 }
+
+func TestSemverParts(t *testing.T) {
+	ctx := testCtx().WithVersion("1.3.0-rc.1")
+	got, err := Render("{{ .Major }}|{{ .Minor }}|{{ .Patch }}|{{ .Prerelease }}|{{ .IsPrerelease }}", ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "1|3|0|rc.1|true"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	got, err = Render("{{ .Major }}.{{ .Minor }}|{{ .Prerelease }}|{{ .IsPrerelease }}", testCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "1.2||false"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A version that is not semver has no MAJOR to take: asking is an error, not
+// a silent "0" — but IsPrerelease stays usable in a condition.
+func TestSemverPartsOfNonSemver(t *testing.T) {
+	ctx := testCtx().WithVersion("2024.10")
+	if _, err := Render("{{ .Major }}", ctx); err == nil {
+		t.Error("{{ .Major }} of 2024.10 rendered; want an error")
+	}
+	if got, err := Render("{{ if .IsPrerelease }}pre{{ else }}rel{{ end }}", ctx); err != nil || got != "rel" {
+		t.Errorf("IsPrerelease of 2024.10 = %q, %v", got, err)
+	}
+}
+
+func TestFields(t *testing.T) {
+	cases := map[string][]string{
+		"latest":                                 nil,
+		"{{ .Major }}":                           {"Major"},
+		"v{{ .Major }}.{{ .Minor }}":             {"Major", "Minor"},
+		"{{ $.Patch }}":                          {"Patch"},
+		"{{ .Env.FOO }}":                         {"Env"},
+		"{{ lower .Branch }}-{{ .ShortCommit }}": {"Branch", "ShortCommit"},
+		"{{ if .IsPrerelease }}{{ .Version }}{{ else }}{{ .Major }}{{ end }}": {"IsPrerelease", "Version", "Major"},
+		"{{ with .Tag }}{{ . }}{{ end }}":                                     {"Tag"},
+	}
+	for src, want := range cases {
+		got, err := Fields(src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		if len(got) != len(want) {
+			t.Errorf("Fields(%q) = %v, want %v", src, got, want)
+			continue
+		}
+		for _, f := range want {
+			if !got[f] {
+				t.Errorf("Fields(%q) = %v, missing %s", src, got, f)
+			}
+		}
+	}
+}
+
+// A snapshot version is a build after a release, not a prerelease of one: the
+// parts come from its base, and IsPrerelease is false.
+func TestSemverPartsOfSnapshot(t *testing.T) {
+	for v, want := range map[string]string{
+		"1.4.0-SNAPSHOT-9f8e7d6":            "1.4.0||false",
+		"1.5.0-rc.1-SNAPSHOT-9f8e7d6-dirty": "1.5.0|rc.1|false",
+	} {
+		got, err := Render("{{ .Major }}.{{ .Minor }}.{{ .Patch }}|{{ .Prerelease }}|{{ .IsPrerelease }}", testCtx().WithVersion(v))
+		if err != nil || got != want {
+			t.Errorf("%s: got %q, %v; want %q", v, got, err, want)
+		}
+	}
+}

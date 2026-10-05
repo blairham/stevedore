@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"text/template/parse"
 	"time"
 
 	"github.com/blairham/stevedore/internal/gitinfo"
+	"github.com/blairham/stevedore/internal/semver"
 )
 
 // Context is the data available to templates in the config (tags, labels,
@@ -61,6 +63,131 @@ func (c *Context) WithVersion(version string) *Context {
 	clone := *c
 	clone.Version = version
 	return &clone
+}
+
+// The semver parts of Version are methods rather than fields so they can never
+// drift from it (WithVersion, and contexts built by hand, need not set them)
+// and so a template asking for one of a version that is not semver fails
+// instead of rendering "0".
+
+// Major is the MAJOR part of Version ("1" for 1.2.3).
+func (c *Context) Major() (int, error) {
+	v, err := c.semver()
+	return v.Major, err
+}
+
+// Minor is the MINOR part of Version ("2" for 1.2.3).
+func (c *Context) Minor() (int, error) {
+	v, err := c.semver()
+	return v.Minor, err
+}
+
+// Patch is the PATCH part of Version ("3" for 1.2.3).
+func (c *Context) Patch() (int, error) {
+	v, err := c.semver()
+	return v.Patch, err
+}
+
+// Prerelease is the prerelease part of Version without its "-" ("rc.1" for
+// 1.3.0-rc.1), or "" for a release.
+func (c *Context) Prerelease() (string, error) {
+	v, err := c.semver()
+	return v.Prerelease(), err
+}
+
+// IsPrerelease reports whether Version names a prerelease ("1.3.0-rc.1"). A
+// snapshot version is never one — "1.4.0-SNAPSHOT-9f8e7d6" is a build after
+// a release, not a release candidate; .IsSnapshot says that — and neither is
+// a version that is not semver at all (a static "2024.10"). Asking is never an
+// error, so it is safe in an {{ if }}.
+func (c *Context) IsPrerelease() bool {
+	if _, snap := gitinfo.IsSnapshotVersion(c.Version); snap {
+		return false
+	}
+	v, ok := semver.Parse(c.Version)
+	return ok && v.IsPrerelease()
+}
+
+// semver parses Version. A snapshot version is read as the version it was
+// built on: its "-SNAPSHOT-<sha>" suffix is stevedore's, not a prerelease the
+// user chose, so {{ .Prerelease }} of 1.4.0-SNAPSHOT-9f8e7d6 is empty.
+func (c *Context) semver() (semver.Version, error) {
+	s := c.Version
+	if base, snap := gitinfo.IsSnapshotVersion(s); snap {
+		s = base
+	}
+	v, ok := semver.Parse(s)
+	if !ok {
+		return semver.Version{}, fmt.Errorf("version %q is not a semantic version (MAJOR.MINOR.PATCH)", c.Version)
+	}
+	return v, nil
+}
+
+// Fields returns the top-level context fields (and methods) a template refers
+// to — "Major" for {{ .Major }} or {{ $.Major }}, "Env" for {{ .Env.HOME }}.
+// A field reached inside {{ with }} or {{ range }} is reported too, since dot
+// is not tracked; that only ever over-reports.
+func Fields(s string) (map[string]bool, error) {
+	t, err := template.New("stevedore").Funcs(funcs).Parse(s)
+	if err != nil {
+		return nil, fmt.Errorf("parse template %q: %w", s, err)
+	}
+	found := map[string]bool{}
+	if t.Tree != nil {
+		walkFields(t.Root, found)
+	}
+	return found, nil
+}
+
+func walkFields(n parse.Node, found map[string]bool) {
+	switch n := n.(type) {
+	case *parse.FieldNode:
+		found[n.Ident[0]] = true
+	case *parse.VariableNode:
+		// $.Major: the root variable, then a field path.
+		if len(n.Ident) > 1 && n.Ident[0] == "$" {
+			found[n.Ident[1]] = true
+		}
+	default:
+		for _, c := range children(n) {
+			walkFields(c, found)
+		}
+	}
+}
+
+// children lists the nodes under n that can hold a field reference.
+func children(n parse.Node) []parse.Node {
+	switch n := n.(type) {
+	case *parse.ListNode:
+		if n != nil {
+			return n.Nodes
+		}
+	case *parse.ActionNode:
+		return []parse.Node{n.Pipe}
+	case *parse.PipeNode:
+		if n != nil {
+			out := make([]parse.Node, len(n.Cmds))
+			for i, c := range n.Cmds {
+				out[i] = c
+			}
+			return out
+		}
+	case *parse.CommandNode:
+		return n.Args
+	case *parse.ChainNode:
+		return []parse.Node{n.Node}
+	case *parse.IfNode:
+		return branch(&n.BranchNode)
+	case *parse.RangeNode:
+		return branch(&n.BranchNode)
+	case *parse.WithNode:
+		return branch(&n.BranchNode)
+	}
+	return nil
+}
+
+func branch(b *parse.BranchNode) []parse.Node {
+	return []parse.Node{b.Pipe, b.List, b.ElseList}
 }
 
 var funcs = template.FuncMap{

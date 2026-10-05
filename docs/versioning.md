@@ -5,10 +5,35 @@ Where the version comes from, and how it becomes a set of published tags.
 The set of published references is the **cartesian product of `repositories` × `tags`**.
 Tags are Go templates rendered against git state (see [Template context](configuration.md#template-context)).
 
-**Floating tags** — `latest` or anything ending in `-latest` — are treated specially:
-they only publish on the **default branch** of a **non-snapshot** release. This means
-`latest` never accidentally moves from a feature branch or a snapshot build, while
-immutable tags like the version and commit SHA always publish.
+**Floating tags** are pointers that move from release to release. A tag is floating
+when it is:
+
+- named like one — `latest`, or anything ending in `-latest`;
+- built from `{{ .Major }}` or `{{ .Minor }}` without anything that pins one release —
+  `{{ .Major }}`, `v{{ .Major }}.{{ .Minor }}`, `{{ .Major }}-alpine` are floating;
+  `{{ .Major }}.{{ .Minor }}.{{ .Patch }}` or `{{ .Major }}-{{ .ShortCommit }}` are not
+  (the pinning fields are `.Patch`, `.Prerelease`, `.Version`, `.Tag`, `.LatestTag`,
+  `.Commit`, `.ShortCommit`, `.Date`, `.Timestamp`);
+- or spelled as the version's own major or major.minor however it was produced
+  (`1`, `v1.4` for `1.4.2`).
+
+Floating tags only publish on the **default branch** of a **non-snapshot**, **non-prerelease**
+release, and they are applied last. So `latest` never accidentally moves from a feature
+branch or a snapshot build, a release candidate (`v1.5.0-rc.1`) never moves `latest`,
+`1` or `1.5`, while immutable tags like the version and commit SHA always publish. Set
+`prerelease_floating_tags: true` to let a prerelease move them anyway. A prerelease
+also marks the GitHub release as a prerelease unless `release.github.prerelease` says
+otherwise.
+
+The equivalent of docker/metadata-action's `type=semver` set:
+
+```yaml
+tags:
+  - "{{ .Version }}"                 # 1.4.2       (pattern={{version}})
+  - "{{ .Major }}.{{ .Minor }}"      # 1.4         (pattern={{major}}.{{minor}})
+  - "{{ .Major }}"                   # 1           (pattern={{major}})
+  - "latest"
+```
 
 **Re-releasing a commit.** A tag that contains the commit SHA (`{{ .ShortCommit }}`,
 `{{ .Commit }}`, `main-{{ .ShortCommit }}`, …) names exactly one build of one

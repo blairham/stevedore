@@ -38,6 +38,12 @@ type Config struct {
 	// cut from. Defaults to "main".
 	DefaultBranch string `yaml:"default_branch"`
 
+	// PrereleaseFloatingTags lets floating tags ("latest", "*-latest", and
+	// major / major.minor tags) publish when the release version is a semver
+	// prerelease ("1.3.0-rc.1"). By default they are withheld, so a release
+	// candidate never moves "latest" or "1".
+	PrereleaseFloatingTags bool `yaml:"prerelease_floating_tags"`
+
 	// Dist is the output directory for generated artifacts (SBOMs, changelog).
 	Dist string `yaml:"dist"`
 
@@ -101,9 +107,12 @@ type Release struct {
 // GitHubRelease configures creating a GitHub release (via the gh CLI) with the
 // changelog as the body. Runs only on a real (non-snapshot) release.
 type GitHubRelease struct {
-	Enabled    bool `yaml:"enabled"`
-	Draft      bool `yaml:"draft"`
-	Prerelease bool `yaml:"prerelease"`
+	Enabled bool `yaml:"enabled"`
+	Draft   bool `yaml:"draft"`
+	// Prerelease marks the GitHub release as a prerelease. Unset, it follows
+	// the version: a semver prerelease ("1.3.0-rc.1") is marked, a release is
+	// not. true or false forces it either way.
+	Prerelease *bool `yaml:"prerelease"`
 }
 
 // Announce configures release notifications to chat webhooks.

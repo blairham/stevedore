@@ -10,6 +10,8 @@ version: 1
 
 project_name: myapp
 default_branch: main      # branch real releases must be cut from; floating tags publish only here
+prerelease_floating_tags: false   # let a prerelease (1.3.0-rc.1) move floating
+                          # tags too; by default it publishes only immutable ones
 dist: dist                # output dir for SBOMs and the changelog
 
 images:
@@ -26,6 +28,8 @@ images:
     tags:                 # Go templates; floating tags gated to default branch
       - "{{ .Version }}"
       - "{{ .ShortCommit }}"
+      - "{{ .Major }}.{{ .Minor }}"   # floating: 1.4 follows the newest 1.4.x
+      - "{{ .Major }}"                # floating: 1 follows the newest 1.x.y
       - "latest"
     build_args:
       - "VERSION={{ .Version }}"
@@ -124,7 +128,8 @@ release:
   github:
     enabled: true         # create a GitHub release (via gh) with the changelog
     draft: false
-    prerelease: false
+    # prerelease: true    # unset (default): marked a prerelease exactly when the
+                          # version is one (1.3.0-rc.1); true/false force it
 
 announce:
   slack:
@@ -212,6 +217,9 @@ undefined field is an error (no silent empty strings). Available fields:
 |-------|---------|
 | `.ProjectName` | `myapp` |
 | `.Version` | `1.4.0` |
+| `.Major` / `.Minor` / `.Patch` | `1` / `4` / `0` — the parts of `.Version`; an error when the version is not semver |
+| `.Prerelease` | `rc.1` for `1.5.0-rc.1`; empty for a release. A snapshot version is read as its base, so `.Major`…`.Prerelease` of `1.4.0-SNAPSHOT-9f8e7d6` are those of `1.4.0` |
+| `.IsPrerelease` | `true` when `.Version` is a semver prerelease. `false` for a snapshot (`1.5.0-SNAPSHOT-9f8e7d6` is a build after a release, not a candidate; see `.IsSnapshot`) and, never an error, for a non-semver version |
 | `.Tag` | `v1.4.0` — the tag on HEAD; empty on an untagged commit |
 | `.LatestTag` | `v1.4.0` — the most recent tag reachable from HEAD (`.Tag` when HEAD is tagged) |
 | `.Commit` | full SHA |

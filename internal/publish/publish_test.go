@@ -97,14 +97,14 @@ func TestAnnounceDisabledIsNoop(t *testing.T) {
 }
 
 func TestGitHubReleaseNeedsTag(t *testing.T) {
-	err := GitHubRelease(&run.Runner{DryRun: true}, config.GitHubRelease{Enabled: true}, "", "", "title", "notes.md", nil)
+	err := GitHubRelease(&run.Runner{DryRun: true}, config.GitHubRelease{Enabled: true}, "", "", "title", "notes.md", false, nil)
 	if err == nil {
 		t.Error("expected error when tag is empty")
 	}
 }
 
 func TestGitHubReleaseDisabledIsNoop(t *testing.T) {
-	if err := GitHubRelease(&run.Runner{}, config.GitHubRelease{}, "", "", "", "", nil); err != nil {
+	if err := GitHubRelease(&run.Runner{}, config.GitHubRelease{}, "", "", "", "", false, nil); err != nil {
 		t.Errorf("disabled github release should be a no-op, got %v", err)
 	}
 }
@@ -173,5 +173,37 @@ func TestWebhookTransportErrorIsRedacted(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "SECRET") {
 		t.Errorf("error leaks the webhook URL: %v", err)
+	}
+}
+
+// release.github.prerelease unset follows the version; set, it wins.
+func TestGitHubReleasePrereleaseFollowsVersion(t *testing.T) {
+	yes, no := true, false
+	cases := []struct {
+		name       string
+		cfg        *bool
+		prerelease bool
+		want       bool
+	}{
+		{"unset, release", nil, false, false},
+		{"unset, prerelease", nil, true, true},
+		{"forced on", &yes, false, true},
+		{"forced off", &no, true, false},
+	}
+	for _, c := range cases {
+		f, err := os.CreateTemp(t.TempDir(), "stderr")
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := &run.Runner{DryRun: true, Stderr: f}
+		cfg := config.GitHubRelease{Enabled: true, Prerelease: c.cfg}
+		if err := GitHubRelease(r, cfg, "v1.3.0-rc.1", "", "t", "notes.md", c.prerelease, nil); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		f.Close()
+		out, _ := os.ReadFile(f.Name())
+		if got := strings.Contains(string(out), "--prerelease"); got != c.want {
+			t.Errorf("%s: --prerelease passed = %v, want %v\n%s", c.name, got, c.want, out)
+		}
 	}
 }
