@@ -216,6 +216,28 @@ jobs:
           install-stevedore: "false"
           command: check
           install-crane: "false"
+      # The download path, which the step above skips: the action fetches the
+      # newest release, verifies its checksums.txt signature against the
+      # release workflow identity, and checks the archive against it. `help`
+      # needs no config, so a config field newer than that release cannot
+      # fail this for an unrelated reason.
+      - name: Install a release via the action (verified download)
+        if: needs.changes.outputs.code == 'true'
+        uses: ./
+        with:
+          command: help
+          install-cosign: "false" # installed anyway: the download needs it
+          setup-buildx: "false"
+          install-syft: "false"
+          install-grype: "false"
+      - name: The verified release is what is on PATH
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          set -euo pipefail
+          got=$(command -v stevedore)
+          echo "stevedore on PATH: $got"
+          test "$got" = "$RUNNER_TEMP/stevedore-bin/stevedore"
+          command -v cosign
 
   examples:
     # The examples are documentation people copy, so they are checked like code:

@@ -62,6 +62,13 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # cosign comes first: the stevedore download is verified with it, so it is
+    # installed whenever the action installs stevedore, even with
+    # install-cosign: false.
+    - name: Install cosign
+      if: ${{ inputs.install-cosign == 'true' || inputs.install-stevedore == 'true' }}
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
     - name: Install stevedore
       if: ${{ inputs.install-stevedore == 'true' }}
       shell: bash
@@ -71,6 +78,7 @@ runs:
         SD_ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
+        repo=blairham/stevedore
         os=$(uname -s)          # Linux | Darwin (matches the release asset naming)
         arch=$(uname -m)        # x86_64 | aarch64 | arm64
         case "$arch" in aarch64) arch=arm64 ;; esac
@@ -82,32 +90,65 @@ runs:
           # the action and the binary it drives are one contract. Resolve
           # "latest" inside the action's own major line, falling back to the
           # newest release overall when that lookup finds nothing.
-          tag=$(gh release list --repo blairham/stevedore --limit 100 \
+          tag=$(gh release list --repo "$repo" --limit 100 \
                   --exclude-drafts --exclude-pre-releases --json tagName \
                   --jq "[.[].tagName | select(startswith(\"v${BASH_REMATCH[1]}.\"))] | first // empty" \
                 2>/dev/null || true)
         fi
+        # The signature check below pins the tag in the signer's identity, so
+        # "newest" is resolved to a name first rather than left to `gh`.
+        if [ -z "$tag" ]; then
+          tag=$(gh release view --repo "$repo" --json tagName --jq .tagName)
+        fi
         dest="${RUNNER_TEMP:-/tmp}/stevedore-bin"
+        rm -rf "$dest"
         mkdir -p "$dest"
-        # $tag is deliberately unquoted: empty must disappear from the
-        # argument list entirely (that is how `gh` is asked for the newest
-        # release), where "" would be rejected as a bad tag.
-        # shellcheck disable=SC2086
-        gh release download $tag --repo blairham/stevedore \
-          --pattern "stevedore_*_${os}_${arch}.tar.gz" \
-          --output "$dest/stevedore.tar.gz" --clobber
-        tar -xzf "$dest/stevedore.tar.gz" -C "$dest" stevedore
-        chmod +x "$dest/stevedore"
+        cd "$dest"
+        archive="stevedore_${tag#v}_${os}_${arch}.tar.gz"
+        gh release download "$tag" --repo "$repo" \
+          --pattern "$archive" --pattern checksums.txt --pattern checksums.txt.sigstore.json
+        for f in "$archive" checksums.txt checksums.txt.sigstore.json; do
+          if [ ! -s "$f" ]; then
+            echo "::error::release $tag has no $f; the action only installs releases with a signed checksums.txt (v1.0.2 and later)"
+            exit 1
+          fi
+        done
+
+        # 1. checksums.txt was signed by this repository's release workflow,
+        #    for this tag. A release re-run by hand is signed from the branch
+        #    it was dispatched from, so main is accepted too (see SECURITY.md).
+        tag_re=$(printf '%s' "$tag" | sed 's/[][\.*^$+?(){}|/]/\\&/g')
+        cosign verify-blob \
+          --certificate-identity-regexp "^https://github\\.com/blairham/stevedore/\\.github/workflows/release\\.yml@refs/(tags/${tag_re}|heads/main)\$" \
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          --bundle checksums.txt.sigstore.json checksums.txt
+
+        # 2. The archive is the one checksums.txt lists. Exactly one line must
+        #    name it: `--ignore-missing` would pass an archive it never saw.
+        want=$(awk -v n="$archive" '$2 == n || $2 == "*" n { print $1 }' checksums.txt)
+        if [ "$(printf '%s\n' "$want" | grep -c .)" -ne 1 ]; then
+          echo "::error::checksums.txt does not list $archive exactly once"
+          exit 1
+        fi
+        if command -v sha256sum >/dev/null; then
+          got=$(sha256sum "$archive" | cut -d' ' -f1)
+        else
+          got=$(shasum -a 256 "$archive" | cut -d' ' -f1)
+        fi
+        if [ "$got" != "$want" ]; then
+          echo "::error::$archive sha256 $got does not match checksums.txt ($want)"
+          exit 1
+        fi
+        echo "verified $archive ($got) against the signed checksums.txt of $tag"
+
+        tar -xzf "$archive" stevedore
+        chmod +x stevedore
         echo "$dest" >> "$GITHUB_PATH"
-        "$dest/stevedore" --version
+        ./stevedore --version
 
     - name: Set up buildx
       if: ${{ inputs.setup-buildx == 'true' }}
       uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-    - name: Install cosign
-      if: ${{ inputs.install-cosign == 'true' }}
-      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
     - name: Install syft
       if: ${{ inputs.install-syft == 'true' }}
