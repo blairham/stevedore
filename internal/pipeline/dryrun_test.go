@@ -128,7 +128,8 @@ func TestDryRunWritesNothing(t *testing.T) {
 		if s := strings.TrimSpace(string(out)); s != "" {
 			t.Errorf("snapshot=%v: dry run left the tree dirty:\n%s", snapshot, s)
 		}
-		for _, f := range []string{stepSummary, output} {
+		// git status cannot see an empty directory.
+		for _, f := range []string{stepSummary, output, filepath.Join(dir, "dist")} {
 			if _, err := os.Stat(f); err == nil {
 				t.Errorf("snapshot=%v: dry run wrote %s", snapshot, f)
 			}
