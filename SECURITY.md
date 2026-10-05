@@ -98,6 +98,10 @@ A release re-run by hand (the workflow's `workflow_dispatch` input) is signed
 by the ref it was dispatched from, usually `refs/heads/main`, rather than by
 the tag, so use `@refs/heads/main` in `--certificate-identity` for that release.
 
+The GitHub Action runs exactly these two checks on the archive it installs,
+accepting either the tag or `main` as the signing ref, and fails rather than
+running a binary it could not verify.
+
 The macOS builds are additionally Developer ID signed and notarized.
 
 **Build provenance.** From `v1.0.7`, every archive carries SLSA build
