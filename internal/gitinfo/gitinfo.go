@@ -5,10 +5,12 @@
 package gitinfo
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -18,11 +20,13 @@ type Info struct {
 	// checkout with a tag on HEAD this is the tag minus "v"; otherwise a
 	// snapshot version based on LatestTag.
 	Version string
-	// Tag is the tag pointing exactly at HEAD, or empty when HEAD is untagged.
+	// Tag is the version tag pointing exactly at HEAD (the highest, when
+	// there are several), or empty when HEAD has none. Tags that are not
+	// semantic versions ("deploy-prod") are ignored.
 	// It is the only tag a release may be named after: a tag further back
 	// names a release that was already cut from a different commit.
 	Tag string
-	// LatestTag is the most recent tag reachable from HEAD — Tag when HEAD is
+	// LatestTag is the most recent version tag reachable from HEAD — Tag when HEAD is
 	// tagged, otherwise the last release before it (may be empty). It seeds
 	// snapshot versions and the changelog range, never a release name.
 	LatestTag string
@@ -67,24 +71,190 @@ func Gather(ctx context.Context, dir string) (*Info, error) {
 	// The exact tag on HEAD and the latest reachable tag are kept apart: only
 	// the former may become a clean release version. Collapsing them released
 	// an untagged commit under the previous release's version.
-	if tag, err := run(ctx, dir, "describe", "--tags", "--exact-match"); err == nil {
-		info.Tag = tag
-	}
-	if tag, err := run(ctx, dir, "describe", "--tags", "--abbrev=0"); err == nil {
-		info.LatestTag = tag
-	}
+	//
+	// Only version tags count. A commit often carries other tags too (a
+	// lightweight "deploy-prod" marker), and git's own choice among several
+	// tags on one commit is alphabetical, which made such a marker the
+	// release version.
+	info.Tag = highestVersionTagAt(ctx, dir, "HEAD")
+	info.LatestTag = nearestVersionTag(ctx, dir, "HEAD")
 
 	switch {
 	case info.Tag != "":
-		if prev, err := run(ctx, dir, "describe", "--tags", "--abbrev=0", info.Tag+"^"); err == nil {
-			info.PreviousTag = prev
-		}
+		info.PreviousTag = nearestVersionTag(ctx, dir, "HEAD^")
 	default:
 		info.PreviousTag = info.LatestTag
 	}
 
 	info.Version = deriveVersion(info)
 	return info, nil
+}
+
+// highestVersionTagAt returns the highest-precedence version tag pointing at
+// rev, or "" when rev carries none.
+func highestVersionTagAt(ctx context.Context, dir, rev string) string {
+	out, err := run(ctx, dir, "tag", "--points-at", rev)
+	if err != nil {
+		return ""
+	}
+	best := ""
+	var bestV version
+	for _, tag := range strings.Split(out, "\n") {
+		v, ok := parseVersion(tag)
+		if !ok {
+			continue
+		}
+		// Equal precedence (v1.0.0 vs 1.0.0, or differing build metadata)
+		// falls back to the name, so the choice never depends on git's order.
+		if c := v.compare(bestV); best == "" || c > 0 || (c == 0 && tag > best) {
+			best, bestV = tag, v
+		}
+	}
+	return best
+}
+
+// nearestVersionTag returns the version tag on the nearest commit reachable
+// from rev that carries one (the highest, when it carries several), or "".
+//
+// The --match globs narrow describe to tags that start like a version; a tag
+// that passes them but is not one ("v2-legacy") is excluded and describe asked
+// again, so it cannot hide an older real version behind it.
+func nearestVersionTag(ctx context.Context, dir, rev string) string {
+	args := []string{"describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--match", "[0-9]*"}
+	for range maxDescribeRetries {
+		tag, err := run(ctx, dir, append(args, rev)...)
+		if err != nil {
+			return ""
+		}
+		if _, ok := parseVersion(tag); ok {
+			if best := highestVersionTagAt(ctx, dir, tag+"^{commit}"); best != "" {
+				return best
+			}
+			return tag
+		}
+		args = append(args, "--exclude", tag)
+	}
+	return ""
+}
+
+// maxDescribeRetries bounds how many version-looking non-version tags
+// nearestVersionTag will step past.
+const maxDescribeRetries = 64
+
+// version is a parsed semantic version: MAJOR.MINOR.PATCH with an optional
+// prerelease. Build metadata is accepted and, per semver, ignored for
+// precedence.
+type version struct {
+	core [3]int
+	pre  []string
+}
+
+// parseVersion accepts a semantic version with an optional leading "v"
+// ("v1.2.3", "1.2.3-rc.1", "v1.2.3+build.5") and rejects everything else.
+func parseVersion(tag string) (version, bool) {
+	s := strings.TrimPrefix(tag, "v")
+	if i := strings.IndexByte(s, '+'); i >= 0 {
+		if !validIdents(s[i+1:], false) {
+			return version{}, false
+		}
+		s = s[:i]
+	}
+	var v version
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		if !validIdents(s[i+1:], true) {
+			return version{}, false
+		}
+		v.pre = strings.Split(s[i+1:], ".")
+		s = s[:i]
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return version{}, false
+	}
+	for i, p := range parts {
+		if !isNumeric(p) || (len(p) > 1 && p[0] == '0') {
+			return version{}, false
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return version{}, false
+		}
+		v.core[i] = n
+	}
+	return v, true
+}
+
+// validIdents checks dot-separated semver identifiers: non-empty, [0-9A-Za-z-],
+// and (for prerelease) no leading zero on a numeric identifier.
+func validIdents(s string, prerelease bool) bool {
+	for _, id := range strings.Split(s, ".") {
+		if id == "" {
+			return false
+		}
+		for _, c := range id {
+			if (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && c != '-' {
+				return false
+			}
+		}
+		if prerelease && isNumeric(id) && len(id) > 1 && id[0] == '0' {
+			return false
+		}
+	}
+	return true
+}
+
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// compare orders versions by semver precedence: -1, 0, or 1.
+func (v version) compare(o version) int {
+	for i := range v.core {
+		if c := cmp.Compare(v.core[i], o.core[i]); c != 0 {
+			return c
+		}
+	}
+	// A release outranks any prerelease of the same core version.
+	switch {
+	case len(v.pre) == 0 && len(o.pre) == 0:
+		return 0
+	case len(v.pre) == 0:
+		return 1
+	case len(o.pre) == 0:
+		return -1
+	}
+	for i := 0; i < len(v.pre) && i < len(o.pre); i++ {
+		a, b := v.pre[i], o.pre[i]
+		an, bn := isNumeric(a), isNumeric(b)
+		var c int
+		switch {
+		case an && bn:
+			// Compare numerically without overflow: longer is larger, as
+			// neither has leading zeros.
+			c = cmp.Compare(len(a), len(b))
+			if c == 0 {
+				c = strings.Compare(a, b)
+			}
+		case an:
+			c = -1
+		case bn:
+			c = 1
+		default:
+			c = strings.Compare(a, b)
+		}
+		if c != 0 {
+			return c
+		}
+	}
+	return cmp.Compare(len(v.pre), len(o.pre))
 }
 
 // branchesContaining lists the branches that contain HEAD. A tag-triggered CI

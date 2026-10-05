@@ -20,7 +20,7 @@ default is `git`; the others let you avoid relying on git tags entirely.
 
 | Strategy | Where the version comes from |
 |----------|------------------------------|
-| `git` (default) | Git tags. Clean checkout with a tag **on HEAD** → the tag with any leading `v` stripped (`v1.4.0` → `1.4.0`). Otherwise — HEAD untagged, dirty tree, or `--snapshot` — a snapshot of the latest reachable tag like `1.4.0-SNAPSHOT-9f8e7d6` (`-dirty` if the tree is dirty; `0.0.0-SNAPSHOT-…` with no tags at all). |
+| `git` (default) | Git tags. Clean checkout with a version tag **on HEAD** → the tag with any leading `v` stripped (`v1.4.0` → `1.4.0`; the highest wins when HEAD has several). Only semver tags count, with or without the `v` (`v1.4.0`, `1.4.0`, `v2.0.0-rc.1`); others such as `deploy-prod` are ignored here and for the latest/previous tag. Otherwise — HEAD untagged, dirty tree, or `--snapshot` — a snapshot of the latest reachable tag like `1.4.0-SNAPSHOT-9f8e7d6` (`-dirty` if the tree is dirty; `0.0.0-SNAPSHOT-…` with no tags at all). |
 | `registry` | Lists the existing tags in a registry repo (via `crane`), takes the highest semver, and bumps it by `patch`/`minor`/`major`. Non-semver tags (`latest`, commit SHAs) are ignored. |
 | `ecr` | Like `registry`, but lists tags via `aws ecr describe-images` using your AWS credentials directly — no `crane` or docker credential helper. Region is inferred from the ECR host (override with `region:`). |
 | `static` | An explicit `value:`. |
