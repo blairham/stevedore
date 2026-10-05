@@ -522,50 +522,113 @@ func Release(o Options) error {
 
 // finishRelease is everything after the builds: it records the new
 // fingerprints, advances the release markers, notifies, writes the changelog,
-// publishes and emits the summary. A marker that cannot advance does not stop
-// the rest; it is reported once the release is otherwise done.
+// publishes and emits the summary. The images are already out by now, so a
+// stage that fails does not stop the ones after it: every stage runs, the
+// summary is always written, and the failures are reported together at the
+// end.
 func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result, fpPath string, state fingerprint.State, depDiffSections []string) error {
+	var errs []error
 	if recordsFingerprints(o) {
 		if err := state.Save(fpPath); err != nil {
-			return fmt.Errorf("save fingerprint state: %w", err)
+			errs = append(errs, fmt.Errorf("save fingerprint state: %w", err))
 		}
 	}
 
 	markerErrs := advanceMarkers(o, p, result.Images)
 
 	if err := notifyWebhook(o, p, r, result.Images); err != nil {
-		return err
+		errs = append(errs, err)
 	}
 
 	changelogPath, err := writeChangelog(o, p, depDiffSections)
 	if err != nil {
-		return err
-	}
-
-	// Publishing (GitHub release + announce) runs only for real releases, and
-	// only when this run built something: a run whose every image was skipped
-	// released no version, so there is nothing to name a release after.
-	if !o.NoPush && !o.Snapshot && !o.SkipPublish {
-		if refs := builtRefs(result.Images); len(refs) == 0 {
-			fmt.Fprintln(progress, "==> nothing was built; no GitHub release or announcement")
-		} else if err := publishRelease(r, p, changelogPath, refs); err != nil {
-			return err
-		}
+		errs = append(errs, err)
+	} else if err := publishStage(o, p, r, changelogPath, result.Images); err != nil {
+		errs = append(errs, err)
 	}
 
 	if err := emitSummary(o, p, result); err != nil {
-		return err
+		errs = append(errs, err)
 	}
 
 	if len(markerErrs) > 0 {
-		return fmt.Errorf("images published, but %d release marker(s) could not advance: %w",
-			len(markerErrs), errors.Join(markerErrs...))
+		errs = append(errs, fmt.Errorf("images published, but %d release marker(s) could not advance: %w",
+			len(markerErrs), errors.Join(markerErrs...)))
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
 	}
 	if len(o.SplitPlatforms) > 0 {
 		fmt.Fprintln(progress, "==> split build complete — assemble with `stevedore merge`")
 	} else {
 		fmt.Fprintln(progress, "==> release complete")
 	}
+	return nil
+}
+
+// publishStage creates the GitHub release and posts the announcements, for a
+// real release that built something: a run whose every image was skipped
+// released no version, so there is nothing to name a release after.
+//
+// An --only run never publishes. --only is matrix mode, one job per plan
+// entry, and every job publishing would create the same GitHub release N
+// times (or N releases named after N image versions) and announce N times;
+// like a split leg, a matrix job leaves that to one final step, `stevedore
+// publish`.
+func publishStage(o Options, p *Prepared, r *run.Runner, changelogPath string, images []summary.Image) error {
+	if o.NoPush || o.Snapshot || o.SkipPublish {
+		return nil
+	}
+	if len(o.Only) > 0 {
+		if p.Config.Release.GitHub.Enabled || p.Config.Announce.Slack.Enabled || p.Config.Announce.Discord.Enabled {
+			fmt.Fprintln(progress, "==> --only: no GitHub release or announcement from a matrix job; run `stevedore publish` once after the matrix")
+		}
+		return nil
+	}
+	refs := builtRefs(images)
+	if len(refs) == 0 {
+		fmt.Fprintln(progress, "==> nothing was built; no GitHub release or announcement")
+		return nil
+	}
+	return publishRelease(r, p, changelogPath, refs)
+}
+
+// Publish is the last step of a matrix release, run once after every
+// `release --only` job has finished: it writes the changelog, creates the
+// GitHub release and posts the announcements that the matrix jobs leave out.
+// Given the --only and --pin-version of every plan entry that built, the
+// release is named after the version those jobs pushed and the announcement
+// carries their refs, rather than re-resolving a version (which, under
+// registry versioning, would now be the next one).
+func Publish(o Options) error {
+	p, err := Prepare(o)
+	if err != nil {
+		return err
+	}
+	err = guardReleasable(p.Git, p.Config.Versioning.Strategy)
+	if err == nil && !o.DryRun {
+		err = checkTools(o.context(), p.Config, preflight.Opts{GitHubRelease: p.Config.Release.GitHub.Enabled})
+	}
+	if err != nil {
+		return err
+	}
+	err = mkdirDist(filepath.Join(o.Dir, p.Config.Dist))
+	if err != nil {
+		return fmt.Errorf("create dist dir: %w", err)
+	}
+	r := run.New(o.context(), o.DryRun, o.Verbose)
+	changelogPath, err := writeChangelog(o, p, nil)
+	if err != nil {
+		return err
+	}
+	var refs []string
+	for _, plan := range p.Plans {
+		refs = append(refs, plan.Refs...)
+	}
+	if err := publishRelease(r, p, changelogPath, refs); err != nil {
+		return err
+	}
+	fmt.Fprintln(progress, "==> publish complete")
 	return nil
 }
 
@@ -664,7 +727,7 @@ func preflightRelease(o Options, p *Prepared) error {
 	if o.DryRun {
 		return nil
 	}
-	ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && p.Config.Release.GitHub.Enabled
+	ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && len(o.Only) == 0 && p.Config.Release.GitHub.Enabled
 	// --no-push builds only; none of the push-dependent tools are required.
 	opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease}
 	if len(o.SplitPlatforms) > 0 {

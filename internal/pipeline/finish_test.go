@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -134,5 +136,122 @@ func TestBuiltRefsLeavesOutSkippedImages(t *testing.T) {
 	want := []string{"r/checkout:1.0.0", "r/checkout:latest"}
 	if !slices.Equal(got, want) {
 		t.Errorf("builtRefs = %v, want %v", got, want)
+	}
+}
+
+// A matrix job (`release --only`) must not publish: N jobs would create the
+// same GitHub release N times and announce N times. Publishing is left to one
+// `stevedore publish` after the matrix.
+func TestFinishReleaseOnlyRunDoesNotPublish(t *testing.T) {
+	dir, p := finishHarness(t)
+	posts := announceServer(t, p)
+	result := summary.Result{Project: "proj", Images: []summary.Image{{ID: "checkout", Refs: []string{"r/checkout:1.0.0"}}}}
+	o := Options{Dir: dir, Only: []string{"checkout"}}
+	if err := finishRelease(o, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := posts.Load(); got != 0 {
+		t.Errorf("an --only run posted %d announcement(s), want 0", got)
+	}
+}
+
+// The images are out before publishing starts, so a failed announcement must
+// neither suppress the summary that records them nor hide a release marker
+// that could not advance.
+func TestFinishReleaseReportsEverythingWhenPublishFails(t *testing.T) {
+	dir, p := finishHarness(t)
+	// No repository above dir, so advancing the marker fails.
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("TEST_SLACK_WEBHOOK", srv.URL)
+	p.Config.Announce.Slack = config.Webhook{Enabled: true, WebhookEnv: "TEST_SLACK_WEBHOOK"}
+	p.Config.ChangeDetection.MarkerRefs = true
+	p.Config.ChangeDetection.MarkerPrefix = "refs/releases/image/"
+	result := summary.Result{Project: "proj", Images: []summary.Image{{ID: "checkout", Refs: []string{"r/checkout:1.0.0"}}}}
+
+	err := finishRelease(Options{Dir: dir}, p, quietRunner(t), result, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{}, nil)
+	if err == nil {
+		t.Fatal("want the failed announcement to fail the release")
+	}
+	for _, want := range []string{"announce slack", "release marker"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dist", "release-summary.json")); err != nil {
+		t.Errorf("summary not written after the publish failure: %v", err)
+	}
+}
+
+// `stevedore publish` is the matrix release's one publishing step: it
+// announces once and builds nothing.
+func TestPublishAnnouncesOnceAndBuildsNothing(t *testing.T) {
+	_, log, _, _, _ := gateHarness(t) // fake docker on PATH, logging every call
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t.co",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t.co",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	cfg := `version: 1
+project_name: shop
+dist: dist
+images:
+  - id: checkout
+    dockerfile: Dockerfile
+    context: .
+    platforms: [linux/amd64]
+    repositories: [ghcr.io/acme/checkout]
+    tags: ["{{ .Version }}"]
+  - id: billing
+    dockerfile: Dockerfile
+    context: .
+    platforms: [linux/amd64]
+    repositories: [ghcr.io/acme/billing]
+    tags: ["{{ .Version }}"]
+announce:
+  slack:
+    enabled: true
+    webhook_env: TEST_SLACK_WEBHOOK
+`
+	for name, body := range map[string]string{".stevedore.yaml": cfg, "Dockerfile": "FROM scratch\n", ".gitignore": "dist/\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("add", ".")
+	git("commit", "-q", "-m", "feat: shop")
+	git("tag", "v1.0.0")
+
+	var posts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		posts.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("TEST_SLACK_WEBHOOK", srv.URL)
+	t.Setenv("GITHUB_STEP_SUMMARY", "")
+	t.Setenv("GITHUB_OUTPUT", "")
+
+	o := Options{Dir: dir, ConfigPath: filepath.Join(dir, ".stevedore.yaml"), Only: []string{"checkout"}}
+	if err := Publish(o); err != nil {
+		t.Fatal(err)
+	}
+	if got := posts.Load(); got != 1 {
+		t.Errorf("publish posted %d announcement(s), want 1", got)
+	}
+	if data, err := os.ReadFile(log); err == nil && strings.Contains(string(data), "buildx build") {
+		t.Errorf("publish built an image:\n%s", data)
 	}
 }
