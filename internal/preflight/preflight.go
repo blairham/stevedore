@@ -48,6 +48,8 @@ type Opts struct {
 	Scan bool
 	// GitHubRelease is true when a GitHub release will be created.
 	GitHubRelease bool
+	// GitLabRelease is true when a GitLab release will be created.
+	GitLabRelease bool
 	// VersionsPinned is true when every image's version is pinned
 	// (--pin-version), so no registry is read to derive one.
 	VersionsPinned bool
@@ -130,6 +132,16 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 			Reason:   "create GitHub releases",
 			Install:  "brew install gh  •  https://github.com/cli/cli#installation",
 			Required: o.GitHubRelease,
+		})
+	}
+	if cfg.Release.GitLab.Enabled {
+		reqs = append(reqs, Requirement{
+			Label:    "glab",
+			Exe:      "glab",
+			Probe:    []string{subcommandVersion},
+			Reason:   "create GitLab releases",
+			Install:  "brew install glab  •  https://gitlab.com/gitlab-org/cli#installation",
+			Required: o.GitLabRelease,
 		})
 	}
 	if cfg.Versioning.Strategy == "registry" && cfg.Versioning.Lister == crane {

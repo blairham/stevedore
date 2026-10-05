@@ -797,8 +797,8 @@ func publishStage(o Options, p *Prepared, r *run.Runner, changelogPath string, i
 		return nil
 	}
 	if len(o.Only) > 0 {
-		if p.Config.Release.GitHub.Enabled || p.Config.Announce.Slack.Enabled || p.Config.Announce.Discord.Enabled {
-			fmt.Fprintln(progress, "==> --only: no GitHub release or announcement from a matrix job; run `stevedore publish` once after the matrix")
+		if p.Config.Release.AnyEnabled() || p.Config.Announce.Slack.Enabled || p.Config.Announce.Discord.Enabled {
+			fmt.Fprintln(progress, "==> --only: no release or announcement from a matrix job; run `stevedore publish` once after the matrix")
 		}
 		return nil
 	}
@@ -831,7 +831,7 @@ func Publish(o Options) error {
 		err = guardDefaultBranch(o, p.Config.DefaultBranch)
 	}
 	if err == nil && !o.DryRun {
-		err = checkTools(o.context(), p.Config, preflight.Opts{GitHubRelease: p.Config.Release.GitHub.Enabled, VersionsPinned: allPinned(p.Plans, o.PinVersions)})
+		err = checkTools(o.context(), p.Config, preflight.Opts{GitHubRelease: p.Config.Release.GitHub.Enabled, GitLabRelease: p.Config.Release.GitLab.Enabled, VersionsPinned: allPinned(p.Plans, o.PinVersions)})
 	}
 	if err == nil && !o.DryRun && p.Config.Release.GitHub.Enabled {
 		err = checkGitHubAuth(o)
@@ -970,10 +970,14 @@ func preflightRelease(o Options, p *Prepared) error {
 			return err
 		}
 	}
-	ghRelease := !o.NoPush && !o.Snapshot && !o.SkipPublish && len(o.Only) == 0 && p.Config.Release.GitHub.Enabled
+	publishes := !o.NoPush && !o.Snapshot && !o.SkipPublish && len(o.Only) == 0
+	ghRelease := publishes && p.Config.Release.GitHub.Enabled
 	pinned := allPinned(p.Plans, o.PinVersions)
 	// --no-push builds only; none of the push-dependent tools are required.
-	opts := preflight.Opts{Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan, GitHubRelease: ghRelease, VersionsPinned: pinned}
+	opts := preflight.Opts{
+		Sign: !o.NoPush && !o.SkipSign, SBOM: !o.NoPush && !o.SkipSBOM, Scan: !o.NoPush && !o.SkipScan,
+		GitHubRelease: ghRelease, GitLabRelease: publishes && p.Config.Release.GitLab.Enabled, VersionsPinned: pinned,
+	}
 	if len(o.SplitPlatforms) > 0 {
 		// A split leg needs only the build toolchain — the merge run
 		// carries the sign/scan/sbom/publish requirements.
@@ -1242,6 +1246,16 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string, refs []str
 			return err
 		}
 		fmt.Fprintf(progress, "==> GitHub release %s created\n", tag)
+	}
+	if p.Config.Release.GitLab.Enabled {
+		if changelogPath == "" {
+			return fmt.Errorf("gitlab release needs changelog notes; enable changelog or drop --skip-changelog")
+		}
+		title := fmt.Sprintf("%s %s", p.Config.ProjectName, p.Ctx.Version)
+		if err := publish.GitLabRelease(r, p.Config.Release.GitLab, tag, p.Git.Commit, title, changelogPath, nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(progress, "==> GitLab release %s created\n", tag)
 	}
 
 	if p.Config.Announce.Slack.Enabled || p.Config.Announce.Discord.Enabled {

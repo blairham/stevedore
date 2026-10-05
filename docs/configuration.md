@@ -153,6 +153,9 @@ release:
     draft: false
     # prerelease: true    # unset (default): marked a prerelease exactly when the
                           # version is one (1.3.0-rc.1); true/false force it
+  gitlab:
+    enabled: false        # create a GitLab release (via glab) with the changelog,
+                          # at the built commit; see CI docs for authentication
 
 announce:
   slack:

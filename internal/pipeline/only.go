@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/blairham/stevedore/internal/config"
+	"github.com/blairham/stevedore/internal/summary"
 )
 
 // OnlyAll is the --only value that selects every image, so a workflow need
@@ -91,14 +92,14 @@ func (r *PlanResult) FlatPins() string {
 	return strings.Join(pins, " ")
 }
 
-// WriteGitHubOutput appends the flat `only` and `pins` as step outputs to the
-// file named by $GITHUB_OUTPUT, if set. They are outputs rather than keys of
+// WriteGitHubOutput appends the flat `only` and `pins` as step outputs to
+// summary.OutputsPath() ($STEVEDORE_OUTPUTS_FILE or $GITHUB_OUTPUT), if set. They are outputs rather than keys of
 // the plan document: a workflow that builds its matrix from the whole
 // document (`matrix: ${{ fromJson(plan) }}`) turns every top-level key into a
 // matrix dimension. The documented form is `matrix: {include: ${{
 // fromJson(plan).include }}}`. No-op outside GitHub Actions.
 func (r *PlanResult) WriteGitHubOutput() error {
-	path := os.Getenv("GITHUB_OUTPUT")
+	path := summary.OutputsPath()
 	if path == "" {
 		return nil
 	}
