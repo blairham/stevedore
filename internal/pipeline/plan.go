@@ -78,7 +78,7 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 		if err != nil {
 			return nil, fmt.Errorf("fingerprint %s: %w", plan.Image.ID, err)
 		}
-		if ch && o.OnlyChanged && state[plan.Image.ID] == fp {
+		if ch && o.OnlyChanged && !o.BuildAll && state[plan.Image.ID] == fp {
 			ch, reason = false, "inputs unchanged"
 		}
 		evals = append(evals, imageEval{plan: plan, fp: fp, changed: ch, reason: reason})
@@ -114,6 +114,8 @@ func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, scope 
 	switch {
 	case len(o.Only) > 0:
 		return true, "selected via --only", nil
+	case o.BuildAll:
+		return true, "tag on HEAD (versioning.require_tag)", nil
 	case markerMode:
 		ref := changed.MarkerRef(cd.MarkerPrefix, plan.Image.ID)
 		if !changed.RefExists(o.context(), o.Dir, ref) {
@@ -283,6 +285,10 @@ func Plan(o Options) (*PlanResult, error) {
 	progress = os.Stderr
 	defer func() { progress = os.Stdout }()
 
+	o, err := applyRequireTag(o)
+	if err != nil {
+		return nil, err
+	}
 	p, err := Prepare(o)
 	if err != nil {
 		return nil, err

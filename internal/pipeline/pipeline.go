@@ -93,6 +93,9 @@ type Options struct {
 	// groups. Either way, the groups that did push are recorded (markers,
 	// notifications, summary) before the run fails.
 	KeepGoing bool
+	// BuildAll builds every image regardless of change detection: a tagged
+	// release under versioning.require_tag.
+	BuildAll bool
 	// AllowNonDefaultBranch lets a real (non-snapshot) release publish from a
 	// commit that is not on the default branch.
 	AllowNonDefaultBranch bool
@@ -590,6 +593,10 @@ func Release(o Options) error {
 		// Keep stdout clean for the JSON document.
 		progress = os.Stderr
 		defer func() { progress = os.Stdout }()
+	}
+	o, err = applyRequireTag(o)
+	if err != nil {
+		return err
 	}
 	p, err := Prepare(o)
 	if err != nil {
