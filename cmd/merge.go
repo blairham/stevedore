@@ -28,10 +28,10 @@ func newMergeCmd() *cobra.Command {
 		Long: "merge is the second half of a split release. Matrix jobs first run\n" +
 			"`release --split <platform>` on native runners — each builds one platform\n" +
 			"and pushes it untagged, by digest, recording the digest under dist/digests/.\n" +
-			"merge then stitches those digests into one tagged manifest list per image\n" +
-			"(docker buildx imagetools create) and runs the release tail on the merged\n" +
-			"artifact: scan, smoke test, sign, SBOM, changelog, GitHub release,\n" +
-			"announce, notify.\n" +
+			"merge then stitches those digests into one manifest list per image\n" +
+			"(docker buildx imagetools create, pushed by digest) and runs the release\n" +
+			"tail on the merged artifact: scan, smoke test, sign, SBOM — and only then\n" +
+			"tags it — followed by changelog, GitHub release, announce, notify.\n" +
 			"In CI, upload dist/digests/ from every leg and download it before merging.",
 		RunE: func(c *cobra.Command, _ []string) error {
 			o, err := baseOptions(c.Context())

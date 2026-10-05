@@ -597,7 +597,7 @@ func releaseOptions(o Options) (Options, error) {
 			return o, fmt.Errorf("--split pushes per-arch images by digest; drop --no-push")
 		}
 		// A split leg only builds and pushes by digest; everything that
-		// operates on the final tagged manifest list belongs to the merge run.
+		// operates on the final manifest list belongs to the merge run.
 		o.SkipChangelog = true
 		o.SkipPublish = true
 	}
@@ -798,8 +798,9 @@ func writeDistFile(path string, data []byte) error {
 }
 
 // Merge is the second half of a split release: it stitches the per-arch
-// digests the split legs pushed (dist/digests/) into one tagged manifest list
-// per image, then runs the full release tail on the merged artifact.
+// digests the split legs pushed (dist/digests/) into one manifest list per
+// image, then runs the full release tail on the merged artifact — tagging it
+// only once the gates have passed.
 func Merge(o Options) error {
 	o.FromDigests = true
 	return Release(o)
@@ -945,7 +946,7 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 
 	// Split leg: build the given platform(s) natively, push untagged by
 	// digest, record the digest for the merge run, and stop — every stage
-	// below operates on the tagged manifest list the merge run creates.
+	// below operates on the manifest list the merge run creates.
 	if len(o.SplitPlatforms) > 0 {
 		return irs, "", buildSplitLeg(o, p, r, grp, label, repos, irs)
 	}
@@ -965,7 +966,48 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 		return irs, "", nil
 	}
 	depSection, err := postBuild(o, p, r, rep, repos, digest, irs)
-	return irs, depSection, err
+	if err != nil {
+		return irs, "", err
+	}
+	// Only now, with every gate passed and the digest signed, do the tags
+	// appear. Until this point the artifact exists in the registries by
+	// digest alone, so a failed gate leaves nothing for a consumer to pull by
+	// name.
+	return irs, depSection, applyTags(r, repos, refs, digest)
+}
+
+// applyTags points every published tag at the already-pushed digest, one
+// `imagetools create` per repository. --prefer-index=false makes each one a
+// carbon copy: without it, buildx wraps a single-platform manifest in a fresh
+// index, so the tag would name a different digest from the one that was
+// scanned, tested and signed.
+func applyTags(r *run.Runner, repos, refs []string, digest string) error {
+	for _, repo := range repos {
+		tags := refsForRepo(repo, refs)
+		if len(tags) == 0 {
+			continue
+		}
+		args := imagetoolsCreate("--prefer-index=false")
+		for _, t := range tags {
+			args = append(args, "--tag", t)
+		}
+		args = append(args, digestRef(repo, digest))
+		if err := r.Run("docker", args...); err != nil {
+			return fmt.Errorf("tag %s: %w", repo, err)
+		}
+	}
+	return nil
+}
+
+// refsForRepo returns the refs that belong to repo.
+func refsForRepo(repo string, refs []string) []string {
+	var out []string
+	for _, ref := range refs {
+		if strings.HasPrefix(ref, repo+":") {
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
 // unionRefsRepos returns the union of every plan's refs and repos (deduped,
@@ -1035,9 +1077,11 @@ func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label
 	return writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), o.SplitPlatforms, digest)
 }
 
-// buildOrMerge produces the group's tagged artifact and returns its digest:
-// built and pushed to every member's tags, or — in merge mode — assembled
-// from the per-arch digests the split legs already pushed.
+// buildOrMerge produces the group's artifact and returns its digest: built and
+// pushed untagged, by digest, to every member repository, or — in merge mode —
+// assembled from the per-arch digests the split legs already pushed. Nothing
+// is tagged here; applyTags does that once the gates have passed. Under
+// --no-push the build only validates and returns no digest.
 func buildOrMerge(o Options, p *Prepared, r *run.Runner, rep ImagePlan, label string, refs, repos []string) (string, error) {
 	verb := "building"
 	if o.FromDigests {
@@ -1049,17 +1093,24 @@ func buildOrMerge(o Options, p *Prepared, r *run.Runner, rep ImagePlan, label st
 	}
 	if o.FromDigests {
 		// Merge mode: the split legs already built and pushed per-arch images
-		// by digest; assemble them into one tagged manifest list per repo.
-		return mergeGroup(r, o, rep, p.Config.Dist, repos, refs)
+		// by digest; assemble them into one untagged manifest list per repo.
+		return mergeGroup(r, o, rep, p.Config.Dist, repos)
 	}
 	spec := toSpec(rep, o.Dir, !o.NoPush, false, p.Config.Provenance)
-	spec.Refs = refs // push the one build to every member's tags
+	spec.Refs = refs
+	if !o.NoPush {
+		// Push the one build untagged to every member repository; the tags
+		// follow the gates.
+		spec.PushByDigest = true
+		spec.Refs = repos
+	}
 	return builder.Build(r, spec)
 }
 
-// postBuild runs the stages that operate on the pushed digest, gates first:
-// scan, smoke test, sign, then SBOM. It returns the dependency-diff section,
-// if one was produced.
+// postBuild runs the stages that operate on the pushed (still untagged)
+// digest, gates first: scan, smoke test, sign, then SBOM. It returns the
+// dependency-diff section, if one was produced. Signing and attesting happen
+// before tagging, so a tag never names an unsigned image, not even briefly.
 func postBuild(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string, irs []summary.Image) (string, error) {
 	ref := digestRef(repos[0], digest)
 
