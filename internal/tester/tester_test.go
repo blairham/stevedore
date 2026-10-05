@@ -76,7 +76,9 @@ func TestStoppedSmokeTestRemovesContainer(t *testing.T) {
 		cancel  bool
 		want    string
 	}{
-		{name: "timeout", timeout: "300ms", want: "timed out"},
+		// Long enough for the fake to record its arguments on a loaded
+		// machine; the cancel case cancels as soon as it has.
+		{name: "timeout", timeout: "2s", want: "timed out"},
 		{name: "cancel", timeout: "30s", cancel: true, want: "canceled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,7 +86,15 @@ func TestStoppedSmokeTestRemovesContainer(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			if tc.cancel {
-				time.AfterFunc(300*time.Millisecond, cancel)
+				go func() {
+					for ctx.Err() == nil {
+						if b, _ := os.ReadFile(runLog); len(b) > 0 {
+							cancel()
+							return
+						}
+						time.Sleep(20 * time.Millisecond)
+					}
+				}()
 			}
 			r := run.New(ctx, false, false)
 			r.Stdout, r.Stderr = devnull, devnull

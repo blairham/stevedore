@@ -159,7 +159,7 @@ func taggingCalls(calls []string) []int {
 func assertTaggedAfterGates(t *testing.T, calls []string, digest string) {
 	t.Helper()
 	scan := indexOf(calls, "grype ghcr.io/x/app@"+digest)
-	smoke := indexOf(calls, "docker run --rm --platform linux/amd64 ghcr.io/x/app@"+digest)
+	smoke := indexOf(calls, "docker run --rm --name stevedore-test-", " --platform linux/amd64 ghcr.io/x/app@"+digest)
 	sign := indexOf(calls, "cosign sign", "reg.io/x/app@"+digest)
 	if scan < 0 || smoke < 0 || sign < 0 {
 		t.Fatalf("gates did not run on the digest (scan=%d smoke=%d sign=%d):\n%s", scan, smoke, sign, strings.Join(calls, "\n"))
