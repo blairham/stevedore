@@ -57,7 +57,7 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 
 | Package | Purpose |
 |---------|---------|
-| `cmd` | cobra commands: release, merge, plan, build, check, verify, doctor, init, schema |
+| `cmd` | cobra commands: release, merge, publish, plan, build, check, verify, doctor, init, schema |
 | `internal/config` | `.stevedore.yaml` schema, load, defaults, validation |
 | `internal/pipeline` | orchestrates the whole release; the integration layer |
 | `internal/builder` | `docker buildx` build/push (multi-arch, provenance, cache) |
