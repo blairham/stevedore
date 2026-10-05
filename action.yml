@@ -62,7 +62,7 @@ outputs:
     description: "`command: plan` only: every planned image's `--pin-version id=ver`, space-joined, to go with `only`."
     value: ${{ steps.run.outputs.pins }}
   refs:
-    description: "`command: release`/`merge`/`publish`: JSON object of image id → `repository@sha256:…` (its first repository) for every image whose digest was published this run or already released from this commit — `fromJSON(steps.<id>.outputs.refs).api`."
+    description: "`command: release`/`merge`: JSON object of image id → `repository@sha256:…` (its first repository) for every image whose digest was published this run or already released from this commit — `fromJSON(steps.<id>.outputs.refs).api`."
     value: ${{ steps.run.outputs.refs }}
   digests:
     description: "As `refs`, but image id → `sha256:…` digest."

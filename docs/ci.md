@@ -67,14 +67,15 @@ default it resolves to the newest release *in the action's own major line*, so
 
 | Output | Set by | Value |
 |--------|--------|-------|
-| `refs` | `release`, `merge`, `publish` | JSON: image id → `repository@sha256:…` (first repository) for every image with a published digest — pushed this run, or already released from this commit |
+| `refs` | `release`, `merge` | JSON: image id → `repository@sha256:…` (first repository) for every image with a published digest — pushed this run, or already released from this commit |
 | `digests` | same | JSON: image id → `sha256:…` |
 | `ref` / `digest` | same | the one pinned image's `repository@sha256:…` / digest — only when exactly one image was pinned |
 | `summary` | `release`, `build` | the compact JSON release summary (each image also carries `digest_refs`) |
 | `plan` / `only` / `pins` | `plan` | matrix mode (see [Monorepos](monorepo.md)) |
 
 A dry run, a `--no-push` build and a split leg pin nothing: none of them has a digest a
-consumer can pull.
+consumer can pull. In matrix mode each `release --only` job reports the images it built,
+and `publish` reports none, so collect the jobs' `refs` (or `outputs:` files) yourself.
 
 ## Feeding a GitOps repository
 
