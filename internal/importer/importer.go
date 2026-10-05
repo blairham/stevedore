@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -150,10 +152,11 @@ func FromBakeJSON(data []byte) ([]Image, error) {
 	var imgs []Image
 	for name, t := range doc.Target {
 		repos, tags := splitRefs(t.Tags)
+		ctx := orDefault(t.Context, ".")
 		imgs = append(imgs, Image{
 			ID:           name,
-			Dockerfile:   orDefault(t.Dockerfile, "Dockerfile"),
-			Context:      orDefault(t.Context, "."),
+			Dockerfile:   bakeDockerfile(ctx, orDefault(t.Dockerfile, "Dockerfile")),
+			Context:      ctx,
 			Target:       t.Target,
 			Platforms:    t.Platforms,
 			BuildArgs:    mapToArgs(t.Args),
@@ -166,6 +169,23 @@ func FromBakeJSON(data []byte) ([]Image, error) {
 	}
 	sort.Slice(imgs, func(i, j int) bool { return imgs[i].ID < imgs[j].ID })
 	return imgs, nil
+}
+
+// bakeDockerfile resolves a bake target's dockerfile, which bake reads
+// relative to the target's context, into the path from the config directory
+// that stevedore expects. Absolute paths, stdin ("-"), and remote contexts
+// (whose Dockerfile lives inside the remote source) are left as written.
+func bakeDockerfile(context, dockerfile string) string {
+	if dockerfile == "-" || path.IsAbs(dockerfile) || filepath.IsAbs(dockerfile) || isRemoteContext(context) {
+		return dockerfile
+	}
+	return path.Join(filepath.ToSlash(context), filepath.ToSlash(dockerfile))
+}
+
+// isRemoteContext reports whether a build context is a URL or git remote
+// rather than a local directory.
+func isRemoteContext(context string) bool {
+	return strings.Contains(context, "://") || strings.HasPrefix(context, "git@")
 }
 
 // --- GoReleaser ---

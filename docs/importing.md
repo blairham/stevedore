@@ -8,6 +8,9 @@ instead of scanning Dockerfiles:
 - `--from goreleaser` reads a `.goreleaser.yaml`'s `dockers:` blocks, merging
   per-arch entries into multi-arch images.
 - `--from bake` resolves a docker-bake target set (`docker buildx bake --print`).
+  Bake reads a target's `dockerfile` relative to its `context`; the import
+  rewrites it relative to the config (`context = "services/api"` becomes
+  `dockerfile: services/api/Dockerfile`), leaving absolute paths alone.
 - `--from services --file <dir>` reads a directory of per-service manifests —
   the monorepo convention of one YAML per service — and scaffolds one image
   each.

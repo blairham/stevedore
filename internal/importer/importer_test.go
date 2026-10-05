@@ -131,3 +131,44 @@ func TestRenderYAML(t *testing.T) {
 		}
 	}
 }
+
+// bake resolves a target's dockerfile relative to its context, and --print
+// emits it unresolved; stevedore resolves dockerfile from the config
+// directory, so the importer must join the two (#49). The JSON is the shape
+// buildx v0.33.0's `bake --print` emits for these targets.
+func TestFromBakeJSONDockerfileRelativeToContext(t *testing.T) {
+	const doc = `{"target": {
+  "api":    {"context": "services/api", "dockerfile": "Dockerfile"},
+  "sub":    {"context": "services/y", "dockerfile": "build/Dockerfile.prod"},
+  "dot":    {"context": ".", "dockerfile": "./docker/Dockerfile"},
+  "abs":    {"context": "services/x", "dockerfile": "/abs/Dockerfile"},
+  "parent": {"context": "../outside", "dockerfile": "../sibling/Dockerfile"},
+  "nodf":   {"context": "services/n"},
+  "noctx":  {"dockerfile": "web/Dockerfile"},
+  "stdin":  {"context": "services/w", "dockerfile": "-"},
+  "remote": {"context": "https://github.com/x/y.git", "dockerfile": "Dockerfile"}
+}}`
+	want := map[string]string{
+		"api":    "services/api/Dockerfile",
+		"sub":    "services/y/build/Dockerfile.prod",
+		"dot":    "docker/Dockerfile",
+		"abs":    "/abs/Dockerfile",
+		"parent": "../sibling/Dockerfile",
+		"nodf":   "services/n/Dockerfile",
+		"noctx":  "web/Dockerfile",
+		"stdin":  "-",
+		"remote": "Dockerfile",
+	}
+	imgs, err := FromBakeJSON([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != len(want) {
+		t.Fatalf("got %d images, want %d", len(imgs), len(want))
+	}
+	for _, img := range imgs {
+		if img.Dockerfile != want[img.ID] {
+			t.Errorf("%s: dockerfile = %q, want %q (context %q)", img.ID, img.Dockerfile, want[img.ID], img.Context)
+		}
+	}
+}
