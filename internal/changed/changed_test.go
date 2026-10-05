@@ -227,6 +227,25 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+// A pattern written with a leading ./ must match git's bare paths (#62);
+// before the fix such an image was always reported unchanged.
+func TestMatchDotSlashPattern(t *testing.T) {
+	patterns := []string{"./svc-a/**"}
+	for path, want := range map[string]bool{
+		"svc-a/main.go":   true,
+		"./svc-a/main.go": true,
+		"svc-b/main.go":   false,
+	} {
+		if got := Match(patterns, path); got != want {
+			t.Errorf("Match(%q, %q) = %v, want %v", patterns, path, got, want)
+		}
+	}
+	d := Evaluate(Scope{Paths: patterns}, nil, []string{"svc-a/main.go"})
+	if !d.Changed || !strings.Contains(d.Reason, `"./svc-a/**"`) {
+		t.Errorf("Evaluate = %+v, want changed quoting the pattern as written", d)
+	}
+}
+
 func TestEvaluateUnscoped(t *testing.T) {
 	// No paths and no local context -> always changed (can't prove it's safe
 	// to skip).
