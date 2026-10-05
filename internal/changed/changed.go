@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/blairham/stevedore/internal/run"
 )
 
 // FilesSince returns the repo-relative paths that differ between ref and the
@@ -28,15 +30,13 @@ func FilesSince(ctx context.Context, dir, ref string) ([]string, error) {
 	if ref == "" {
 		return nil, fmt.Errorf("changed-since requires a git ref")
 	}
-	cmd := exec.CommandContext(ctx, "git", "-c", "core.quotePath=false",
+	out, err := git(ctx, dir, "-c", "core.quotePath=false",
 		"diff", "--name-only", "--no-renames", "-z", ref, "--")
-	cmd.Dir = dir
-	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff against %s: %w", ref, err)
 	}
 	var files []string
-	for name := range strings.SplitSeq(string(out), "\x00") {
+	for name := range strings.SplitSeq(out, "\x00") {
 		if name != "" {
 			files = append(files, name)
 		}
@@ -51,9 +51,8 @@ func MarkerRef(prefix, id string) string {
 
 // RefExists reports whether a git ref resolves in the repository at dir.
 func RefExists(ctx context.Context, dir, ref string) bool {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", ref)
-	cmd.Dir = dir
-	return cmd.Run() == nil
+	_, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", ref)
+	return err == nil
 }
 
 // FetchMarkers fetches the marker ref namespace from origin so change
@@ -68,10 +67,8 @@ func FetchMarkers(ctx context.Context, dir, prefix string) error {
 		return nil
 	}
 	spec := "+" + prefix + "*:" + prefix + "*"
-	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", spec)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("fetch release markers %s*: %w: %s", prefix, err, strings.TrimSpace(string(out)))
+	if err := gitRefresh(ctx, dir, "fetch", "--quiet", "origin", spec); err != nil {
+		return fmt.Errorf("fetch release markers %s*: %w", prefix, err)
 	}
 	return nil
 }
@@ -92,13 +89,10 @@ func MarkerBase(ctx context.Context, dir, ref string) (base string, diverged boo
 	if err != nil {
 		return "", false, err
 	}
-	cmd := exec.CommandContext(ctx, "git", "merge-base", marker, head)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	mb, err := git(ctx, dir, "merge-base", marker, head)
 	if err != nil {
 		return "", false, fmt.Errorf("merge-base %s HEAD: %w", ref, err)
 	}
-	mb := strings.TrimSpace(string(out))
 	if mb == marker || mb == head {
 		return marker, false, nil
 	}
@@ -127,18 +121,14 @@ func AdvanceMarker(ctx context.Context, dir, ref string) error {
 			return err
 		}
 	}
-	up := exec.CommandContext(ctx, "git", "update-ref", ref, "HEAD")
-	up.Dir = dir
-	if out, err := up.CombinedOutput(); err != nil {
-		return fmt.Errorf("update-ref %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
+	if err := run.Exec(ctx, "git", "-C", dir, "update-ref", ref, "HEAD"); err != nil {
+		return fmt.Errorf("update-ref %s: %w", ref, err)
 	}
 	if !hasOrigin(ctx, dir) {
 		return nil
 	}
-	push := exec.CommandContext(ctx, "git", "push", "--quiet", "origin", ref)
-	push.Dir = dir
-	if out, err := push.CombinedOutput(); err != nil {
-		return fmt.Errorf("push %s: %w: %s", ref, err, strings.TrimSpace(string(out)))
+	if err := run.Exec(ctx, "git", "-C", dir, "push", "--quiet", "origin", ref); err != nil {
+		return fmt.Errorf("push %s: %w", ref, err)
 	}
 	return nil
 }
@@ -148,21 +138,17 @@ func AdvanceMarker(ctx context.Context, dir, ref string) error {
 // fetched here first; without it git rejects the push as `(fetch first)`
 // whatever the ancestry.
 func checkFastForward(ctx context.Context, dir, ref string) error {
-	ls := exec.CommandContext(ctx, "git", "ls-remote", "origin", ref)
-	ls.Dir = dir
-	out, err := ls.Output()
+	out, err := git(ctx, dir, "ls-remote", "origin", ref)
 	if err != nil {
 		return fmt.Errorf("ls-remote %s: %w", ref, err)
 	}
-	fields := strings.Fields(string(out))
+	fields := strings.Fields(out)
 	if len(fields) == 0 {
 		return nil
 	}
 	remote := fields[0]
-	fetch := exec.CommandContext(ctx, "git", "fetch", "--quiet", "origin", ref)
-	fetch.Dir = dir
-	if fout, ferr := fetch.CombinedOutput(); ferr != nil {
-		return fmt.Errorf("fetch %s: %w: %s", ref, ferr, strings.TrimSpace(string(fout)))
+	if ferr := gitRefresh(ctx, dir, "fetch", "--quiet", "origin", ref); ferr != nil {
+		return fmt.Errorf("fetch %s: %w", ref, ferr)
 	}
 	head, err := revParse(ctx, dir, "HEAD")
 	if err != nil {
@@ -186,13 +172,11 @@ func checkFastForward(ctx context.Context, dir, ref string) error {
 }
 
 func revParse(ctx context.Context, dir, rev string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", rev+"^{commit}")
-	cmd.Dir = dir
-	out, err := cmd.Output()
+	out, err := git(ctx, dir, "rev-parse", "--verify", rev+"^{commit}")
 	if err != nil {
 		return "", fmt.Errorf("rev-parse %s: %w", rev, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // IsAncestor reports whether commit a is an ancestor of b; a commit counts as
@@ -206,9 +190,7 @@ func IsAncestor(ctx context.Context, dir, a, b string) (bool, error) {
 // anything else for a real failure (a missing object in a shallow clone, say),
 // which is returned rather than read as "no".
 func isAncestor(ctx context.Context, dir, a, b string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", a, b)
-	cmd.Dir = dir
-	err := cmd.Run()
+	_, err := git(ctx, dir, "merge-base", "--is-ancestor", a, b)
 	if err == nil {
 		return true, nil
 	}
@@ -227,10 +209,8 @@ func short(sha string) string {
 }
 
 func hasOrigin(ctx context.Context, dir string) bool {
-	cmd := exec.CommandContext(ctx, "git", "remote")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	return err == nil && strings.Contains(string(out), "origin")
+	out, err := git(ctx, dir, "remote")
+	return err == nil && strings.Contains(out, "origin")
 }
 
 // Decision explains why an image is (or isn't) considered changed.
@@ -304,4 +284,18 @@ func matchAny(patterns []string, path string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// git runs a read-only git query in dir through the Runner ctx carries (see
+// run.WithRunner): it executes under --dry-run too, since planning needs the
+// answer, and is echoed under --verbose.
+func git(ctx context.Context, dir string, args ...string) (string, error) {
+	return run.Query(ctx, "git", append([]string{"-C", dir}, args...)...)
+}
+
+// gitRefresh runs a git command that updates local refs the plan reads (a
+// fetch). It executes under --dry-run, but is echoed there, since unlike a
+// query it changes the repository.
+func gitRefresh(ctx context.Context, dir string, args ...string) error {
+	return run.Refresh(ctx, "git", append([]string{"-C", dir}, args...)...)
 }

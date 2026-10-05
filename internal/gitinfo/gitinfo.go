@@ -8,10 +8,11 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
+
+	runner "github.com/blairham/stevedore/internal/run"
 )
 
 // Info is the git-derived state used to build the template context.
@@ -418,12 +419,8 @@ func output(ctx context.Context, dir string, args ...string) string {
 	return out
 }
 
+// run is a read-only git query in dir, through the Runner ctx carries (see
+// run.WithRunner): it executes under --dry-run and is echoed under --verbose.
 func run(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return runner.Query(ctx, "git", append([]string{"-C", dir}, args...)...)
 }

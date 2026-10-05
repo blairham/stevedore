@@ -89,11 +89,16 @@ type Options struct {
 	Now              time.Time
 }
 
+// context returns the invocation's context. It carries a Runner with the
+// invocation's dry-run and verbose settings, so a package whose API takes only
+// a context (internal/changed) still echoes what it runs under --dry-run and
+// --verbose.
 func (o Options) context() context.Context {
-	if o.Context != nil {
-		return o.Context
+	ctx := o.Context
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return context.Background()
+	return run.WithRunner(ctx, run.New(ctx, o.DryRun, o.Verbose))
 }
 
 // ImagePlan is a fully-resolved plan for one image.
@@ -593,10 +598,13 @@ func reportGroups(toBuild [][]imageEval, skipped []imageEval) []summary.Image {
 // loadReleaseState creates dist/ and loads the fingerprint state from it.
 // Fingerprint state drives --only-changed. Every release reads it; only a
 // real publish writes it back (see recordsFingerprints), so the next
-// --only-changed run compares against what was last released.
+// --only-changed run compares against what was last released. A dry run
+// writes nothing, dist/ included: it only reads whatever state is there.
 func loadReleaseState(o Options, p *Prepared) (string, fingerprint.State, error) {
-	if err := mkdirDist(filepath.Join(o.Dir, p.Config.Dist)); err != nil {
-		return "", nil, fmt.Errorf("create dist dir: %w", err)
+	if !o.DryRun {
+		if err := mkdirDist(filepath.Join(o.Dir, p.Config.Dist)); err != nil {
+			return "", nil, fmt.Errorf("create dist dir: %w", err)
+		}
 	}
 	fpPath := filepath.Join(o.Dir, p.Config.Dist, "fingerprints.json")
 	state, err := fingerprint.Load(fpPath)
@@ -811,6 +819,12 @@ func writeChangelog(o Options, p *Prepared, depDiffSections []string) (string, e
 		notes += "\n## Dependency changes\n\n" + strings.Join(depDiffSections, "")
 	}
 	path := filepath.Join(o.Dir, p.Config.Dist, "CHANGELOG.md")
+	if o.DryRun {
+		// Generated, so a broken changelog config still fails the dry run,
+		// but not written: the path is only what the echoed commands name.
+		fmt.Fprintf(progress, "==> changelog would be written to %s\n", path)
+		return path, nil
+	}
 	if err := writeDistFile(path, []byte(notes)); err != nil {
 		return "", fmt.Errorf("write changelog: %w", err)
 	}
@@ -844,12 +858,18 @@ func Merge(o Options) error {
 // emitSummary writes the release report: a GitHub Actions job-summary table
 // (when running in Actions), a JSON artifact under dist/, and — under
 // --output json — the JSON document to stdout.
+//
+// A dry run writes none of those files, the Actions ones included:
+// $GITHUB_OUTPUT would hand a later step placeholder digests as if they had
+// been pushed. --output json still prints the document.
 func emitSummary(o Options, p *Prepared, result summary.Result) error {
-	if err := result.WriteGitHubStepSummary(); err != nil {
-		fmt.Fprintf(progress, "warning: could not write GitHub step summary: %v\n", err)
-	}
-	if err := result.WriteGitHubOutput(); err != nil {
-		fmt.Fprintf(progress, "warning: could not write GitHub summary output: %v\n", err)
+	if !o.DryRun {
+		if err := result.WriteGitHubStepSummary(); err != nil {
+			fmt.Fprintf(progress, "warning: could not write GitHub step summary: %v\n", err)
+		}
+		if err := result.WriteGitHubOutput(); err != nil {
+			fmt.Fprintf(progress, "warning: could not write GitHub summary output: %v\n", err)
+		}
 	}
 	data, err := result.JSON()
 	if err != nil {

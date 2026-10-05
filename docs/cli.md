@@ -20,7 +20,7 @@ Every command, every flag, and the JSON surfaces meant for machines.
 |------|-------------|
 | `-f, --config` | Path to config file (default: autodiscover `.stevedore.yaml`). |
 | `--dir` | Project/repository root (default `.`). |
-| `--dry-run` | Print every command without executing it. |
+| `--dry-run` | Print every command that would publish or change anything, without running it, and write no files (see [Dry run](#dry-run)). |
 | `-v, --verbose` | Verbose output. |
 
 ## `build --push`
@@ -36,6 +36,27 @@ It skips everything that belongs to `release`: no cosign signature, no SBOM,
 no changelog, no GitHub release, no `announce`, and **no `notify` webhook** — an
 inner-loop push must never be the thing that triggers a deploy. Use `release
 --snapshot` when a snapshot should notify.
+
+## Dry run
+
+`--dry-run` prints each command that would publish or change something —
+`docker buildx`, `cosign`, `syft`, `gh`, the notify webhook — prefixed
+`[dry-run]`, and runs none of them. It writes **no files**: not `dist/` (no
+changelog, fingerprints, digests, SBOMs or release summary) and not the GitHub
+Actions `$GITHUB_STEP_SUMMARY` / `$GITHUB_OUTPUT` files. `--output json` still
+prints the summary to stdout. A dry run therefore leaves the tree exactly as it
+found it, so a real release can follow it.
+
+Planning still has to read the world, so a few commands do run:
+
+- **Read-only queries** — `git diff`, `rev-parse`, `merge-base`, `describe`,
+  `log` for the changelog, registry tag listing for the `registry`/`ecr`
+  versioning strategies. They are shown (prefixed `+`) under `--verbose`.
+- **The release-marker fetch** under `change_detection.marker_refs` — `git fetch
+  origin +refs/releases/image/*:…`. It changes nothing on the remote but does
+  update local refs, and the plan is wrong without it, so it runs and is always
+  echoed (prefixed `+`, meaning it ran). Markers are never advanced or pushed
+  under `--dry-run`.
 
 ## `release` flags
 
