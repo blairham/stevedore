@@ -183,6 +183,42 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// changelog.sort and change_detection.resolver are compared exactly where they
+// are used, so anything outside the set must be refused rather than silently
+// picking a branch (#64).
+func TestValidateEnums(t *testing.T) {
+	base := func() Config {
+		return Config{Version: 1, Images: []Image{{ID: "a", Repositories: []string{"r"}}}}
+	}
+	cases := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{"sort asc", func(c *Config) { c.Changelog.Sort = "asc" }, ""},
+		{"sort desc", func(c *Config) { c.Changelog.Sort = "desc" }, ""},
+		{"sort descending", func(c *Config) { c.Changelog.Sort = "descending" }, "changelog.sort"},
+		{"sort ASC", func(c *Config) { c.Changelog.Sort = "ASC" }, "changelog.sort"},
+		{"resolver empty", func(c *Config) { c.ChangeDetection.Resolver = "" }, ""},
+		{"resolver dotnet", func(c *Config) { c.ChangeDetection.Resolver = "dotnet" }, ""},
+		{"resolver Dotnet", func(c *Config) { c.ChangeDetection.Resolver = "Dotnet" }, "change_detection.resolver"},
+		{"resolver npm", func(c *Config) { c.ChangeDetection.Resolver = "npm" }, "change_detection.resolver"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base()
+			tc.mutate(&cfg)
+			err := cfg.Validate()
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("Validate() = %v, want nil", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Errorf("Validate() = %v, want an error naming %s", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateVersioning(t *testing.T) {
 	base := func(v Versioning) Config {
 		return Config{Version: 1, Images: []Image{{ID: "a", Repositories: []string{"r"}}}, Versioning: v}
@@ -202,6 +238,11 @@ func TestValidateVersioning(t *testing.T) {
 		{"env needs var", Versioning{Strategy: "env"}, true},
 		{"command needs command", Versioning{Strategy: "command"}, true},
 		{"unknown strategy", Versioning{Strategy: "tarot"}, true},
+		{"initial semver", Versioning{Strategy: "registry", Initial: "1.2.3"}, false},
+		{"initial with v", Versioning{Strategy: "ecr", Initial: "v0.1.0"}, false},
+		{"initial not a version", Versioning{Strategy: "registry", Initial: "banana"}, true},
+		{"initial two parts", Versioning{Strategy: "registry", Initial: "1.0"}, true},
+		{"initial prerelease", Versioning{Strategy: "registry", Initial: "1.0.0-rc.1"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -262,7 +263,7 @@ type ChangeDetection struct {
 	// Resolver auto-derives each image's dependency paths from a project graph
 	// instead of hand-written Paths. Currently only "dotnet" (walks .csproj
 	// <ProjectReference> transitively). Empty disables auto-resolution.
-	Resolver string `yaml:"resolver"`
+	Resolver string `yaml:"resolver" enum:"dotnet,"`
 
 	// MarkerRefs, when true, advances a per-image git ref after each successful
 	// push and uses it as that image's default change-detection base. An image
@@ -581,7 +582,7 @@ func (s ScanIgnore) ExpiresAt() (time.Time, bool) {
 type Changelog struct {
 	Enabled bool `yaml:"enabled"`
 	// Sort is "asc" or "desc" (default asc).
-	Sort string `yaml:"sort"`
+	Sort string `yaml:"sort" enum:"asc,desc"`
 	// Exclude is a list of regexes; matching commit subjects are dropped.
 	Exclude []string `yaml:"exclude"`
 	// DependencyDiff, when true (and SBOMs are enabled), appends a section
@@ -779,6 +780,20 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("test.timeout %q invalid: %w", c.Test.Timeout, err)
 		}
 	}
+	// Enum-like strings are matched exactly where they are used, so a value
+	// outside the set does not fail: it silently picks a branch. "descending"
+	// sorted desc only because it is not "asc"; "Dotnet" turned the resolver
+	// off and under-scoped every image.
+	switch c.Changelog.Sort {
+	case "", "asc", "desc":
+	default:
+		return fmt.Errorf("changelog.sort %q invalid (want asc or desc)", c.Changelog.Sort)
+	}
+	switch c.ChangeDetection.Resolver {
+	case "", "dotnet":
+	default:
+		return fmt.Errorf("change_detection.resolver %q unsupported (want dotnet, or empty to disable)", c.ChangeDetection.Resolver)
+	}
 	return c.Versioning.validate()
 }
 
@@ -933,6 +948,11 @@ func (p Provenance) validate() error {
 
 // validate checks the versioning strategy and its required fields.
 func (v Versioning) validate() error {
+	// initial becomes the version verbatim when the registry has no semver tags
+	// yet, so it must be one the next run can parse and bump.
+	if v.Initial != "" && !isStableSemver(v.Initial) {
+		return fmt.Errorf("versioning.initial %q invalid (want MAJOR.MINOR.PATCH, optionally with a leading v)", v.Initial)
+	}
 	switch v.Strategy {
 	case "", "git":
 	case "registry", "ecr":
@@ -960,6 +980,22 @@ func (v Versioning) validate() error {
 		return fmt.Errorf("versioning.strategy %q unsupported (want git, registry, ecr, static, env, or command)", v.Strategy)
 	}
 	return nil
+}
+
+// isStableSemver reports whether s is an optional "v" followed by exactly three
+// dot-separated non-negative integers. It accepts what the versioner's
+// parseSemver does; config cannot import the versioner, which imports config.
+func isStableSemver(s string) bool {
+	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(s), "v"), ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if n, err := strconv.Atoi(p); err != nil || n < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Severities are the recognized vulnerability severities, ascending.
