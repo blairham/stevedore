@@ -21,6 +21,7 @@ func newMergeCmd() *cobra.Command {
 		output        string
 		only          []string
 		pinVersions   []string
+		keepGoing     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "merge",
@@ -52,6 +53,7 @@ func newMergeCmd() *cobra.Command {
 				return err
 			}
 			o.PinVersions = pins
+			o.KeepGoing = keepGoing
 			return pipeline.Merge(o)
 		},
 	}
@@ -64,6 +66,7 @@ func newMergeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation, announcements, and notify webhooks")
 	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to merge (matrix mode: match the split legs' --only)")
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; match the split legs' pins)")
+	cmd.Flags().BoolVar(&keepGoing, "keep-going", false, "merge every image whose digests are complete even after one fails, then fail at the end (the ones that merged are still tagged, recorded and notified)")
 	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
 	return cmd
 }

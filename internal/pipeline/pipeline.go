@@ -86,7 +86,12 @@ type Options struct {
 	// SplitPerPlatform makes the plan emit one matrix entry per build group
 	// per platform (with a native runner hint) instead of one per group.
 	SplitPerPlatform bool
-	Now              time.Time
+	// KeepGoing builds every group even after one fails, and fails the run
+	// at the end. Without it the first failure stops dispatching more
+	// groups. Either way, the groups that did push are recorded (markers,
+	// notifications, summary) before the run fails.
+	KeepGoing bool
+	Now       time.Time
 }
 
 // context returns the invocation's context. It carries a Runner with the
@@ -507,17 +512,24 @@ func Release(o Options) error {
 	if len(o.SplitPlatforms) > 0 {
 		toBuild, skipped = splitLegGroups(toBuild, skipped, o.SplitPlatforms)
 	}
+	return buildAndFinish(o, p, r, toBuild, skipped, fpPath, state)
+}
+
+// buildAndFinish builds the groups and runs the release tail. A group that
+// fails does not cost the ones that succeeded their record: by then they are
+// pushed, signed and tagged, and without a marker, a notification and a
+// summary the next run would release them again as a new version. So the tail
+// always runs for whatever was built, and the build failure is returned with
+// whatever else went wrong.
+func buildAndFinish(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, skipped []imageEval, fpPath string, state fingerprint.State) error {
 	result := summary.Result{Project: p.Config.ProjectName, Snapshot: o.Snapshot}
 	result.Images = reportGroups(toBuild, skipped)
 
-	built, depDiffSections, err := buildGroups(o, p, r, toBuild, state)
-	if err != nil {
-		return err
-	}
+	built, depDiffSections, buildErr := buildGroups(o, p, r, toBuild, state)
 	result.Images = append(result.Images, built...)
 	sort.Slice(result.Images, func(i, j int) bool { return result.Images[i].ID < result.Images[j].ID })
 
-	return finishRelease(o, p, r, result, fpPath, state, depDiffSections)
+	return finishRelease(o, p, r, result, fpPath, state, depDiffSections, buildErr)
 }
 
 // finishRelease is everything after the builds: it records the new
@@ -526,8 +538,16 @@ func Release(o Options) error {
 // stage that fails does not stop the ones after it: every stage runs, the
 // summary is always written, and the failures are reported together at the
 // end.
-func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result, fpPath string, state fingerprint.State, depDiffSections []string) error {
+//
+// buildErr is the failure of any group that did not build. The groups that
+// did are recorded as usual, but the release as a whole is incomplete, so it
+// writes no changelog and is not published (GitHub release, announce); the
+// re-run that builds the rest does that.
+func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result, fpPath string, state fingerprint.State, depDiffSections []string, buildErr error) error {
 	var errs []error
+	if buildErr != nil {
+		errs = append(errs, buildErr)
+	}
 	if recordsFingerprints(o) {
 		if err := state.Save(fpPath); err != nil {
 			errs = append(errs, fmt.Errorf("save fingerprint state: %w", err))
@@ -540,8 +560,9 @@ func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result,
 		errs = append(errs, err)
 	}
 
-	changelogPath, err := writeChangelog(o, p, depDiffSections)
-	if err != nil {
+	if buildErr != nil {
+		fmt.Fprintln(progress, "==> a build failed: recorded what was pushed, but no changelog, GitHub release or announcement")
+	} else if changelogPath, err := writeChangelog(o, p, depDiffSections); err != nil {
 		errs = append(errs, err)
 	} else if err := publishStage(o, p, r, changelogPath, result.Images); err != nil {
 		errs = append(errs, err)
@@ -740,7 +761,9 @@ func preflightRelease(o Options, p *Prepared) error {
 
 // buildGroups builds each group, up to o.Parallel groups at a time, recording
 // each built member's fingerprint in state. It returns the built images'
-// summaries and dependency-diff sections; the first failure stops dispatch.
+// summaries and dependency-diff sections — of every group that succeeded,
+// even when another failed — and the failures, joined. The first failure
+// stops dispatch unless o.KeepGoing.
 func buildGroups(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, state fingerprint.State) ([]summary.Image, []string, error) {
 	workers := max(o.Parallel, 1)
 	if len(toBuild) > 0 {
@@ -751,21 +774,24 @@ func buildGroups(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, s
 	}
 	var (
 		mu       sync.Mutex
-		firstErr error
+		errs     []error
 		wg       sync.WaitGroup
 		sem      = make(chan struct{}, workers)
 		images   []summary.Image
 		depDiffs []string
 	)
 	for _, grp := range toBuild {
+		// Wait for a free slot before deciding: only then has the group that
+		// held it finished, and with it the failure that should stop us.
+		sem <- struct{}{}
 		mu.Lock()
-		stop := firstErr != nil
+		stop := len(errs) > 0 && !o.KeepGoing
 		mu.Unlock()
 		if stop {
+			<-sem
 			break // a build already failed; stop dispatching more
 		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(grp []imageEval) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -773,9 +799,7 @@ func buildGroups(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, s
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("%s: %w", grp[0].plan.Image.ID, err)
-				}
+				errs = append(errs, fmt.Errorf("%s: %w", grp[0].plan.Image.ID, err))
 				return
 			}
 			images = append(images, irs...)
@@ -788,10 +812,7 @@ func buildGroups(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, s
 		}(grp)
 	}
 	wg.Wait()
-	if firstErr != nil {
-		return nil, nil, firstErr
-	}
-	return images, depDiffs, nil
+	return images, depDiffs, errors.Join(errs...)
 }
 
 // advancesMarker reports whether an image's release marker moves: it was
