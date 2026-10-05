@@ -155,6 +155,8 @@ notify:                   # machine-readable post-push notification (CD trigger)
     # bearer_env: DEPLOY_WEBHOOK_TOKEN   # sent as "Authorization: Bearer <token>"
     # hmac_env: DEPLOY_WEBHOOK_SECRET    # body signed with HMAC-SHA256, sent as
     #                                    # "X-Stevedore-Signature: sha256=<hex>"
+    # required: false                    # a failed delivery warns instead of failing
+    # payload_template: '{"service": {{ json .Image }}, "version": {{ json .Version }}}'
 
 policy:
   require: [scan, test, sign, sbom]  # stages a real release may not go without
@@ -215,6 +217,32 @@ they fire from the `merge` run, once the manifest lists are gated and tagged. Th
 and credentials come from environment variables; a missing variable or a
 non-2xx response fails the release rather than silently skipping the trigger.
 
+A webhook that is a convenience rather than the deploy trigger can be made
+best-effort with `required: false`: a transport error or non-2xx response is
+then printed as a warning, the remaining images are still notified, and the
+release succeeds (its log says `notified webhook of 1 of 2 pushed image(s)`).
+Configuration mistakes — an unset variable, a non-https URL, a template that
+does not render — fail the release either way, because retrying will not fix
+them. The default is `required: true`.
+
+`payload_template` replaces the JSON body above with your own, so a receiver
+that expects a different shape needs no glue step. It is a Go template over the
+same fields (`.Project`, `.Snapshot`, `.Image`, `.Version`, `.Digest`,
+`.Repositories`, `.Refs`), rendered once per image, and it must produce valid
+JSON: use the `json` helper to encode a value rather than quoting it by hand.
+Every payload is rendered before the first request, so a template error never
+leaves the receiver with half the notifications. `hmac_env` signs the rendered
+body.
+
+```yaml
+notify:
+  webhook:
+    enabled: true
+    url_env: DEPLOY_WEBHOOK_URL
+    payload_template: |
+      {"service": {{ json .Image }}, "version": {{ json .Version }}, "digest": {{ json .Digest }}}
+```
+
 Webhook URLs — `notify.webhook` and both `announce` targets — must be `https://`.
 A plain `http://` URL would send the URL, and for `notify` the bearer token, in
 cleartext, so it fails the release. The one exception is a loopback host
@@ -249,7 +277,7 @@ undefined field is an error (no silent empty strings). Available fields:
 | `.Detached` | `true` when HEAD points at a commit rather than a branch (any tag-triggered CI release) |
 | `.Env.NAME` | environment variable `NAME` |
 
-Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`.
+Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`, `json` (encodes a value as JSON).
 
 ## Default labels
 

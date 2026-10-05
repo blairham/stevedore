@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/blairham/stevedore/internal/tmpl"
 )
 
 // DefaultFilenames are the config files stevedore looks for, in order.
@@ -156,6 +158,21 @@ type NotifyWebhook struct {
 	// the request body is signed with HMAC-SHA256 and the digest is sent as
 	// "X-Stevedore-Signature: sha256=<hex>" (optional).
 	HMACEnv string `yaml:"hmac_env"`
+	// Required, when false, turns a failed delivery (transport error or
+	// non-2xx response) into a warning instead of a failed release. Unset means
+	// true. Configuration errors — a missing env var, a bad URL, a template
+	// that does not render — fail either way.
+	Required *bool `yaml:"required"`
+	// PayloadTemplate replaces the default JSON body: a Go template over the
+	// notification (.Project, .Snapshot, .Image, .Version, .Digest,
+	// .Repositories, .Refs) that must render valid JSON. The `json` helper
+	// encodes a value, e.g. {"service": {{ json .Image }}}.
+	PayloadTemplate string `yaml:"payload_template"`
+}
+
+// IsRequired reports whether a failed delivery fails the release.
+func (w NotifyWebhook) IsRequired() bool {
+	return w.Required == nil || *w.Required
 }
 
 // Webhook is a single chat webhook target. The URL is read from an environment
@@ -653,6 +670,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Notify.Webhook.Enabled && c.Notify.Webhook.URLEnv == "" {
 		return fmt.Errorf("notify.webhook.enabled requires notify.webhook.url_env")
+	}
+	if t := c.Notify.Webhook.PayloadTemplate; t != "" {
+		if err := tmpl.Parse(t); err != nil {
+			return fmt.Errorf("notify.webhook.payload_template: %w", err)
+		}
 	}
 	if c.Test.Enabled && c.Test.Timeout != "" {
 		if _, err := time.ParseDuration(c.Test.Timeout); err != nil {

@@ -1088,11 +1088,18 @@ func notifyWebhook(o Options, p *Prepared, r *run.Runner, images []summary.Image
 			Refs:         im.Refs,
 		})
 	}
-	if err := publish.Notify(r, p.Config.Notify.Webhook, notes); err != nil {
+	sent, err := publish.Notify(r, p.Config.Notify.Webhook, notes)
+	if err != nil {
 		return err
 	}
-	if len(notes) > 0 {
+	switch {
+	case len(notes) == 0:
+	case r.DryRun || sent == len(notes):
 		fmt.Fprintf(progress, "==> notified webhook of %d pushed image(s)\n", len(notes))
+	default:
+		// Only reachable with notify.webhook.required: false; each failure was
+		// already reported as a warning.
+		fmt.Fprintf(progress, "==> notified webhook of %d of %d pushed image(s)\n", sent, len(notes))
 	}
 	return nil
 }
