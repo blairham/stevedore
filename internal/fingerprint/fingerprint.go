@@ -56,7 +56,13 @@ func Compute(dir string, img config.Image, distDir string, scopedPaths []string)
 		return "", err
 	}
 
-	absDist := absPath(dir, distDir)
+	// The walk compares each directory's absolute path against this, so it must
+	// be absolute and clean too: under the default --dir "." a joined "dist"
+	// stays relative and never matches (issue #36).
+	absDist, err := filepath.Abs(absPath(dir, distDir))
+	if err != nil {
+		return "", fmt.Errorf("resolve dist dir %s: %w", distDir, err)
+	}
 	if len(scopedPaths) > 0 {
 		// Path-scoped: hash only files matching the resolved globs — so images
 		// sharing one context/Dockerfile get distinct, narrowly-invalidated
@@ -106,7 +112,8 @@ func hashTree(h io.Writer, root, distDir string) error {
 
 // walkFiles returns the root-relative paths of the files under root that keep
 // accepts, sorted. Skipped dirs and the dist dir (when it lives under root) are
-// not descended into, and symlinks are not followed.
+// not descended into, and symlinks are not followed. distDir must be absolute
+// and clean, as filepath.Abs returns it.
 func walkFiles(root, distDir string, keep func(rel string) bool) ([]string, error) {
 	var rels []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {

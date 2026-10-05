@@ -73,6 +73,64 @@ func TestComputeIgnoresDistAndGit(t *testing.T) {
 	}
 }
 
+// TestComputeIgnoresDistUnderRelativeDir pins issue #36: the release runs with
+// the default --dir ".", and the dist dir must still be excluded so that what a
+// release writes there (fingerprints.json, SBOMs, the changelog) does not change
+// the next run's fingerprint. Each case also checks that a real input change is
+// still seen, so an identical pair cannot pass by hashing nothing.
+func TestComputeIgnoresDistUnderRelativeDir(t *testing.T) {
+	cases := []struct {
+		name    string
+		dir     string // the --dir Compute is called with, after chdir into the tree
+		dist    string // the configured dist dir; "<abs>" means its absolute path
+		distRel string // where that dist dir lives, relative to the tree
+		scoped  []string
+	}{
+		{name: "dot", dir: ".", dist: "dist", distRel: "dist"},
+		{name: "dot scoped", dir: ".", dist: "dist", distRel: "dist", scoped: []string{"**"}},
+		{name: "dot slash", dir: "./", dist: "./dist/", distRel: "dist"},
+		{name: "relative subdir", dir: "repo", dist: "dist", distRel: "repo/dist"},
+		{name: "custom dist", dir: ".", dist: "out", distRel: "out"},
+		{name: "absolute dist", dir: ".", dist: "<abs>", distRel: "dist"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tree := t.TempDir()
+			t.Chdir(tree)
+			root := filepath.Join(tree, tc.dir)
+			writeFile(t, filepath.Join(root, "Dockerfile"), "FROM scratch\n")
+			writeFile(t, filepath.Join(root, "app.txt"), "x")
+			dist := tc.dist
+			if dist == "<abs>" {
+				dist = filepath.Join(tree, tc.distRel)
+			}
+			img := demoImage()
+
+			fp1, err := Compute(tc.dir, img, dist, tc.scoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(tree, tc.distRel, "fingerprints.json"), `{"app":"x"}`)
+			fp2, err := Compute(tc.dir, img, dist, tc.scoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fp1 != fp2 {
+				t.Errorf("writing into %s changed the fingerprint: %s != %s", tc.distRel, fp1, fp2)
+			}
+
+			writeFile(t, filepath.Join(root, "app.txt"), "y")
+			fp3, err := Compute(tc.dir, img, dist, tc.scoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fp3 == fp2 {
+				t.Error("changing a real input should change the fingerprint")
+			}
+		})
+	}
+}
+
 func TestComputeSensitiveToBuildInputs(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM scratch\n")
