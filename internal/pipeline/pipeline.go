@@ -499,6 +499,9 @@ func Release(o Options) error {
 		return err
 	}
 	toBuild, skipped := groupPlans(o.Dir, evals)
+	if len(o.SplitPlatforms) > 0 {
+		toBuild, skipped = splitLegGroups(toBuild, skipped, o.SplitPlatforms)
+	}
 	result := summary.Result{Project: p.Config.ProjectName, Snapshot: o.Snapshot}
 	result.Images = reportGroups(toBuild, skipped)
 
@@ -1074,9 +1077,12 @@ func dryRunDigest(digest string, dryRun bool) string {
 // buildSplitLeg builds the leg's platform(s), pushes them untagged by digest,
 // and records the digest under dist/digests/ for the merge run.
 func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label string, repos []string, irs []summary.Image) error {
-	fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(o.SplitPlatforms, ","))
+	// Only the leg's platforms the image is configured for: splitLegGroups
+	// already dropped the groups with none, so this is never empty.
+	platforms := legPlatforms(o.SplitPlatforms, grp[0].plan.Image.Platforms)
+	fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(platforms, ","))
 	spec := toSpec(grp[0].plan, o.Dir, true, false, p.Config.Provenance)
-	spec.Platforms = o.SplitPlatforms
+	spec.Platforms = platforms
 	spec.PushByDigest = true
 	spec.Refs = repos // untagged: bare repo names
 	digest, err := builder.Build(r, spec)
@@ -1090,7 +1096,7 @@ func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label
 	if o.DryRun {
 		return nil
 	}
-	return writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), o.SplitPlatforms, digest)
+	return writeSplitDigest(o.Dir, p.Config.Dist, evalIDs(grp), platforms, digest)
 }
 
 // buildOrMerge produces the group's artifact and returns its digest: built and

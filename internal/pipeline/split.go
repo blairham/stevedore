@@ -33,6 +33,46 @@ func platformFile(platforms []string) string {
 	return strings.Join(parts, ",")
 }
 
+// legPlatforms returns the leg's platforms that an image is configured for,
+// in the leg's order. A leg is driven by a platform matrix, not by the image,
+// so `--split linux/arm64` reaches amd64-only images too; building those for
+// arm64 would publish a platform their config excludes.
+func legPlatforms(split, configured []string) []string {
+	want := make(map[string]bool, len(configured))
+	for _, p := range configured {
+		want[p] = true
+	}
+	var out []string
+	for _, p := range split {
+		if want[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitLegGroups moves every build group none of whose configured platforms
+// is in the leg onto the skipped list, with a reason that names both sides.
+// Group members share a build key, which includes the platforms, so the
+// first member speaks for the group.
+func splitLegGroups(toBuild [][]imageEval, skipped []imageEval, split []string) ([][]imageEval, []imageEval) {
+	kept := toBuild[:0:0]
+	for _, grp := range toBuild {
+		configured := grp[0].plan.Image.Platforms
+		if len(legPlatforms(split, configured)) > 0 {
+			kept = append(kept, grp)
+			continue
+		}
+		reason := fmt.Sprintf("not configured for split platform(s) %s; image platforms: %s",
+			strings.Join(split, ","), strings.Join(configured, ","))
+		for _, m := range grp {
+			m.reason = reason
+			skipped = append(skipped, m)
+		}
+	}
+	return kept, skipped
+}
+
 func splitDigestDir(dir, dist, id string) string {
 	return filepath.Join(dir, dist, "digests", id)
 }
@@ -57,8 +97,15 @@ func writeSplitDigest(dir, dist string, ids, platforms []string, digest string) 
 
 // readSplitDigests loads an image's per-arch digests and the (sanitized)
 // platforms they cover. Filenames are stable-sorted so merge output is
-// deterministic.
-func readSplitDigests(dir, dist, id string) (digests []string, covered map[string]bool, err error) {
+// deterministic. A file covering a platform outside configured is an error,
+// not something to skip: it is either a leftover from an earlier run in a
+// persistent dist/ or a leg that built a platform the image excludes, and in
+// both cases merging it would publish a platform the config does not ask for.
+func readSplitDigests(dir, dist, id string, configured []string) (digests []string, covered map[string]bool, err error) {
+	allowed := make(map[string]bool, len(configured))
+	for _, p := range configured {
+		allowed[strings.ReplaceAll(p, "/", "-")] = true
+	}
 	d := splitDigestDir(dir, dist, id)
 	entries, err := os.ReadDir(d)
 	if err != nil {
@@ -81,6 +128,16 @@ func readSplitDigests(dir, dist, id string) (digests []string, covered map[strin
 		if digest == "" {
 			return nil, nil, fmt.Errorf("image %s: empty split digest file %s", id, name)
 		}
+		var unexpected []string
+		for p := range strings.SplitSeq(name, ",") {
+			if !allowed[p] {
+				unexpected = append(unexpected, p)
+			}
+		}
+		if len(unexpected) > 0 {
+			return nil, nil, fmt.Errorf("image %s: split digest %s covers %s, which the image does not configure (platforms: %s) — remove the stale file, or the leg that wrote it",
+				id, filepath.Join(d, name), strings.Join(unexpected, ","), strings.Join(configured, ","))
+		}
 		digests = append(digests, digest)
 		for p := range strings.SplitSeq(name, ",") {
 			covered[p] = true
@@ -96,9 +153,11 @@ func readSplitDigests(dir, dist, id string) (digests []string, covered map[strin
 // repository and returns its digest. The list is pushed untagged, by digest:
 // tags are applied only after the gates pass. It fails when a configured
 // platform has no recorded digest, so a partial matrix (a leg that never ran
-// or failed to upload its digests) can't publish an incomplete image.
+// or failed to upload its digests) can't publish an incomplete image, and when
+// a digest covers a platform the image does not configure, so it can't
+// publish an unwanted one either.
 func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos []string) (string, error) {
-	digests, covered, err := readSplitDigests(o.Dir, dist, rep.Image.ID)
+	digests, covered, err := readSplitDigests(o.Dir, dist, rep.Image.ID, rep.Image.Platforms)
 	if err != nil {
 		return "", err
 	}
