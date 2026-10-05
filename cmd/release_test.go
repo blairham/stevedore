@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"runtime/debug"
+	"strings"
 	"testing"
 )
 
@@ -47,5 +48,21 @@ func TestResolveVersion(t *testing.T) {
 		if got := resolveVersion(tc.ldflags, tc.info); got != tc.want {
 			t.Errorf("%s: resolveVersion(%q) = %q, want %q", tc.name, tc.ldflags, got, tc.want)
 		}
+	}
+}
+
+func TestPlanReasons(t *testing.T) {
+	t.Setenv("STEVEDORE_PLAN", "")
+	if r, err := planReasons(); len(r) != 0 || err != nil {
+		t.Errorf("unset: %v, %v", r, err)
+	}
+	t.Setenv("STEVEDORE_PLAN", `{"include":[{"ids":["api"],"reason":"src/api/main.go since its release marker"}]}`)
+	r, err := planReasons()
+	if err != nil || r["api"] != "src/api/main.go since its release marker" {
+		t.Errorf("set: %v, %v", r, err)
+	}
+	t.Setenv("STEVEDORE_PLAN", "not json")
+	if _, err := planReasons(); err == nil || !strings.Contains(err.Error(), "$STEVEDORE_PLAN") {
+		t.Errorf("malformed: err = %v, want it to name the variable", err)
 	}
 }

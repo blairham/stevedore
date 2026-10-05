@@ -50,6 +50,11 @@ func newPlanCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println(string(data))
+			if !flagDryRun {
+				if err := result.WriteGitHubOutput(); err != nil {
+					return fmt.Errorf("write GitHub output: %w", err)
+				}
+			}
 			return nil
 		},
 	}

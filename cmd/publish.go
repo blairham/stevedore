@@ -40,7 +40,7 @@ func newPublishCmd() *cobra.Command {
 			return pipeline.Publish(o)
 		},
 	}
-	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) the matrix built (the plan entries' `only`, joined); default every image")
+	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) the matrix built (the plan step's flat only output); default every image, as does 'all'")
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; the plan entries' `pins`), so the release is named after what was pushed")
 	cmd.Flags().BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
 	return cmd

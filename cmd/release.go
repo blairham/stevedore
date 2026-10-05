@@ -5,12 +5,32 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/blairham/stevedore/internal/pipeline"
 )
+
+// planEnv names the variable a matrix job or merge step can carry the plan
+// document in, so the release summary keeps the plan's reason for each image
+// instead of "selected via --only". An environment variable rather than a
+// flag: the document holds spaces, and the action word-splits its args.
+const planEnv = "STEVEDORE_PLAN"
+
+// planReasons reads the plan's per-image reasons from $STEVEDORE_PLAN, if set.
+func planReasons() (map[string]string, error) {
+	data := os.Getenv(planEnv)
+	if strings.TrimSpace(data) == "" {
+		return map[string]string{}, nil
+	}
+	reasons, err := pipeline.ReasonsFromPlan([]byte(data))
+	if err != nil {
+		return nil, fmt.Errorf("$%s: %w", planEnv, err)
+	}
+	return reasons, nil
+}
 
 // parsePins parses repeated --pin-version id=version flags into a map.
 func parsePins(pins []string) (map[string]string, error) {
@@ -74,6 +94,9 @@ func newReleaseCmd() *cobra.Command {
 				return err
 			}
 			o.PinVersions = pins
+			if o.PlanReasons, err = planReasons(); err != nil {
+				return err
+			}
 			o.SplitPlatforms = split
 			o.KeepGoing = keepGoing
 			o.AllowNonDefaultBranch = allowNonDefault
@@ -90,7 +113,7 @@ func newReleaseCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipChangelog, "skip-changelog", false, "skip changelog generation")
 	cmd.Flags().BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
 	cmd.Flags().StringVar(&changedSince, "changed-since", "", "git ref: only build images whose paths changed since this ref (stateless, CI-native; under marker_refs, since the older of this and the image's marker)")
-	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to build unconditionally, skipping change detection (matrix mode: one plan entry per job)")
+	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to build unconditionally, skipping change detection (matrix mode: one plan entry per job); 'all' selects every image")
 	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; from the plan's `pins`)")
 	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
 	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip GitHub release creation, announcements, and notify webhooks")
