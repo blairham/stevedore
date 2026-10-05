@@ -154,6 +154,41 @@ func TestComputeSensitiveToBuildInputs(t *testing.T) {
 	if fp, _ := Compute(dir, plat, "dist", nil); fp == baseFP {
 		t.Error("changing platforms should change the fingerprint")
 	}
+
+	// extra_flags go to buildx verbatim and can carry build inputs (#59).
+	flags := base
+	flags.ExtraFlags = []string{"--build-arg", "EXTRA=1"}
+	if fp, _ := Compute(dir, flags, "dist", nil); fp == baseFP {
+		t.Error("changing extra_flags should change the fingerprint")
+	}
+}
+
+// COPY preserves a file's mode, so making an entrypoint executable changes the
+// image without changing its bytes (#59). Both the whole-context and the
+// path-scoped walks must see it.
+func TestComputeSensitiveToFileMode(t *testing.T) {
+	for name, scoped := range map[string][]string{"context": nil, "scoped": {"entrypoint.sh"}} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, filepath.Join(dir, "Dockerfile"), "FROM scratch\nCOPY entrypoint.sh /\n")
+			script := filepath.Join(dir, "entrypoint.sh")
+			writeFile(t, script, "#!/bin/sh\n")
+			before, err := Compute(dir, demoImage(), "dist", scoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Chmod(script, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			after, err := Compute(dir, demoImage(), "dist", scoped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before == after {
+				t.Error("chmod +x on a context file should change the fingerprint")
+			}
+		})
+	}
 }
 
 func TestStateRoundTrip(t *testing.T) {

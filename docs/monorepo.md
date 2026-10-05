@@ -89,7 +89,9 @@ image whose context is not a local directory — a remote git or tarball URL —
 
 This default applies to the diff-based modes (`--changed-since`, marker refs).
 An `--only-changed` fingerprint of an image without `paths` still hashes its whole
-context directory, dockerignored files included.
+context directory, dockerignored files included. Besides each file's content it
+hashes its permission bits (`COPY` preserves them, so `chmod +x` is a change), the
+Dockerfile, target, platforms, build args and `extra_flags`.
 
 ### Declaring paths
 

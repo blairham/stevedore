@@ -75,6 +75,13 @@ func Compute(dir string, img config.Image, distDir string, scopedPaths []string)
 	for _, a := range buildArgs {
 		fmt.Fprintf(h, "arg=%s\n", a)
 	}
+	// extra_flags reach buildx verbatim and can carry build inputs of their own
+	// (--build-arg, --secret, --build-context). They are hashed in order, not
+	// sorted: a flag and its value are separate elements, so sorting would mix
+	// pairs up, and a reorder costing one rebuild is the safe direction.
+	for _, f := range img.ExtraFlags {
+		fmt.Fprintf(h, "flag=%s\n", f)
+	}
 
 	// The Dockerfile (it may live outside the context).
 	dockerfile := absPath(dir, img.Dockerfile)
@@ -182,9 +189,10 @@ func hashFiles(h io.Writer, label, root string, rels []string) error {
 	return nil
 }
 
-// hashFile mixes a labeled file's path and content into h. A missing file is
-// recorded as absent rather than erroring, so an optional Dockerfile path is
-// tolerated.
+// hashFile mixes a labeled file's path, permission bits and content into h. The
+// mode counts because COPY preserves it: a `chmod +x entrypoint.sh` changes the
+// image without changing a byte of the file. A missing file is recorded as
+// absent rather than erroring, so an optional Dockerfile path is tolerated.
 func hashFile(h io.Writer, label, path string) error {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -195,7 +203,11 @@ func hashFile(h io.Writer, label, path string) error {
 		return err
 	}
 	defer f.Close()
-	fmt.Fprintf(h, "%s=", label)
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(h, "%s=%04o:", label, info.Mode().Perm())
 	if _, err := io.Copy(h, f); err != nil {
 		return err
 	}
