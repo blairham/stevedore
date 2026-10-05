@@ -28,6 +28,7 @@ image_defaults:           # merged under every image (see "Image defaults")
 
 images:
   - id: myapp             # stable identifier used in logs/artifact names
+                          # (default: project_name for a lone id-less image, else image<N>)
     dockerfile: Dockerfile
     context: .
     target: ""            # optional multi-stage target

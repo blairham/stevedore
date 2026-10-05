@@ -107,6 +107,8 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Fixed
 
+- Two images without an `id` under a `project_name` no longer collide:
+  `project_name` names an id-less image only when it is the only one. (#65)
 - Config validation refuses an unknown `changelog.sort` or
   `change_detection.resolver` (values are case-sensitive) and a
   `versioning.initial` that is not `MAJOR.MINOR.PATCH`, instead of silently
