@@ -6,6 +6,7 @@ Every command, every flag, and the JSON surfaces meant for machines.
 |---------|--------------|
 | `stevedore release` | Full pipeline: build all platforms → push → sign → SBOM → changelog. Requires a clean, tagged checkout unless `--snapshot`. `--split <platform>` builds one native-arch leg of a split release (see [Native multi-arch](monorepo.md#native-multi-arch-one-runner-per-platform)). |
 | `stevedore merge` | Second half of a split release: stitch the legs' per-arch digests into manifest lists (`imagetools create`, by digest), run the gates on them, then sign, attest, tag, and finish the release (changelog, publish). |
+| `stevedore publish` | Last step of a matrix release: write the changelog, create the GitHub release and announce — once, after every `release --only` job. Builds and pushes nothing. See [`publish` flags](#publish-flags). |
 | `stevedore plan` | Resolve versions, change detection, and build-once grouping — print the plan as JSON without building. The `include` array is GitHub Actions matrix shape (see [Matrix mode](monorepo.md#matrix-mode-one-ci-job-per-build)); `--split-platforms` emits one entry per platform with native runner hints. |
 | `stevedore build` | Inner-loop build: one platform, loaded into the local docker daemon, no push. `--push` publishes a multi-arch snapshot — see [`build --push`](#build---push). |
 | `stevedore check` | Validate the config and print the fully-resolved release plan (the exact refs that would publish). |
@@ -74,6 +75,11 @@ planner's decision, so change detection is skipped. `--pin-version <id>=<ver>`
 (repeatable) makes the run tag exactly what the plan resolved instead of
 re-resolving. Both come straight out of a `stevedore plan` entry (`.only` /
 `.pins`); see [Matrix mode](monorepo.md#matrix-mode-one-ci-job-per-build).
+An `--only` run is one job of a matrix, so — like a `--split` leg — it creates no
+GitHub release and posts no announcement; N jobs would otherwise publish N times.
+It still notifies `notify.webhook` and advances its own release markers. Run
+`stevedore publish` once after the matrix to publish. (`merge --only` behaves
+the same way.)
 
 `--split <platform>` builds only that platform, natively, and pushes it
 **untagged, by digest** — no tags, no sign/scan/SBOM/publish. The digest lands
@@ -83,6 +89,22 @@ only the platforms each image configures: an image whose `platforms` doesn't
 include the leg's is skipped (reported with the reason), and writes no digest.
 See
 [Native multi-arch](monorepo.md#native-multi-arch-one-runner-per-platform).
+
+## `publish` flags
+
+`stevedore publish` runs only the publishing end of a release: the changelog, the
+GitHub release (`release.github`) and the announcements (`announce`). It is the
+single publishing step of a [matrix release](monorepo.md#matrix-mode-one-ci-job-per-build),
+run after every `release --only` job has succeeded.
+
+`--only <id,…>` and `--pin-version <id>=<ver>` (repeatable) take the joined
+`only` and `pins` of every plan entry, so the announcement lists the images the
+matrix built and the release is named after the version it pushed. Without the
+pins, a `registry`/`ecr` strategy would re-resolve — and, the jobs having pushed,
+resolve the *next* version. Like `release`, it needs a clean checkout, tagged
+under the `git` strategy.
+
+## Release summary
 
 Every release also writes `<dist>/release-summary.json` and, in GitHub Actions, a
 job-summary table (images, digests, signed/sbom/provenance/test status, vuln

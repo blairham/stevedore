@@ -149,6 +149,7 @@ Working configs, each validated in CI against the real binary:
 |---------|--------------|
 | `stevedore release` | Full pipeline: build → push → scan → test → sign → SBOM → changelog. Clean, tagged checkout unless `--snapshot`. |
 | `stevedore merge` | Second half of a split release: stitch the per-arch digests into manifest lists and run the release tail. |
+| `stevedore publish` | Last step of a matrix release: create the GitHub release and announce, once, after the `release --only` jobs. |
 | `stevedore plan` | Resolve versions, change detection and build grouping, and print the plan as JSON. Builds nothing. |
 | `stevedore build` | Inner loop: one platform, loaded into the local docker daemon, no push. |
 | `stevedore check` | Validate the config and print the exact refs that would publish. |

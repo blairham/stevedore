@@ -166,8 +166,16 @@ splits deciding from building so CI can fan out:
 `--changed-since`, or `--only-changed`), and applies build-once grouping — a
 group is **one** entry, so images sharing a build still ride one runner.
 Each matrix job then runs `release --only <entry.only> <entry.pins>`: it builds
-its entry unconditionally, tags exactly what the plan resolved, and advances
-only its own release markers. Progress goes to stderr; stdout is only the JSON.
+its entry unconditionally, tags exactly what the plan resolved, notifies, and
+advances only its own release markers. Progress goes to stderr; stdout is only
+the JSON.
+
+A matrix job does **not** create the GitHub release or announce — with N jobs
+that would be N `gh release create` calls for one tag and N Slack posts. As with
+split legs and `merge`, one final job does it: `stevedore publish`, given every
+entry's `only` and `pins` (GitHub's `join(….include.*.only, ',')` collects them),
+writes the changelog, creates the release named after the pushed version, and
+announces once. It runs only if every matrix job succeeded.
 
 ```yaml
 jobs:
@@ -195,6 +203,24 @@ jobs:
         with:
           command: release
           args: --only ${{ matrix.only }} ${{ matrix.pins }}
+
+  publish:
+    needs: [plan, build]
+    if: ${{ fromJson(needs.plan.outputs.matrix).include[0] != null }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub release
+    steps:
+      - uses: actions/checkout@v6
+        with: {fetch-depth: 0}
+      - uses: blairham/stevedore@v1
+        env:
+          GH_TOKEN: ${{ github.token }}   # for gh release create
+        with:
+          command: publish
+          args: >-
+            --only ${{ join(fromJson(needs.plan.outputs.matrix).include.*.only, ',') }}
+            ${{ join(fromJson(needs.plan.outputs.matrix).include.*.pins, ' ') }}
 ```
 
 Entries carry the member `ids`, so a caller can also map per-entry metadata —
