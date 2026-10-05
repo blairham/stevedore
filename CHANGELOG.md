@@ -38,6 +38,13 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Added
 
+- `stevedore promote` points new tags, in the image's own repositories or
+  others, at a released digest without rebuilding it, verifying the cosign
+  signature before and after the copy, so signatures and attestations still
+  apply. (#137)
+- Digest-pinned refs for GitOps: `digest_refs` in the summary, `refs`,
+  `digests`, `ref` and `digest` action outputs, and an `outputs:` block that
+  renders a template to a file. (#136)
 - `stevedore publish`: writes the changelog, creates the GitHub release and
   announces once for a matrix release, after the `--only` legs. (#103)
 - `--only all`, and flat `only`/`pins` outputs from `plan` for the final
