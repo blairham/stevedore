@@ -178,7 +178,9 @@ func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos []st
 	// trailing newline), and the per-arch digests are identical across repos
 	// (content-addressed; the legs pushed the same blobs to every repo), so one
 	// list serves them all.
-	dryArgs := imagetoolsCreate(append([]string{"--dry-run"}, sources(repos[0], digests)...)...)
+	// The annotations go on both, so the computed digest is the pushed one.
+	annotations := indexAnnotations(rep.Annotations)
+	dryArgs := imagetoolsCreate(append(append([]string{"--dry-run"}, annotations...), sources(repos[0], digests)...)...)
 	var listDigest string
 	if o.DryRun {
 		r.Preview("docker", dryArgs...)
@@ -193,7 +195,7 @@ func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos []st
 
 	// One untagged create per repository, addressed by the list's digest.
 	for _, repo := range repos {
-		args := imagetoolsCreate(append([]string{"--tag", repo + "@" + listDigest}, sources(repo, digests)...)...)
+		args := imagetoolsCreate(append(append([]string{"--tag", repo + "@" + listDigest}, annotations...), sources(repo, digests)...)...)
 		if err := r.Run("docker", args...); err != nil {
 			return "", err
 		}
@@ -202,6 +204,22 @@ func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos []st
 		return "", nil // Release substitutes the dry-run placeholder
 	}
 	return listDigest, nil
+}
+
+// indexAnnotations renders the --annotation flags for a merged manifest list:
+// index level, since the per-platform manifests were annotated (and pushed,
+// content-addressed) by their split legs and cannot be changed here.
+func indexAnnotations(annotations map[string]string) []string {
+	keys := make([]string, 0, len(annotations))
+	for k := range annotations {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := make([]string, 0, 2*len(keys))
+	for _, k := range keys {
+		args = append(args, "--annotation", "index:"+k+"="+annotations[k])
+	}
+	return args
 }
 
 // imagetoolsCreate renders a `docker buildx imagetools create` argument list.

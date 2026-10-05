@@ -44,6 +44,12 @@ type Config struct {
 	// candidate never moves "latest" or "1".
 	PrereleaseFloatingTags bool `yaml:"prerelease_floating_tags"`
 
+	// DefaultLabels sets org.opencontainers.image.source (the origin remote as
+	// https), .revision (the commit), .version (the image's version) and
+	// .created (the commit date) on every image. An image's own labels win key
+	// by key. On unless set to false.
+	DefaultLabels *bool `yaml:"default_labels"`
+
 	// SourceDateEpoch passes SOURCE_DATE_EPOCH — HEAD's commit time — to every
 	// build, as a build arg and in buildx's environment, so rebuilding a
 	// commit stamps the same timestamps into the image. On unless set to
@@ -264,8 +270,15 @@ type Image struct {
 	// contain Go templates, e.g. "VERSION={{ .Version }}".
 	BuildArgs []string `yaml:"build_args"`
 
-	// Labels are OCI image labels; values may contain Go templates.
+	// Labels are OCI image labels; values may contain Go templates. They
+	// override the default org.opencontainers.image.* labels key by key.
 	Labels map[string]string `yaml:"labels"`
+
+	// Annotations are OCI annotations; values may contain Go templates. They
+	// are set on the image manifest and, for a multi-platform image, on the
+	// index too (a split build's merged list gets them at the index level).
+	// Pushed images only: a local --load build carries none.
+	Annotations map[string]string `yaml:"annotations"`
 
 	// Secrets are BuildKit build secrets exposed via --secret.
 	Secrets []Secret `yaml:"secrets"`
@@ -600,6 +613,12 @@ func orDefault(field *string, value string) {
 }
 
 // Validate checks the config for internal consistency.
+// DefaultLabelsEnabled reports whether the default OCI labels are set
+// (default_labels unset or true).
+func (c *Config) DefaultLabelsEnabled() bool {
+	return c.DefaultLabels == nil || *c.DefaultLabels
+}
+
 // SourceDateEpochEnabled reports whether SOURCE_DATE_EPOCH is passed to builds
 // (source_date_epoch unset or true).
 func (c *Config) SourceDateEpochEnabled() bool {

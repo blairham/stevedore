@@ -25,9 +25,7 @@ images:
     labels:
       org.opencontainers.image.source: "https://github.com/blairham/stevedore"
       org.opencontainers.image.licenses: "Apache-2.0"
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.revision: "{{ .Commit }}"
-      org.opencontainers.image.created: "{{ .CommitDate }}"
+      # revision, version and created are stevedore's defaults.
 
 sign:
   cosign:

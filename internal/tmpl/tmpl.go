@@ -33,10 +33,12 @@ type Context struct {
 	// and 0 in a repository with no commits.
 	CommitDate      string
 	CommitTimestamp int64
-	IsSnapshot      bool
-	IsDefault       bool // HEAD is on the configured default branch
-	Detached        bool // HEAD points at a commit, not a branch (a tag checkout)
-	Env             map[string]string
+	// SourceURL is the origin remote as an https URL, "" without one.
+	SourceURL  string
+	IsSnapshot bool
+	IsDefault  bool // HEAD is on the configured default branch
+	Detached   bool // HEAD points at a commit, not a branch (a tag checkout)
+	Env        map[string]string
 }
 
 // NewContext builds a template context from git info and options.
@@ -58,6 +60,7 @@ func NewContext(projectName, defaultBranch string, gi *gitinfo.Info, snapshot bo
 		// every real release.
 		IsDefault: gi.OnBranch(defaultBranch),
 		Detached:  gi.Detached,
+		SourceURL: gi.SourceURL,
 		Env:       env,
 	}
 	if !gi.CommitTime.IsZero() {

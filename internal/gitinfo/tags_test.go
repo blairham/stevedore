@@ -111,3 +111,37 @@ func TestGatherCommitTime(t *testing.T) {
 		t.Errorf("CommitTime with no commits = %v, want zero", empty.CommitTime)
 	}
 }
+
+func TestHTTPSURL(t *testing.T) {
+	cases := map[string]string{
+		"git@github.com:acme/app.git":                       "https://github.com/acme/app",
+		"github.com:acme/app":                               "https://github.com/acme/app",
+		"https://github.com/acme/app.git":                   "https://github.com/acme/app",
+		"https://x-access-token:s3cr3t@github.com/acme/app": "https://github.com/acme/app",
+		"http://gitlab.example.com/group/sub/app.git/":      "https://gitlab.example.com/group/sub/app",
+		"ssh://git@github.com:22/acme/app.git":              "https://github.com/acme/app",
+		"git://example.org/app":                             "https://example.org/app",
+		"file:///srv/git/app.git":                           "",
+		"/srv/git/app.git":                                  "",
+		"./a:b":                                             "",
+		`C:\repos\app`:                                      "",
+		"":                                                  "",
+	}
+	for in, want := range cases {
+		if got := HTTPSURL(in); got != want {
+			t.Errorf("HTTPSURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGatherSourceURL(t *testing.T) {
+	r := newRepo(t, t.TempDir(), "-b", "main")
+	r.commit("a")
+	if got := gather(t, r.dir).SourceURL; got != "" {
+		t.Errorf("SourceURL without origin = %q, want empty", got)
+	}
+	r.git("remote", "add", "origin", "git@github.com:acme/app.git")
+	if got := gather(t, r.dir).SourceURL; got != "https://github.com/acme/app" {
+		t.Errorf("SourceURL = %q", got)
+	}
+}

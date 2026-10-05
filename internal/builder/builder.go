@@ -56,6 +56,10 @@ type Spec struct {
 	// (where BuildKit takes it to clamp the image's timestamps). A
 	// SOURCE_DATE_EPOCH entry already in BuildArgs is left as the only one.
 	SourceDateEpoch string
+	// Annotations are OCI annotations for a pushed image: on the manifest,
+	// and on the index as well when more than one platform is built (a
+	// single-platform push has no index to annotate).
+	Annotations map[string]string
 }
 
 // Build runs buildx for the spec and returns the pushed image digest (empty
@@ -141,6 +145,7 @@ func outputArgs(s Spec, metaFile string) []string {
 		if metaFile != "" {
 			args = append(args, "--metadata-file", metaFile)
 		}
+		args = append(args, annotationArgs(s)...)
 		// Attestations are only carried by the registry (OCI) exporter, so they
 		// apply to pushes, not local --load or validate-only builds.
 		if s.Provenance {
@@ -155,6 +160,21 @@ func outputArgs(s Spec, metaFile string) []string {
 	default:
 		// Neither push nor load: build to validate only (no output). This is the
 		// --no-push case — it proves every platform builds without publishing.
+	}
+	return args
+}
+
+// annotationArgs renders --annotation flags: "manifest:" for a single
+// platform, "manifest,index:" for several — BuildKit refuses index
+// annotations on an export that has no index.
+func annotationArgs(s Spec) []string {
+	levels := "manifest"
+	if len(s.Platforms) > 1 {
+		levels = "manifest,index"
+	}
+	args := make([]string, 0, 2*len(s.Annotations))
+	for _, k := range sortedKeys(s.Annotations) {
+		args = append(args, "--annotation", levels+":"+k+"="+s.Annotations[k])
 	}
 	return args
 }

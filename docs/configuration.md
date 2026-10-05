@@ -12,6 +12,8 @@ project_name: myapp
 default_branch: main      # branch real releases must be cut from; floating tags publish only here
 prerelease_floating_tags: false   # let a prerelease (1.3.0-rc.1) move floating
                           # tags too; by default it publishes only immutable ones
+default_labels: true      # set org.opencontainers.image.{source,revision,
+                          # version,created} on every image (see below)
 source_date_epoch: true   # pass SOURCE_DATE_EPOCH=<commit time> to every build
                           # (build arg + buildx env); false to opt out
 dist: dist                # output dir for SBOMs and the changelog
@@ -35,11 +37,13 @@ images:
       - "latest"
     build_args:
       - "VERSION={{ .Version }}"
-    labels:
-      org.opencontainers.image.source: "https://github.com/acme/myapp"
-      org.opencontainers.image.version: "{{ .Version }}"
-      org.opencontainers.image.revision: "{{ .Commit }}"
-      org.opencontainers.image.created: "{{ .CommitDate }}"   # not .Date: see below
+    labels:               # override the default OCI labels key by key
+      org.opencontainers.image.licenses: "Apache-2.0"
+      # a hand-written created label: use .CommitDate, not .Date (see below)
+    annotations:          # OCI annotations: on the manifest, and on the index
+                          # of a multi-platform image (a split build's merged
+                          # list gets them at index level); pushed images only
+      org.opencontainers.image.description: "myapp, the service"
     secrets:              # BuildKit --secret entries. An env-backed secret
       - id: github_token  # whose variable is unset or empty is SKIPPED in a
         env: GITHUB_TOKEN # --snapshot build, so local builds work without it;
@@ -239,12 +243,29 @@ undefined field is an error (no silent empty strings). Available fields:
 | `.Timestamp` | Unix seconds of `.Date` |
 | `.CommitDate` | RFC 3339 committer time of HEAD (UTC) — the same on every build of the commit; empty with no commits |
 | `.CommitTimestamp` | Unix seconds of `.CommitDate` (`0` with no commits) |
+| `.SourceURL` | `https://github.com/acme/myapp` — the origin remote as https, credentials dropped; empty without one |
 | `.IsSnapshot` | `true` in a snapshot build |
 | `.IsDefault` | `true` when HEAD is on the default branch — including a tag checkout cut from it |
 | `.Detached` | `true` when HEAD points at a commit rather than a branch (any tag-triggered CI release) |
 | `.Env.NAME` | environment variable `NAME` |
 
 Helper functions: `lower`, `upper`, `trim`, `replace`, `trimPrefix`, `trimSuffix`.
+
+## Default labels
+
+Every image gets these OCI labels unless it sets the key itself in `labels:` (or the
+config sets `default_labels: false`):
+
+| Label | Value |
+|-------|-------|
+| `org.opencontainers.image.source` | the `origin` remote as https (`git@github.com:acme/app.git` → `https://github.com/acme/app`, any credentials dropped) |
+| `org.opencontainers.image.revision` | the full commit SHA — also what the already-released check compares against |
+| `org.opencontainers.image.version` | the image's version |
+| `org.opencontainers.image.created` | the commit date (`.CommitDate`), not the build time, so a rebuild keeps its digest |
+
+A default with nothing to say — no `origin` remote, no commits yet — is left out rather
+than set empty. Labels live in the image config; for metadata a registry shows without
+pulling the config, add the same keys under `annotations:`.
 
 ## Reproducible builds
 
