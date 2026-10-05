@@ -403,4 +403,17 @@ func TestFetchMarkers(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	// Only a remote named exactly origin counts (#63): a lookalike such as
+	// myorigin used to pass a substring test, and the fetch from origin then
+	// failed the release.
+	t.Run("only lookalike remotes: nothing to fetch, no error", func(t *testing.T) {
+		clone, _, git := markerRepos(t)
+		url := git(clone, "remote", "get-url", "origin")
+		git(clone, "remote", "rename", "origin", "myorigin")
+		git(clone, "remote", "add", "origin-mirror", url)
+		if err := FetchMarkers(t.Context(), clone, prefix); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
