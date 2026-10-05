@@ -5,7 +5,7 @@ Every command, every flag, and the JSON surfaces meant for machines.
 | Command | What it does |
 |---------|--------------|
 | `stevedore release` | Full pipeline: build all platforms → push → sign → SBOM → changelog. Requires a clean, tagged checkout unless `--snapshot`. `--split <platform>` builds one native-arch leg of a split release (see [Native multi-arch](monorepo.md#native-multi-arch-one-runner-per-platform)). |
-| `stevedore merge` | Second half of a split release: stitch the legs' per-arch digests into tagged manifest lists (`imagetools create`) and run the release tail (scan, test, sign, SBOM, changelog, publish). |
+| `stevedore merge` | Second half of a split release: stitch the legs' per-arch digests into manifest lists (`imagetools create`, by digest), run the gates on them, then sign, attest, tag, and finish the release (changelog, publish). |
 | `stevedore plan` | Resolve versions, change detection, and build-once grouping — print the plan as JSON without building. The `include` array is GitHub Actions matrix shape (see [Matrix mode](monorepo.md#matrix-mode-one-ci-job-per-build)); `--split-platforms` emits one entry per platform with native runner hints. |
 | `stevedore build` | Inner-loop build: one platform, loaded into the local docker daemon, no push. `--push` publishes multi-arch but skips the release extras. |
 | `stevedore check` | Validate the config and print the fully-resolved release plan (the exact refs that would publish). |

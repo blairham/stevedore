@@ -22,10 +22,11 @@ $ stevedore release
     - ghcr.io/acme/myapp:1.4.0
     - ghcr.io/acme/myapp:9f8e7d6
     - ghcr.io/acme/myapp:latest
-+ docker buildx build --platform linux/amd64,linux/arm64 ... --push .
++ docker buildx build --platform linux/amd64,linux/arm64 ... --output 'type=image,...,push-by-digest=true,push=true' .
 + cosign sign --yes ghcr.io/acme/myapp@sha256:…
 + syft ghcr.io/acme/myapp@sha256:… -o spdx-json=dist/sbom-myapp.spdx.json
 + cosign attest --yes --predicate dist/sbom-myapp.spdx.json --type spdxjson ghcr.io/acme/myapp@sha256:…
++ docker buildx imagetools create --prefer-index=false --tag ghcr.io/acme/myapp:1.4.0 ... ghcr.io/acme/myapp@sha256:…
 ==> changelog written to dist/CHANGELOG.md
 ==> release complete
 ```
@@ -92,7 +93,7 @@ need:
 
 | Tool | Needed for | Required? |
 |------|-----------|-----------|
-| `docker` (with `buildx`) | building & pushing | always |
+| `docker` (with `buildx`) | building & pushing; releases push by digest, so the builder must not use the plain `docker` driver (`docker buildx create --use`; CI's `setup-buildx-action` already does this) | always |
 | `git` | version/tag/changelog | always |
 | `cosign` | signing & attestation | when `sign.cosign.enabled` |
 | `syft` | SBOM generation | when `sbom.enabled` |
