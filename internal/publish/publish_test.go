@@ -33,9 +33,24 @@ func TestRenderPayload(t *testing.T) {
 }
 
 func TestRedact(t *testing.T) {
-	got := redact("https://hooks.slack.com/services/T00/B00/XXXXSECRET")
-	if got != "https://hooks.slack.com/…" {
-		t.Errorf("redact = %q", got)
+	for _, c := range []struct{ in, want string }{
+		{"https://hooks.slack.com/services/T00/B00/XXXXSECRET", "https://hooks.slack.com/…"},
+		{"https://user:XXXXSECRET@hooks.example.com/x", "https://hooks.example.com/…"},
+		{"https://XXXXSECRET@hooks.example.com", "https://hooks.example.com/…"},
+		{"https://hooks.example.com?token=XXXXSECRET", "https://hooks.example.com/…"},
+		{"https://hooks.example.com/?token=XXXXSECRET", "https://hooks.example.com/…"},
+		{"https://hooks.example.com#XXXXSECRET", "https://hooks.example.com/…"},
+		{"https://hooks.example.com:8443", "https://hooks.example.com:8443"},
+		{"hooks.example.com/XXXXSECRET", "…"}, // no scheme: nothing is safe to show
+		{"://XXXXSECRET", "…"},                // does not parse
+	} {
+		got := redact(c.in)
+		if got != c.want {
+			t.Errorf("redact(%q) = %q, want %q", c.in, got, c.want)
+		}
+		if strings.Contains(got, "SECRET") {
+			t.Errorf("redact(%q) leaks the secret: %q", c.in, got)
+		}
 	}
 }
 

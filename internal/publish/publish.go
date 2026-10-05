@@ -185,18 +185,19 @@ func isLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// redact hides all but the scheme+host of a webhook URL for log output.
-func redact(url string) string {
-	for i := 0; i < len(url); i++ {
-		if url[i] == '/' && i > 0 && url[i-1] == '/' {
-			// found "://", now find the next slash after the host
-			for j := i + 1; j < len(url); j++ {
-				if url[j] == '/' {
-					return url[:j] + "/…"
-				}
-			}
-			return url
-		}
+// redact hides all but the scheme and host of a webhook URL for log output.
+// Userinfo, path, query and fragment can each carry a credential, so none of
+// them is printed; anything dropped after the host is marked "/…". A URL that
+// does not parse to a scheme and host is replaced whole — there is no safe
+// part of it to show.
+func redact(raw string) string {
+	u, err := neturl.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "…"
 	}
-	return url
+	out := u.Scheme + "://" + u.Host
+	if u.User != nil || u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		out += "/…"
+	}
+	return out
 }
