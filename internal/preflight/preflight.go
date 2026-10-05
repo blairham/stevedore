@@ -31,6 +31,11 @@ type Requirement struct {
 	Install string
 	// Required reports whether the current invocation actually needs it.
 	Required bool
+	// ProbeMustPass marks a tool that Exe on PATH does not prove present: a
+	// plugin such as buildx lives behind the docker binary, so only a
+	// successful Probe shows it is installed. A failed probe then counts as
+	// not found.
+	ProbeMustPass bool
 }
 
 // Opts selects which optional tools count as required for this invocation.
@@ -86,6 +91,8 @@ func Requirements(cfg *config.Config, o Opts) []Requirement {
 			Reason:   "multi-arch builds via BuildKit",
 			Install:  "https://github.com/docker/buildx#installing",
 			Required: true,
+			// docker on PATH says nothing about the buildx plugin.
+			ProbeMustPass: true,
 		},
 		{
 			Label:    "git",
@@ -177,9 +184,12 @@ func Check(ctx context.Context, reqs []Requirement) []Result {
 	for _, r := range reqs {
 		res := Result{Requirement: r}
 		if path, err := exec.LookPath(r.Exe); err == nil {
-			res.Found = true
-			res.Path = path
-			res.Version = probeVersion(ctx, r.Exe, r.Probe)
+			version, ok := probeVersion(ctx, r.Exe, r.Probe)
+			if ok || !r.ProbeMustPass {
+				res.Found = true
+				res.Path = path
+				res.Version = version
+			}
 		}
 		results = append(results, res)
 	}
@@ -208,24 +218,24 @@ func Verify(results []Result) error {
 }
 
 // probeVersion runs the tool's version probe and returns a concise version
-// string, or "" if the probe fails. Multi-line output (e.g. grype's) is reduced
-// to the first line that actually carries a version number.
-func probeVersion(ctx context.Context, exe string, args []string) string {
+// string and true, or "" and false if the probe fails. Multi-line output (e.g.
+// grype's) is reduced to the first line that actually carries a version number.
+func probeVersion(ctx context.Context, exe string, args []string) (string, bool) {
 	out, err := exec.CommandContext(ctx, exe, args...).Output()
 	if err != nil {
-		return ""
+		return "", false
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	first := strings.TrimSpace(lines[0])
 	if containsDigit(first) {
-		return first
+		return first, true
 	}
 	for _, l := range lines[1:] {
 		if l = strings.TrimSpace(l); containsDigit(l) {
-			return l
+			return l, true
 		}
 	}
-	return first
+	return first, true
 }
 
 func containsDigit(s string) bool {
