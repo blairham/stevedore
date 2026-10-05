@@ -56,5 +56,10 @@ provenance:
   enabled: true
   mode: max
 
+# A real release refuses --skip-scan/--skip-test/--skip-sign/--skip-sbom, and
+# refuses any of these stages being disabled above. Snapshots are exempt.
+policy:
+  require: [scan, test, sign, sbom]
+
 changelog:
   enabled: true

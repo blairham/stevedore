@@ -36,6 +36,8 @@ changelog:
   enabled: true
 change_detection:
   marker_refs: true
+policy:
+  require: [scan, test, sign, sbom]
 `
 
 // dryRunRepo is a tagged repository with an origin that carries a release

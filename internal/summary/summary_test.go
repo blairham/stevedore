@@ -115,3 +115,14 @@ func TestWriteGitHubOutput(t *testing.T) {
 		t.Errorf("no-op without env, got %v", err)
 	}
 }
+
+func TestMarkdownDegraded(t *testing.T) {
+	r := demo()
+	if md := r.Markdown(); strings.Contains(md, "Degraded") {
+		t.Errorf("a release with every stage run is marked degraded:\n%s", md)
+	}
+	r.Degraded = []string{"scan", "test"}
+	if md := r.Markdown(); !strings.Contains(md, "**Degraded release:** ran without scan, test") {
+		t.Errorf("degraded stages missing from the summary:\n%s", md)
+	}
+}
