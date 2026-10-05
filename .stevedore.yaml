@@ -27,7 +27,7 @@ images:
       org.opencontainers.image.licenses: "Apache-2.0"
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.revision: "{{ .Commit }}"
-      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.created: "{{ .CommitDate }}"
 
 sign:
   cosign:

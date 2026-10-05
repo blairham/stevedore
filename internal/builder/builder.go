@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -50,6 +51,11 @@ type Spec struct {
 	CacheTo   []string
 	// ExtraFlags are appended verbatim.
 	ExtraFlags []string
+	// SourceDateEpoch, when set, is passed as SOURCE_DATE_EPOCH both as a
+	// build arg (for a Dockerfile that reads it) and in buildx's environment
+	// (where BuildKit takes it to clamp the image's timestamps). A
+	// SOURCE_DATE_EPOCH entry already in BuildArgs is left as the only one.
+	SourceDateEpoch string
 }
 
 // Build runs buildx for the spec and returns the pushed image digest (empty
@@ -61,7 +67,11 @@ func Build(r *run.Runner, s Spec) (string, error) {
 	}
 	defer cleanup()
 
-	if err := r.Run("docker", buildxArgs(s, metaFile)...); err != nil {
+	var env []string
+	if s.SourceDateEpoch != "" {
+		env = []string{"SOURCE_DATE_EPOCH=" + s.SourceDateEpoch}
+	}
+	if err := r.RunEnv(env, "docker", buildxArgs(s, metaFile)...); err != nil {
 		return "", err
 	}
 	if !s.Push || r.DryRun || metaFile == "" {
@@ -94,6 +104,11 @@ func inputArgs(s Spec) []string {
 		args = appendEach(args, "--tag", s.Refs)
 	}
 	args = appendEach(args, "--build-arg", s.BuildArgs)
+	if s.SourceDateEpoch != "" && !slices.ContainsFunc(s.BuildArgs, func(a string) bool {
+		return strings.HasPrefix(a, "SOURCE_DATE_EPOCH=")
+	}) {
+		args = append(args, "--build-arg", "SOURCE_DATE_EPOCH="+s.SourceDateEpoch)
+	}
 	for _, k := range sortedKeys(s.Labels) {
 		args = append(args, "--label", k+"="+s.Labels[k])
 	}

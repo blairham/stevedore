@@ -26,17 +26,22 @@ type Context struct {
 	Commit      string
 	ShortCommit string
 	Branch      string
-	Date        string
+	Date        string // wall-clock build time; differs on every build
 	Timestamp   int64
-	IsSnapshot  bool
-	IsDefault   bool // HEAD is on the configured default branch
-	Detached    bool // HEAD points at a commit, not a branch (a tag checkout)
-	Env         map[string]string
+	// CommitDate / CommitTimestamp are HEAD's committer time, the same on
+	// every build of a commit — the reproducible alternative to Date. Empty
+	// and 0 in a repository with no commits.
+	CommitDate      string
+	CommitTimestamp int64
+	IsSnapshot      bool
+	IsDefault       bool // HEAD is on the configured default branch
+	Detached        bool // HEAD points at a commit, not a branch (a tag checkout)
+	Env             map[string]string
 }
 
 // NewContext builds a template context from git info and options.
 func NewContext(projectName, defaultBranch string, gi *gitinfo.Info, snapshot bool, now time.Time, env map[string]string) *Context {
-	return &Context{
+	c := &Context{
 		ProjectName: projectName,
 		Version:     gi.Version,
 		Tag:         gi.Tag,
@@ -55,6 +60,11 @@ func NewContext(projectName, defaultBranch string, gi *gitinfo.Info, snapshot bo
 		Detached:  gi.Detached,
 		Env:       env,
 	}
+	if !gi.CommitTime.IsZero() {
+		c.CommitDate = gi.CommitTime.UTC().Format(time.RFC3339)
+		c.CommitTimestamp = gi.CommitTime.Unix()
+	}
+	return c
 }
 
 // WithVersion returns a shallow copy of the context with Version overridden.

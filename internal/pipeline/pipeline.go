@@ -133,6 +133,9 @@ type ImagePlan struct {
 	// Version is the version this image was tagged with — its own under per-image
 	// registry versioning, otherwise the release version.
 	Version string
+	// SourceDateEpoch is the SOURCE_DATE_EPOCH passed to the build, or "" for
+	// none (source_date_epoch: false, or a repository with no commits).
+	SourceDateEpoch string
 }
 
 // Prepared bundles the loaded config, git info, and resolved plans.
@@ -351,10 +354,34 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 		if err != nil {
 			return nil, err
 		}
+		if cfg.SourceDateEpochEnabled() {
+			plan.SourceDateEpoch = sourceDateEpoch(plan.BuildArgs, ctx)
+		}
 		plans = append(plans, plan)
 	}
 	return plans, nil
 }
+
+// sourceDateEpoch is the SOURCE_DATE_EPOCH a build gets: an image's own
+// SOURCE_DATE_EPOCH build arg, else one already in the environment (the
+// reproducible-builds convention is that the caller's value wins), else HEAD's
+// commit time. "" when there is none of these.
+func sourceDateEpoch(buildArgs []string, ctx *tmpl.Context) string {
+	for _, a := range buildArgs {
+		if v, ok := strings.CutPrefix(a, sourceDateEpochVar+"="); ok {
+			return v
+		}
+	}
+	if v := os.Getenv(sourceDateEpochVar); v != "" {
+		return v
+	}
+	if ctx.CommitTimestamp > 0 {
+		return strconv.FormatInt(ctx.CommitTimestamp, 10)
+	}
+	return ""
+}
+
+const sourceDateEpochVar = "SOURCE_DATE_EPOCH"
 
 // floatingPolicy is what decides whether a floating tag may publish this run.
 type floatingPolicy struct {
@@ -549,7 +576,7 @@ func isFloating(tag string) bool {
 // rather than a line of them: a tag that uses any of these is never floating
 // on account of also using .Major or .Minor ("{{ .Major }}.{{ .Minor }}.{{
 // .Patch }}" is a version tag, not a pointer).
-var pinningFields = []string{"Patch", "Prerelease", "Version", "Tag", "LatestTag", "Commit", "ShortCommit", "Date", "Timestamp"}
+var pinningFields = []string{"Patch", "Prerelease", "Version", "Tag", "LatestTag", "Commit", "ShortCommit", "Date", "Timestamp", "CommitDate", "CommitTimestamp"}
 
 // floatingTag reports whether the tag rendered as tag from the template src is
 // floating — a pointer that moves from release to release, so it may only
@@ -1612,22 +1639,23 @@ func Build(o Options) error {
 
 func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance) builder.Spec {
 	return builder.Spec{
-		ID:             plan.Image.ID,
-		Dockerfile:     abs(dir, plan.Image.Dockerfile),
-		Context:        abs(dir, plan.Image.Context),
-		Target:         plan.Image.Target,
-		Platforms:      plan.Image.Platforms,
-		BuildArgs:      plan.BuildArgs,
-		Labels:         plan.Labels,
-		Secrets:        plan.Image.Secrets,
-		Refs:           plan.Refs,
-		Push:           push,
-		Load:           load,
-		Provenance:     prov.Enabled,
-		ProvenanceMode: prov.Mode,
-		CacheFrom:      plan.CacheFrom,
-		CacheTo:        plan.CacheTo,
-		ExtraFlags:     plan.Image.ExtraFlags,
+		ID:              plan.Image.ID,
+		Dockerfile:      abs(dir, plan.Image.Dockerfile),
+		Context:         abs(dir, plan.Image.Context),
+		Target:          plan.Image.Target,
+		Platforms:       plan.Image.Platforms,
+		BuildArgs:       plan.BuildArgs,
+		Labels:          plan.Labels,
+		Secrets:         plan.Image.Secrets,
+		Refs:            plan.Refs,
+		Push:            push,
+		Load:            load,
+		Provenance:      prov.Enabled,
+		ProvenanceMode:  prov.Mode,
+		CacheFrom:       plan.CacheFrom,
+		CacheTo:         plan.CacheTo,
+		ExtraFlags:      plan.Image.ExtraFlags,
+		SourceDateEpoch: plan.SourceDateEpoch,
 	}
 }
 

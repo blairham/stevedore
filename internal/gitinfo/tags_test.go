@@ -96,3 +96,18 @@ func TestGatherOnlyNonVersionTags(t *testing.T) {
 		t.Errorf("Version = %q, want %q", info.Version, want)
 	}
 }
+
+// CommitTime is HEAD's committer date, not the author date and not now.
+func TestGatherCommitTime(t *testing.T) {
+	r := newRepo(t, t.TempDir(), "-b", "main")
+	t.Setenv("GIT_AUTHOR_DATE", "2001-01-01T00:00:00Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2024-05-06T07:08:09Z")
+	r.commit("a")
+	info := gather(t, r.dir)
+	if got := info.CommitTime.Unix(); got != 1714979289 {
+		t.Errorf("CommitTime = %v (%d), want 2024-05-06T07:08:09Z", info.CommitTime, got)
+	}
+	if empty := gather(t, newRepo(t, t.TempDir(), "-b", "main").dir); !empty.CommitTime.IsZero() {
+		t.Errorf("CommitTime with no commits = %v, want zero", empty.CommitTime)
+	}
+}

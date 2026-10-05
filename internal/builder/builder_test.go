@@ -162,3 +162,44 @@ func TestBuildSkipsEmptyCacheEntries(t *testing.T) {
 		t.Errorf("empty cache_to entry should be skipped: %s", cmd)
 	}
 }
+
+func TestSourceDateEpochBuildArg(t *testing.T) {
+	args := strings.Join(buildxArgs(Spec{Dockerfile: "Dockerfile", Context: ".", SourceDateEpoch: "1714979289"}, ""), " ")
+	if !strings.Contains(args, "--build-arg SOURCE_DATE_EPOCH=1714979289") {
+		t.Errorf("SOURCE_DATE_EPOCH build arg missing: %s", args)
+	}
+	// The image's own wins and is not duplicated.
+	args = strings.Join(buildxArgs(Spec{
+		Dockerfile: "Dockerfile", Context: ".", SourceDateEpoch: "5",
+		BuildArgs: []string{"SOURCE_DATE_EPOCH=5"},
+	}, ""), " ")
+	if strings.Count(args, "SOURCE_DATE_EPOCH=") != 1 {
+		t.Errorf("SOURCE_DATE_EPOCH passed more than once: %s", args)
+	}
+	if args := strings.Join(buildxArgs(Spec{Dockerfile: "Dockerfile", Context: "."}, ""), " "); strings.Contains(args, "SOURCE_DATE_EPOCH") {
+		t.Errorf("SOURCE_DATE_EPOCH passed when unset: %s", args)
+	}
+}
+
+// buildx itself must see SOURCE_DATE_EPOCH in its environment: that is where
+// it reads the value it hands BuildKit to clamp the image's timestamps.
+func TestSourceDateEpochEnv(t *testing.T) {
+	bin := t.TempDir()
+	out := filepath.Join(bin, "env")
+	script := "#!/bin/sh\necho \"$SOURCE_DATE_EPOCH\" > " + out + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SOURCE_DATE_EPOCH", "")
+	if _, err := Build(&run.Runner{}, Spec{Dockerfile: "Dockerfile", Context: ".", SourceDateEpoch: "1714979289"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "1714979289" {
+		t.Errorf("buildx saw SOURCE_DATE_EPOCH=%q, want 1714979289", got)
+	}
+}
