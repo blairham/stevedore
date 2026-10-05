@@ -188,10 +188,7 @@ func secretArg(s config.Secret) (string, bool) {
 	if s.File != "" {
 		return fmt.Sprintf("id=%s,src=%s", s.ID, s.File), true
 	}
-	env := s.Env
-	if env == "" {
-		env = s.ID
-	}
+	env := s.EnvName()
 	if v, ok := os.LookupEnv(env); !ok || v == "" {
 		return "", false
 	}

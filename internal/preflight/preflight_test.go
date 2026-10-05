@@ -107,3 +107,19 @@ func TestCheckReportsPresence(t *testing.T) {
 		t.Errorf("bogus exe should not be found: %+v", m["nope"])
 	}
 }
+
+// A split leg or matrix job given the plan's pins reads no registry, so it
+// must not need the tool that lists one.
+func TestRequirementsRegistryListerSkippedWhenPinned(t *testing.T) {
+	for strategy, label := range map[string]string{"ecr": "aws", "registry": "crane"} {
+		cfg := &config.Config{}
+		cfg.Versioning.Strategy = strategy
+		cfg.Versioning.Lister = "crane"
+		if !labels(Requirements(cfg, Opts{}))[label].Required {
+			t.Errorf("%s: %s should be required to derive a version", strategy, label)
+		}
+		if labels(Requirements(cfg, Opts{VersionsPinned: true}))[label].Required {
+			t.Errorf("%s: %s required although every version is pinned", strategy, label)
+		}
+	}
+}

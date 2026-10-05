@@ -312,6 +312,22 @@ type Secret struct {
 	ID   string `yaml:"id"`
 	Env  string `yaml:"env"`
 	File string `yaml:"file"`
+	// Optional lets a real release build without an env-backed secret whose
+	// variable is unset. Without it only a snapshot may: a real release
+	// refuses up front rather than failing deep inside the build.
+	Optional bool `yaml:"optional"`
+}
+
+// EnvName is the environment variable an env-backed secret reads: Env, or the
+// ID when Env is unset. It is empty for a file-backed secret.
+func (s Secret) EnvName() string {
+	if s.File != "" {
+		return ""
+	}
+	if s.Env != "" {
+		return s.Env
+	}
+	return s.ID
 }
 
 // Sign configures image signing.

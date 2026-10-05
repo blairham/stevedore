@@ -41,10 +41,11 @@ images:
       org.opencontainers.image.revision: "{{ .Commit }}"
       org.opencontainers.image.created: "{{ .CommitDate }}"   # not .Date: see below
     secrets:              # BuildKit --secret entries. An env-backed secret
-      - id: github_token  # whose variable is unset or empty is SKIPPED (like an
-        env: GITHUB_TOKEN # empty cache entry), so a config can declare a
-      # - id: npmrc        # CI-minted token (e.g. a private-module fetch token)
-      #   file: ./.npmrc   # that stays inert on local builds that don't export it.
+      - id: github_token  # whose variable is unset or empty is SKIPPED in a
+        env: GITHUB_TOKEN # --snapshot build, so local builds work without it;
+        # optional: true  # a real release REFUSES to start without it, unless
+      # - id: npmrc        # the secret is marked optional.
+      #   file: ./.npmrc
     cache_from:           # buildx --cache-from sources; empty-rendering
       # entries are skipped, so an env-templated value enables caching only
       # where the environment provides it (e.g. CI) and stays inert locally
@@ -163,6 +164,12 @@ and `--split` legs are not real releases and are exempt. Whether or not a
 policy is set, a real release that ran without any of these stages is marked
 **degraded** in the release summary (`"degraded": ["scan", …]` in the JSON, and a
 banner over the job-summary table).
+
+Before anything is pushed, a run that will create a GitHub release checks that
+`gh` can authenticate — `GH_TOKEN` (or `GITHUB_TOKEN`) is set, or `gh auth status`
+succeeds — so a missing token fails the run up front rather than after the images
+are out. In GitHub Actions, pass `GH_TOKEN: ${{ github.token }}` to the release
+step.
 
 Publishing (`release.github` + `announce`) runs only on real releases, never on
 `--snapshot`, and can be turned off per-run with `--skip-publish`. It also needs
