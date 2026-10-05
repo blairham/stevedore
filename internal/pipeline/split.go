@@ -95,6 +95,85 @@ func writeSplitDigest(dir, dist string, ids, platforms []string, digest string) 
 	return nil
 }
 
+// splitVersionFile sits beside an image's digest files and holds the version
+// the leg resolved for it. The merge run compares it with the version it
+// resolves itself: the legs' builds already carry that version (labels, build
+// args), so tagging them with another one would publish a mislabelled image.
+const splitVersionFile = "version"
+
+// writeSplitVersions records each group member's resolved version for the
+// merge run's cross-check (see checkMergeInputs). Every leg of a plan writes
+// the same content, so legs sharing one dist/digests overwrite it harmlessly.
+func writeSplitVersions(dir, dist string, grp []imageEval) error {
+	for _, m := range grp {
+		if m.plan.Version == "" {
+			continue
+		}
+		path := filepath.Join(splitDigestDir(dir, dist, m.plan.Image.ID), splitVersionFile)
+		if err := writeDistFile(path, []byte(m.plan.Version+"\n")); err != nil {
+			return fmt.Errorf("write split version: %w", err)
+		}
+	}
+	return nil
+}
+
+// hasSplitDigests reports whether a leg recorded any digest for id.
+func hasSplitDigests(dir, dist, id string) bool {
+	entries, err := os.ReadDir(splitDigestDir(dir, dist, id))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && e.Name() != splitVersionFile {
+			return true
+		}
+	}
+	return false
+}
+
+// checkMergeInputs refuses a merge whose own decisions disagree with what the
+// split legs built. Without --only, merge re-runs change detection and version
+// resolution rather than reading the plan, and either can come out differently
+// by the time it runs (a marker moved, a registry gained a tag, a `command`
+// strategy is not deterministic). Two disagreements are caught:
+//
+//   - an image the legs built and recorded a version for, which merge resolves
+//     to a different version: the per-arch images carry the legs' version, so
+//     tagging them with merge's would mislabel them;
+//   - an image the legs pushed digests for that merge's change detection skips
+//     (only checked without --only, where merge chose the set itself): it would
+//     be left pushed but never tagged, signed or released.
+//
+// Either way the fix is the same: give merge the plan's `only` and `pins`.
+func checkMergeInputs(o Options, dist string, toBuild [][]imageEval, skipped []imageEval) error {
+	var problems []string
+	for _, grp := range toBuild {
+		for _, m := range grp {
+			data, err := os.ReadFile(filepath.Clean(filepath.Join(splitDigestDir(o.Dir, dist, m.plan.Image.ID), splitVersionFile)))
+			if err != nil {
+				continue // an older leg, or no digests at all (mergeGroup reports that)
+			}
+			if built := strings.TrimSpace(string(data)); built != "" && built != m.plan.Version {
+				problems = append(problems, fmt.Sprintf("image %s: the split legs built version %s, but merge resolved %s",
+					m.plan.Image.ID, built, m.plan.Version))
+			}
+		}
+	}
+	if len(o.Only) == 0 {
+		for _, m := range skipped {
+			if hasSplitDigests(o.Dir, dist, m.plan.Image.ID) {
+				problems = append(problems, fmt.Sprintf("image %s: the split legs pushed digests for it (%s), but merge skipped it: %s",
+					m.plan.Image.ID, splitDigestDir(o.Dir, dist, m.plan.Image.ID), m.reason))
+			}
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("merge disagrees with what the split legs built:\n  %s\npass merge the plan's only and pins outputs (--only <ids> --pin-version <id>=<version>) so it releases exactly what the legs built",
+		strings.Join(problems, "\n  "))
+}
+
 // readSplitDigests loads an image's per-arch digests and the (sanitized)
 // platforms they cover. Filenames are stable-sorted so merge output is
 // deterministic. A file covering a platform outside configured is an error,
@@ -114,7 +193,7 @@ func readSplitDigests(dir, dist, id string, configured []string) (digests []stri
 	covered = map[string]bool{}
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && e.Name() != splitVersionFile {
 			names = append(names, e.Name())
 		}
 	}

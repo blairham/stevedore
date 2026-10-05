@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.plan }}
+      only: ${{ steps.plan.outputs.only }} # every planned image id, once
+      pins: ${{ steps.plan.outputs.pins }} # every planned --pin-version
     steps:
       - uses: actions/checkout@v6
         with:
@@ -76,5 +78,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: blairham/stevedore@v1
+        env:
+          STEVEDORE_PLAN: ${{ needs.plan.outputs.matrix }} # the plan's reasons in the summary
         with:
           command: merge
+          # Merge exactly what the legs built, at the versions they built.
+          # Without these, merge re-runs change detection and version
+          # resolution, and refuses if it comes out differently.
+          args: --only ${{ needs.plan.outputs.only }} ${{ needs.plan.outputs.pins }}
