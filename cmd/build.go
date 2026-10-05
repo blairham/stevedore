@@ -23,13 +23,7 @@ func newBuildCmd() *cobra.Command {
 			}
 			o.Snapshot = true // local builds are always snapshots
 			if push {
-				// build --push publishes multi-arch but skips the release
-				// extras (sign/sbom/changelog) — that's what `release` is for.
-				o.Push = true
-				o.SkipSign = true
-				o.SkipSBOM = true
-				o.SkipChangelog = true
-				return pipeline.Release(o)
+				return pipeline.Release(pipeline.BuildPushOptions(o))
 			}
 			return pipeline.Build(o)
 		},

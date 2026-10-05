@@ -170,7 +170,8 @@ without bespoke CI glue:
 Notifications fire only after the image passed every gate (scan, smoke test)
 and its release stages completed. Unlike `announce`, they also fire on
 `--snapshot` pushes — the payload carries the `snapshot` flag so the consumer
-can route dev vs. prod — and they respect `--skip-publish`. On a split release
+can route dev vs. prod — and they respect `--skip-publish`. `stevedore build
+--push` never notifies: an inner-loop push is not a deploy. On a split release
 they fire from the `merge` run, once the manifest lists are gated and tagged. The URL
 and credentials come from environment variables; a missing variable or a
 non-2xx response fails the release rather than silently skipping the trigger.
