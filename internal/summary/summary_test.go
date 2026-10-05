@@ -55,10 +55,18 @@ func TestMarkdown(t *testing.T) {
 }
 
 func TestVulnCell(t *testing.T) {
-	if got := vulnCell(nil); got != "—" {
-		t.Errorf("empty vulns = %q", got)
+	if got := vulnCell(false, nil); got != "—" {
+		t.Errorf("unscanned = %q, want —", got)
 	}
-	if got := vulnCell(map[string]int{"critical": 1, "medium": 3}); got != "1 critical, 3 medium" {
+	// A scan that found nothing is clean, not indistinguishable from no scan
+	// (#66) — whether the count map is nil or empty.
+	if got := vulnCell(true, nil); got != "clean" {
+		t.Errorf("scanned, nil counts = %q, want clean", got)
+	}
+	if got := vulnCell(true, map[string]int{}); got != "clean" {
+		t.Errorf("scanned, empty counts = %q, want clean", got)
+	}
+	if got := vulnCell(true, map[string]int{"critical": 1, "medium": 3}); got != "1 critical, 3 medium" {
 		t.Errorf("vulnCell = %q (want most-severe first)", got)
 	}
 }
@@ -180,5 +188,34 @@ func TestWriteGitHubOutputPins(t *testing.T) {
 	}
 	if strings.Contains(string(data), "\nref=") || strings.Contains(string(data), "\ndigest=") {
 		t.Errorf("ref/digest set with two pinned images:\n%s", data)
+	}
+}
+
+// A clean scanned image renders as clean and says scanned in the JSON; an
+// unscanned one does neither (#66).
+func TestCleanScanIsVisible(t *testing.T) {
+	r := Result{Project: "p", Images: []Image{
+		{ID: "clean", Digest: "sha256:aa", Scanned: true, Vulns: map[string]int{}},
+		{ID: "unscanned", Digest: "sha256:bb"},
+	}}
+	md := r.Markdown()
+	if !strings.Contains(md, "| clean |\n") || strings.Count(md, "| clean |") != 1 {
+		t.Errorf("want exactly the scanned image rendered clean:\n%s", md)
+	}
+	data, err := r.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Images []struct {
+			ID      string `json:"id"`
+			Scanned bool   `json:"scanned"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !back.Images[0].Scanned || back.Images[1].Scanned {
+		t.Errorf("scanned flags = %+v, want [true false]", back.Images)
 	}
 }

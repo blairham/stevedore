@@ -107,6 +107,9 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Fixed
 
+- A scanned image with no findings shows `clean` in the job summary, and the
+  summary JSON gains a per-image `scanned` flag, so a clean scan no longer
+  reads like no scan at all. (#66)
 - The changelog flags commits with a `BREAKING CHANGE:` footer as breaking
   and matches commit types case-insensitively, so `Feat: x` is a feature
   rather than "Other". (#61)

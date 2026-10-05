@@ -182,6 +182,8 @@ array, and the job summary opens with a "Degraded release" banner.
 `platforms`: per platform, whether it was `scanned`, its `vulns`, whether it was `tested` (or `test_skipped` with the
 reason), and its `sbom` path; its top-level `vulns` counts the distinct
 findings across platforms, and `tested` is true only when every platform was.
+`vulns` is omitted when there is nothing to count, so read the image's `scanned`
+to tell a clean scan from none; the job summary shows `clean` and `—`.
 
 ## Editor support
 
