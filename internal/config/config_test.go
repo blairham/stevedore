@@ -404,3 +404,27 @@ func TestValidateScanVEXMustExist(t *testing.T) {
 		t.Errorf("existing VEX document should pass: %v", err)
 	}
 }
+
+func TestValidateNotifyPayloadTemplateParses(t *testing.T) {
+	cfg := Config{Version: 1, Images: []Image{{ID: "a", Repositories: []string{"r1"}}}}
+	cfg.Notify.Webhook = NotifyWebhook{Enabled: true, URLEnv: "X", PayloadTemplate: `{"s": {{ json .Image }`}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "notify.webhook.payload_template") {
+		t.Fatalf("an unparseable payload template should fail validation, got %v", err)
+	}
+	cfg.Notify.Webhook.PayloadTemplate = `{"s": {{ json .Image }}}`
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("a valid payload template should pass: %v", err)
+	}
+}
+
+func TestNotifyWebhookIsRequiredDefaultsTrue(t *testing.T) {
+	f, tr := false, true
+	for _, c := range []struct {
+		in   *bool
+		want bool
+	}{{nil, true}, {&tr, true}, {&f, false}} {
+		if got := (NotifyWebhook{Required: c.in}).IsRequired(); got != c.want {
+			t.Errorf("IsRequired(%v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}

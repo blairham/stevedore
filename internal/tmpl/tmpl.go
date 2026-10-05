@@ -6,6 +6,7 @@ package tmpl
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
@@ -210,16 +211,38 @@ var funcs = template.FuncMap{
 	"replace":    strings.ReplaceAll,
 	"trimPrefix": strings.TrimPrefix,
 	"trimSuffix": strings.TrimSuffix,
+	"json":       toJSON,
+}
+
+// toJSON encodes v as JSON, so a template that builds a JSON document (the
+// notify payload) can place any value without hand-quoting it.
+func toJSON(v any) (string, error) {
+	b, err := json.Marshal(v)
+	return string(b), err
 }
 
 // Render evaluates a single template string against ctx.
 func Render(s string, ctx *Context) (string, error) {
+	return RenderData(s, ctx)
+}
+
+// Parse reports whether s is a syntactically valid template using the helper
+// functions, so a config error surfaces at load rather than mid-release.
+func Parse(s string) error {
+	_, err := template.New("stevedore").Funcs(funcs).Parse(s)
+	return err
+}
+
+// RenderData evaluates a template string against arbitrary data, with the same
+// helper functions and missingkey=error as Render. It is for templates whose
+// data is not the release context, such as the notify payload.
+func RenderData(s string, data any) (string, error) {
 	t, err := template.New("stevedore").Funcs(funcs).Option("missingkey=error").Parse(s)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", s, err)
 	}
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, ctx); err != nil {
+	if err := t.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("render template %q: %w", s, err)
 	}
 	return buf.String(), nil
