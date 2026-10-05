@@ -15,6 +15,8 @@ import (
 
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/fingerprint"
+	"github.com/blairham/stevedore/internal/gitinfo"
+	"github.com/blairham/stevedore/internal/tmpl"
 )
 
 // A grype that fails the gate for any image in a repository named */bad.
@@ -59,6 +61,8 @@ func keepGoingHarness(t *testing.T) (dir, log string, o Options, p *Prepared, gr
 	t.Cleanup(srv.Close)
 	t.Setenv("TEST_NOTIFY_URL", srv.URL)
 	p.Config.ProjectName = "proj"
+	p.Git = &gitinfo.Info{Version: "1.0.0"}
+	p.Ctx = &tmpl.Context{ProjectName: "proj", Version: "1.0.0"}
 	p.Config.Notify.Webhook = config.NotifyWebhook{Enabled: true, URLEnv: "TEST_NOTIFY_URL"}
 	notified = func() []string {
 		mu.Lock()
