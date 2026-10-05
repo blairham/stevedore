@@ -114,7 +114,8 @@ test:
   enabled: true           # smoke-test the built image before signing/tagging
   cmd: ["/usr/bin/myapp", "--version"]   # run inside the container
   expect_exit: 0          # required exit code
-  timeout: 30s            # Go duration; default 60s
+  timeout: 30s            # Go duration; default 60s. A container still running at
+                          # the timeout (or when the run is canceled) is removed
   platforms: native       # native (default): test the platforms the docker
                           # host runs natively, skip the rest with a warning
                           # (if none is native, test under emulation);
