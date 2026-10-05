@@ -20,7 +20,7 @@ default is `git`; the others let you avoid relying on git tags entirely.
 
 | Strategy | Where the version comes from |
 |----------|------------------------------|
-| `git` (default) | Git tags. Clean, tagged checkout → the tag with any leading `v` stripped (`v1.4.0` → `1.4.0`). Otherwise a snapshot like `1.4.0-SNAPSHOT-9f8e7d6` (`-dirty` if the tree is dirty). |
+| `git` (default) | Git tags. Clean checkout with a tag **on HEAD** → the tag with any leading `v` stripped (`v1.4.0` → `1.4.0`). Otherwise — HEAD untagged, dirty tree, or `--snapshot` — a snapshot of the latest reachable tag like `1.4.0-SNAPSHOT-9f8e7d6` (`-dirty` if the tree is dirty; `0.0.0-SNAPSHOT-…` with no tags at all). |
 | `registry` | Lists the existing tags in a registry repo (via `crane`), takes the highest semver, and bumps it by `patch`/`minor`/`major`. Non-semver tags (`latest`, commit SHAs) are ignored. |
 | `ecr` | Like `registry`, but lists tags via `aws ecr describe-images` using your AWS credentials directly — no `crane` or docker credential helper. Region is inferred from the ECR host (override with `region:`). |
 | `static` | An explicit `value:`. |
@@ -35,8 +35,9 @@ unreachable registry — it warns and shows a placeholder so the rest of the con
 still validates offline.
 
 `stevedore release` refuses to run on a dirty tree unless you pass `--snapshot`. A
-git tag on HEAD is required **only** for the `git` strategy — the others source the
-version elsewhere, which is handy when your tags drift out of sync with what's
+git tag on HEAD is required **only** for the `git` strategy (a tag on an earlier
+commit does not count: releasing under it would overwrite that release's image
+tags from a different commit). The others source the version elsewhere, which is handy when your tags drift out of sync with what's
 actually published.
 
 ## Deriving the version from ECR

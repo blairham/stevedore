@@ -23,7 +23,11 @@ import (
 
 // GitHubRelease creates (or updates) a GitHub release for tag using the gh CLI,
 // with notesPath as the body. Assets are the files to attach (e.g. SBOMs).
-func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, title, notesPath string, assets []string) error {
+//
+// target is the commit the tag is created at when it does not exist yet (gh
+// otherwise tags the default branch's tip, which need not be what was built);
+// it is ignored by gh when the tag already exists, and omitted when empty.
+func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, target, title, notesPath string, assets []string) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -34,6 +38,9 @@ func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, title, notesPat
 		return fmt.Errorf("release.github.enabled but gh not found on PATH")
 	}
 	args := []string{"release", "create", tag, "--title", title, "--notes-file", notesPath}
+	if target != "" {
+		args = append(args, "--target", target)
+	}
 	if cfg.Draft {
 		args = append(args, "--draft")
 	}

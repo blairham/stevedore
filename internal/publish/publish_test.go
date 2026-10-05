@@ -82,14 +82,14 @@ func TestAnnounceDisabledIsNoop(t *testing.T) {
 }
 
 func TestGitHubReleaseNeedsTag(t *testing.T) {
-	err := GitHubRelease(&run.Runner{DryRun: true}, config.GitHubRelease{Enabled: true}, "", "title", "notes.md", nil)
+	err := GitHubRelease(&run.Runner{DryRun: true}, config.GitHubRelease{Enabled: true}, "", "", "title", "notes.md", nil)
 	if err == nil {
 		t.Error("expected error when tag is empty")
 	}
 }
 
 func TestGitHubReleaseDisabledIsNoop(t *testing.T) {
-	if err := GitHubRelease(&run.Runner{}, config.GitHubRelease{}, "", "", "", nil); err != nil {
+	if err := GitHubRelease(&run.Runner{}, config.GitHubRelease{}, "", "", "", "", nil); err != nil {
 		t.Errorf("disabled github release should be a no-op, got %v", err)
 	}
 }

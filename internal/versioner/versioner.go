@@ -40,8 +40,11 @@ type Input struct {
 func Resolve(in Input) (string, error) {
 	switch in.Cfg.Strategy {
 	case "git", "":
-		// Preserve the historical git behavior verbatim, including its own
-		// snapshot/dirty handling.
+		// A snapshot is a snapshot even on a tagged commit: --snapshot must
+		// never publish under the clean release version.
+		if in.Snapshot {
+			return in.Git.SnapshotVersion(), nil
+		}
 		return in.Git.Version, nil
 	case "registry", "ecr":
 		// Both list existing tags and bump the highest semver; the tag lister
@@ -103,15 +106,7 @@ func snapshotize(base string, in Input) string {
 	if !in.Snapshot {
 		return base
 	}
-	sc := "unknown"
-	if in.Git != nil && in.Git.ShortCommit != "" {
-		sc = in.Git.ShortCommit
-	}
-	v := fmt.Sprintf("%s-SNAPSHOT-%s", base, sc)
-	if in.Git != nil && in.Git.Dirty {
-		v += "-dirty"
-	}
-	return v
+	return gitinfo.SnapshotOf(base, in.Git)
 }
 
 func getenv(in Input) func(string) string {

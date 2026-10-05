@@ -4,6 +4,7 @@
 package pipeline
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -196,5 +197,27 @@ func TestLocalPlatform(t *testing.T) {
 		if got := localPlatform(tc.platforms, tc.goarch); got != tc.want {
 			t.Errorf("localPlatform(%v, %s) = %s, want %s", tc.platforms, tc.goarch, got, tc.want)
 		}
+	}
+}
+
+// A git-strategy release from a commit past the last tag must refuse rather
+// than republish that tag's version; the other strategies source the version
+// elsewhere and may release from it.
+func TestGuardReleasable_UntaggedHEAD(t *testing.T) {
+	untagged := &gitinfo.Info{LatestTag: "v1.4.0", ShortCommit: "abc1234"}
+	err := guardReleasable(untagged, "git")
+	if err == nil {
+		t.Fatal("git strategy on an untagged HEAD: want an error")
+	}
+	if !strings.Contains(err.Error(), "no git tag on HEAD") || !strings.Contains(err.Error(), "v1.4.0") {
+		t.Errorf("error = %q, want it to name the missing tag and the stale one", err)
+	}
+	for _, s := range []string{"static", "registry", "ecr", "env", "command"} {
+		if err := guardReleasable(untagged, s); err != nil {
+			t.Errorf("%s strategy on an untagged HEAD: %v", s, err)
+		}
+	}
+	if err := guardReleasable(&gitinfo.Info{Tag: "v1.4.0", LatestTag: "v1.4.0"}, "git"); err != nil {
+		t.Errorf("git strategy on a tagged HEAD: %v", err)
 	}
 }

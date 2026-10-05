@@ -134,6 +134,13 @@ notify:                   # machine-readable post-push notification (CD trigger)
 Publishing (`release.github` + `announce`) runs only on real releases, never on
 `--snapshot`, and can be turned off per-run with `--skip-publish`.
 
+The GitHub release is named after the **release version**: the tag on HEAD when
+it names that version (the `git` strategy always does), otherwise `v<version>` —
+for example a `registry` strategy computing `1.5.0` creates release `v1.5.0`, tagged
+at the commit that was built if the tag does not exist yet. A tag that is merely
+reachable from HEAD is never reused: it names a release already cut from an
+earlier commit.
+
 ## Post-push notifications
 
 Where `announce` posts one human-readable message at the end of a release,
@@ -170,7 +177,8 @@ undefined field is an error (no silent empty strings). Available fields:
 |-------|---------|
 | `.ProjectName` | `myapp` |
 | `.Version` | `1.4.0` |
-| `.Tag` | `v1.4.0` |
+| `.Tag` | `v1.4.0` — the tag on HEAD; empty on an untagged commit |
+| `.LatestTag` | `v1.4.0` — the most recent tag reachable from HEAD (`.Tag` when HEAD is tagged) |
 | `.Commit` | full SHA |
 | `.ShortCommit` | `9f8e7d6` |
 | `.Branch` | `main` |
