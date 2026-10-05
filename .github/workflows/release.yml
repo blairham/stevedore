@@ -174,7 +174,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # the tag list, to decide whether this is the newest
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0 # every tag: the newest-release check, and $TAG itself
 
       - name: Repoint moving tags
         env:
@@ -200,6 +201,13 @@ jobs:
             exit 0
           fi
 
+          # Point at the release's commit by name, never at HEAD. On
+          # workflow_dispatch HEAD is whatever the dispatch ran from (normally
+          # main), and the forward-only check above passes for the latest tag,
+          # so tagging HEAD would move `@v1` onto unreleased code. The checkout
+          # ref above makes HEAD the tag too; this does not rely on it.
+          target=$(git rev-parse --verify --end-of-options "refs/tags/${TAG}^{commit}")
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for t in "$major" "$minor"; do
@@ -208,9 +216,9 @@ jobs:
             # restatement of what we just did locally. Empty means "must not
             # exist yet", which is the first-v1 case.
             old=$(git ls-remote --tags origin "refs/tags/$t" | cut -f1)
-            git tag -f -a "$t" -m "$t -> $TAG"
+            git tag -f -a "$t" -m "$t -> $TAG" "$target"
             # A lease rather than a bare force: if a concurrent release already
             # moved the pointer, fail loudly instead of dragging it backwards.
             git push --force-with-lease="refs/tags/$t:${old}" origin "refs/tags/$t"
-            echo "==> $t -> $TAG"
+            echo "==> $t -> $TAG ($target)"
           done
