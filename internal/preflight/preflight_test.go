@@ -4,6 +4,8 @@
 package preflight
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -120,6 +122,45 @@ func TestRequirementsRegistryListerSkippedWhenPinned(t *testing.T) {
 		}
 		if labels(Requirements(cfg, Opts{VersionsPinned: true}))[label].Required {
 			t.Errorf("%s: %s required although every version is pinned", strategy, label)
+		}
+	}
+}
+
+// fakeDocker puts a docker script on PATH whose buildx subcommand fails the
+// way docker does when the plugin is not installed, while `docker version`
+// still works.
+func fakeDocker(t *testing.T, buildxInstalled bool) {
+	t.Helper()
+	dir := t.TempDir()
+	buildx := `echo "docker: 'buildx' is not a docker command." >&2; exit 1`
+	if buildxInstalled {
+		buildx = `echo "github.com/docker/buildx v0.17.1 abc123"`
+	}
+	script := "#!/bin/sh\ncase \"$1\" in\n  buildx) " + buildx + " ;;\n  *) echo 27.3.1 ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+}
+
+// docker on PATH must not vouch for the buildx plugin: a failed `docker buildx
+// version` means buildx is missing, so doctor and the pipeline preflight
+// report it instead of the build failing later.
+func TestCheckBuildxNeedsWorkingProbe(t *testing.T) {
+	for _, installed := range []bool{false, true} {
+		fakeDocker(t, installed)
+		m := map[string]Result{}
+		for _, r := range Check(t.Context(), Requirements(&config.Config{}, Opts{})) {
+			m[r.Label] = r
+		}
+		if !m["docker"].Found {
+			t.Errorf("installed=%v: docker should be found: %+v", installed, m["docker"])
+		}
+		if got := m["docker buildx"].Found; got != installed {
+			t.Errorf("installed=%v: buildx Found = %v, want %v (%+v)", installed, got, installed, m["docker buildx"])
+		}
+		if err := Verify([]Result{m["docker buildx"]}); (err != nil) == installed {
+			t.Errorf("installed=%v: Verify = %v", installed, err)
 		}
 	}
 }
