@@ -46,6 +46,11 @@ will be flagged as an error inside a user's editor.
 
 ## Tests
 
+**New functionality and bug fixes come with tests in the same pull request.**
+A bug fix comes with a test that fails without the fix; a new config field,
+flag or command comes with a test that exercises it. A PR without one is not
+ready to merge.
+
 - `go test -race ./...`, and tests must never touch real user state — use
   `t.TempDir()`.
 - Anything that depends on git's behavior should drive **a real git repository**
@@ -71,9 +76,10 @@ including that no employer holds rights to it.
 
 ## Commits and PRs
 
-- Conventional-commit prefixes (`fix:`, `feat:`, `ci:`, `docs:`, `chore:`). The
-  changelog is generated from them, and `chore:`/`docs:`/`test:` are filtered out
-  of release notes.
+- Conventional-commit prefixes (`fix:`, `feat:`, `ci:`, `docs:`, `chore:`).
+- A user-visible change gets a line under `[Unreleased]` in
+  [`CHANGELOG.md`](CHANGELOG.md), written for someone upgrading. That section
+  becomes the release notes; commit subjects do not.
 - Explain the **why** in the commit message. The diff already says what.
 - One change per PR.
 - Put `Closes #N` in the PR body so the issue actually closes.
@@ -91,7 +97,10 @@ existing field means is a v2 change, and needs a deprecation path first.
 
 ## Releasing
 
-Maintainers only. Tag `vX.Y.Z` on `main`; the release workflow does the rest:
+Maintainers only. First move the CHANGELOG's `[Unreleased]` entries under
+`## [X.Y.Z] - <date>` in a pull request. Then tag `vX.Y.Z` on `main`, on that
+commit or a later one; the release workflow does the rest, and refuses a tag
+whose CHANGELOG section is missing or empty:
 stevedore builds and publishes its own image (dogfooding), GoReleaser publishes
 the CLI binary, the GitHub release and the Homebrew formula, and a final job
 repoints the moving `vX` / `vX.Y` tags. Prereleases never move those pointers.

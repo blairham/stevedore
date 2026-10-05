@@ -23,5 +23,6 @@ against: a real repo, a dry-run plan, a detached-HEAD checkout.
 ---
 
 - [ ] I have signed the CLA (see CLA.md)
+- [ ] A user-visible change has a line under `[Unreleased]` in CHANGELOG.md
 
 Closes #

@@ -15,7 +15,7 @@ What helps: the stevedore version (`stevedore --version`), the relevant part of
 your `.stevedore.yaml`, and what an attacker gets. A proof of concept is welcome
 but not required to start the conversation.
 
-Expect an acknowledgement within a few days. This is a personal project, not a
+Expect an acknowledgement within 7 days. This is a personal project, not a
 funded security team — if it is quiet, it is a calendar problem rather than
 disinterest, and a nudge on the same thread is fine.
 
