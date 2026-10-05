@@ -333,7 +333,7 @@ func (i *Info) ReleaseTag(version string) string {
 // CommitsSince returns commit subjects (and bodies) reachable from HEAD but not
 // from ref. If ref is empty, all commits are returned. Newest first.
 func CommitsSince(ctx context.Context, dir, ref string) ([]Commit, error) {
-	args := []string{"log", "--no-merges", "--pretty=format:%H%x1f%s%x1f%an%x1e"}
+	args := []string{"log", "--no-merges", "--pretty=format:%H%x1f%s%x1f%an%x1f%b%x1e"}
 	if ref != "" {
 		args = append(args, ref+"..HEAD")
 	}
@@ -348,13 +348,14 @@ func CommitsSince(ctx context.Context, dir, ref string) ([]Commit, error) {
 			continue
 		}
 		fields := strings.Split(rec, "\x1f")
-		if len(fields) < 3 {
+		if len(fields) < 4 {
 			continue
 		}
 		commits = append(commits, Commit{
 			SHA:     fields[0],
 			Subject: fields[1],
 			Author:  fields[2],
+			Body:    strings.TrimSpace(fields[3]),
 		})
 	}
 	return commits, nil
@@ -365,6 +366,9 @@ type Commit struct {
 	SHA     string
 	Subject string
 	Author  string
+	// Body is the message after the subject line, where Conventional Commits
+	// footers such as "BREAKING CHANGE:" live.
+	Body string
 }
 
 // output is run for the best-effort fields of Info: a repository with no

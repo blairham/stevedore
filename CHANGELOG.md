@@ -107,6 +107,9 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ### Fixed
 
+- The changelog flags commits with a `BREAKING CHANGE:` footer as breaking
+  and matches commit types case-insensitively, so `Feat: x` is a feature
+  rather than "Other". (#61)
 - The GoReleaser import merges per-arch entries whatever order they list
   their repositories in, maps `goarm` to the arm variant (`linux/arm/v7`), and
   strips `-armv7`/`-arm64v8`-style tag suffixes. (#60)

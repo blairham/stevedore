@@ -408,6 +408,7 @@ generated files) is up to the Dockerfile.
 
 When enabled, stevedore reads commits since the previous tag and groups them by
 [Conventional Commit](https://www.conventionalcommits.org) type into **Features**,
-**Bug Fixes**, **Performance**, **Refactors**, **Documentation**, and **Other**. A
-`!` (e.g. `feat!:`) marks a breaking change. Non-conforming subjects land under
-"Other". The result is written to `<dist>/CHANGELOG.md`.
+**Bug Fixes**, **Performance**, **Refactors**, **Documentation**, and **Other**;
+types match case-insensitively (`Feat:` is a feature). A `!` (e.g. `feat!:`) or a
+`BREAKING CHANGE:` footer in the commit body marks a breaking change.
+Non-conforming subjects land under "Other". The result is written to `<dist>/CHANGELOG.md`.

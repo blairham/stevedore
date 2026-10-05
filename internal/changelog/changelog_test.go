@@ -41,6 +41,30 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+// A BREAKING CHANGE footer marks a commit as breaking just as `!` does, and the
+// type is matched case-insensitively (#61).
+func TestClassifyFooterAndCase(t *testing.T) {
+	cases := []struct {
+		name, subject, body string
+		wantGroup, wantLine string
+	}{
+		{"footer", "feat: new api", "Details.\n\nBREAKING CHANGE: the old api is gone", "Features", "**BREAKING** new api (abc1234)"},
+		{"hyphen footer", "fix: x", "BREAKING-CHANGE: y", "Bug Fixes", "**BREAKING** x (abc1234)"},
+		{"footer on plain subject", "rework", "BREAKING CHANGE: z", "Other", "**BREAKING** rework (abc1234)"},
+		{"mention is not a footer", "fix: x", "this is not a BREAKING CHANGE: really", "Bug Fixes", "x (abc1234)"},
+		{"capitalised type", "Feat: shout", "", "Features", "shout (abc1234)"},
+		{"upper type with scope", "FIX(api): y", "", "Bug Fixes", "api: y (abc1234)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g, l := classify(gitinfo.Commit{SHA: "abc1234", Subject: tc.subject, Body: tc.body})
+			if g != tc.wantGroup || l != tc.wantLine {
+				t.Errorf("classify = %q, %q; want %q, %q", g, l, tc.wantGroup, tc.wantLine)
+			}
+		})
+	}
+}
+
 func TestClassifyShortSHA(t *testing.T) {
 	// A SHA shorter than 7 chars should not panic or be truncated.
 	_, line := classify(gitinfo.Commit{SHA: "abc", Subject: "feat: x"})

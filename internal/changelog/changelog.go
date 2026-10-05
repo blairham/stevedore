@@ -35,6 +35,11 @@ var groups = []group{
 
 var conventional = regexp.MustCompile(`^(\w+)(\([^)]*\))?(!)?:\s*(.+)$`)
 
+// breakingFooter is the Conventional Commits footer that marks a breaking
+// change from the body, as `!` does from the subject. The spec requires the
+// token in capitals, and accepts BREAKING-CHANGE as a synonym.
+var breakingFooter = regexp.MustCompile(`(?m)^BREAKING[ -]CHANGE:`)
+
 // Generate renders a Markdown changelog for commits since the previous tag.
 func Generate(ctx context.Context, cfg config.Changelog, gi *gitinfo.Info, dir string) (string, error) {
 	if !cfg.Enabled {
@@ -107,15 +112,21 @@ func classify(c gitinfo.Commit) (string, string) {
 	if len(short) > 7 {
 		short = short[:7]
 	}
+	breaking := breakingFooter.MatchString(c.Body)
 	if m == nil {
-		return otherGroup, fmt.Sprintf("%s (%s)", c.Subject, short)
+		line := c.Subject
+		if breaking {
+			line = "**BREAKING** " + line
+		}
+		return otherGroup, fmt.Sprintf("%s (%s)", line, short)
 	}
-	typ, scope, bang, desc := m[1], m[2], m[3], m[4]
+	// Types are case-insensitive in Conventional Commits: "Feat:" is a feature.
+	typ, scope, bang, desc := strings.ToLower(m[1]), m[2], m[3], m[4]
 	line := desc
 	if scope != "" {
 		line = strings.Trim(scope, "()") + ": " + desc
 	}
-	if bang != "" {
+	if bang != "" || breaking {
 		line = "**BREAKING** " + line
 	}
 	line = fmt.Sprintf("%s (%s)", line, short)
