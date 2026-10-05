@@ -266,9 +266,10 @@ type Sign struct {
 // Cosign configures cosign signing. When Key is empty, keyless (OIDC) signing
 // is used.
 type Cosign struct {
-	Enabled bool     `yaml:"enabled"`
-	Key     string   `yaml:"key"`
-	Args    []string `yaml:"args"`
+	Enabled bool   `yaml:"enabled"`
+	Key     string `yaml:"key"`
+	// Args are extra flags passed to both `cosign sign` and `cosign attest`.
+	Args []string `yaml:"args"`
 }
 
 // SBOM configures software bill of materials generation.

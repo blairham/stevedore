@@ -57,7 +57,7 @@ sign:
   cosign:
     enabled: true
     key: ""               # omit for keyless (OIDC) signing
-    args: []              # extra cosign flags
+    args: []              # extra flags for both cosign sign and cosign attest
 
 sbom:
   enabled: true

@@ -53,6 +53,11 @@ func Attest(r *run.Runner, cfg config.Cosign, repos []string, digest, predicateP
 		if cfg.Key != "" {
 			args = append(args, "--key", cfg.Key)
 		}
+		// sign.cosign.args apply here too: flags like --tlog-upload=false or
+		// --rekor-url must govern the attestation as well as the signature,
+		// or the SBOM for a privately-signed digest still lands in public
+		// Rekor.
+		args = append(args, cfg.Args...)
 		args = append(args, ref)
 		if err := r.Run("cosign", args...); err != nil {
 			return fmt.Errorf("cosign attest %s: %w", ref, err)
