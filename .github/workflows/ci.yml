@@ -4,10 +4,11 @@ name: CI
 # files, Build and test, Fuzz — are blairham/.github's go-ci.yml, shared with
 # every Go repository there; their checks report as `CI / <job>`. The image
 # build is go-image.yml (`Image / Build image`). What is stevedore's own —
-# the composite action and the example configs — is below, `needs: ci`, with
-# its steps gated on `needs.ci.outputs.code == 'true'` (never a job-level
-# `if:` or a `paths:` filter: a required check that never runs is pending
-# forever).
+# the composite action and the example configs — is below, as is the image
+# build. They `needs: changes` (go-changes.yml, so they need not wait for all
+# of go-ci), with steps gated on `needs.changes.outputs.code == 'true'`
+# (never a job-level `if:` or a `paths:` filter: a required check that never
+# runs is pending forever).
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -33,41 +34,45 @@ concurrency:
 jobs:
   ci:
     name: CI
-    uses: blairham/.github/.github/workflows/go-ci.yml@99060d62d0693570a360127ab698307d276630da # v0.0.0
+    uses: blairham/.github/.github/workflows/go-ci.yml@9711060ad4860f35860bcbf90d90f103617082d2 # v0.0.1
+
+  changes:
+    name: Changes
+    uses: blairham/.github/.github/workflows/go-changes.yml@9711060ad4860f35860bcbf90d90f103617082d2 # v0.0.1
 
   # The image is released by the dogfood job on a tag, so a Dockerfile that
   # stopped building would first fail after the tag was public. Build only,
   # for both release platforms; nothing is pushed.
   image:
     name: Image
-    needs: ci
-    uses: blairham/.github/.github/workflows/go-image.yml@99060d62d0693570a360127ab698307d276630da # v0.0.0
+    needs: changes
+    uses: blairham/.github/.github/workflows/go-image.yml@9711060ad4860f35860bcbf90d90f103617082d2 # v0.0.1
     with:
-      run: ${{ needs.ci.outputs.code == 'true' }}
+      run: ${{ needs.changes.outputs.code == 'true' }}
       platforms: linux/amd64,linux/arm64
 
   action-smoke:
     # Exercises the composite action end to end against the CURRENT checkout:
     # build stevedore, put it on PATH, then let the action install the tooling
     # and run `check` (install-stevedore: false so it uses our fresh binary).
-    needs: ci
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         with:
           fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           check-latest: true
       - name: Build stevedore from checkout
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         run: |
           go build -o /usr/local/bin/stevedore .
       - name: Run stevedore via the action
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         uses: ./
         with:
           install-stevedore: "false"
@@ -79,7 +84,7 @@ jobs:
       # needs no config, so a config field newer than that release cannot
       # fail this for an unrelated reason.
       - name: Install a release via the action (verified download)
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         uses: ./
         with:
           command: help
@@ -88,7 +93,7 @@ jobs:
           install-syft: "false"
           install-grype: "false"
       - name: The verified release is what is on PATH
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         run: |
           set -euo pipefail
           got=$(command -v stevedore)
@@ -101,21 +106,21 @@ jobs:
     # each one is resolved by the real binary in a scratch repo shaped the way
     # its config expects. A stale example is worse than no example, because it
     # is copied before it is read.
-    needs: ci
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
           check-latest: true
       - name: Build stevedore from checkout
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         run: go build -o /usr/local/bin/stevedore .
       - name: Check every example config
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         run: |
           set -euo pipefail
           scratch=$(mktemp -d)
@@ -134,14 +139,14 @@ jobs:
             echo "::endgroup::"
           done
       - name: Lint the example workflow
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         run: |
           # It is a workflow people paste into .github/workflows, so it has to
           # parse as one — it lives outside that directory precisely so GitHub
           # does not try to run it here.
           python3 -c "import yaml,sys; yaml.safe_load(open('examples/split-multiarch/release.yml'))"
       - name: No matrix built from the whole plan document
-        if: needs.ci.outputs.code == 'true'
+        if: needs.changes.outputs.code == 'true'
         run: |
           # A matrix built from the whole plan document makes its `skipped`
           # list a matrix dimension: GitHub rejects it when empty and, when
