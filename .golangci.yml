@@ -186,6 +186,7 @@ linters:
         - shadow
         - timeformat
         - unusedwrite
+        # fieldalignment: off here — overrides/stevedore.yml
 
     goconst:
       min-len: 3
