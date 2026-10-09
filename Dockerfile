@@ -8,7 +8,7 @@
 
 # Build on the native arch and cross-compile for the target platform, so
 # multi-arch builds never run the Go toolchain under QEMU emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:c95332c2af86b6d89b91bd0500f4b9529ccbd090a0d1855c6d1ceaa142ae8615 AS build
 ARG TARGETOS TARGETARCH
 ARG VERSION=dev
 WORKDIR /src
