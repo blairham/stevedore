@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/blairham/stevedore/internal/progress"
 	"github.com/blairham/stevedore/internal/summary"
 	"github.com/blairham/stevedore/internal/tmpl"
 )
@@ -63,7 +64,7 @@ func writeOutputsFile(o Options, p *Prepared, result summary.Result) error {
 	}
 	pinned := result.Pinned()
 	if len(pinned) == 0 {
-		fmt.Fprintf(progress, "==> no image pushed; %s not written\n", cfg.File)
+		progress.Printf(progressOut, "==> no image pushed; %s not written\n", cfg.File)
 		return nil
 	}
 	data := outputsData{Project: p.Config.ProjectName}
@@ -85,12 +86,15 @@ func writeOutputsFile(o Options, p *Prepared, result summary.Result) error {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(o.Dir, path)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec // a directory the config names, like dist/
+	if err := os.MkdirAll( //nolint:gosec // a directory the config names, like dist/
+		filepath.Dir(path),
+		0o755,
+	); err != nil {
 		return fmt.Errorf("outputs.file: %w", err)
 	}
 	if err := writeDistFile(path, []byte(content)); err != nil {
 		return fmt.Errorf("outputs.file: %w", err)
 	}
-	fmt.Fprintf(progress, "==> outputs written to %s\n", path)
+	progress.Printf(progressOut, "==> outputs written to %s\n", path)
 	return nil
 }

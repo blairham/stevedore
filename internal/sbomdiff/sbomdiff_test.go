@@ -61,7 +61,8 @@ func TestDiff(t *testing.T) {
 	if len(r.Removed) != 1 || r.Removed[0].Name != "gone" {
 		t.Errorf("removed = %v", r.Removed)
 	}
-	if len(r.Changed) != 1 || r.Changed[0].Name != "openssl" || r.Changed[0].From != "1.1.1" || r.Changed[0].To != "3.0.0" {
+	if len(r.Changed) != 1 || r.Changed[0].Name != "openssl" || r.Changed[0].From != "1.1.1" ||
+		r.Changed[0].To != "3.0.0" {
 		t.Errorf("changed = %v", r.Changed)
 	}
 	if r.Empty() {

@@ -202,7 +202,10 @@ func TestSemverPartsOfSnapshot(t *testing.T) {
 		"1.4.0-SNAPSHOT-9f8e7d6":            "1.4.0||false",
 		"1.5.0-rc.1-SNAPSHOT-9f8e7d6-dirty": "1.5.0|rc.1|false",
 	} {
-		got, err := Render("{{ .Major }}.{{ .Minor }}.{{ .Patch }}|{{ .Prerelease }}|{{ .IsPrerelease }}", testCtx().WithVersion(v))
+		got, err := Render(
+			"{{ .Major }}.{{ .Minor }}.{{ .Patch }}|{{ .Prerelease }}|{{ .IsPrerelease }}",
+			testCtx().WithVersion(v),
+		)
 		if err != nil || got != want {
 			t.Errorf("%s: got %q, %v; want %q", v, got, err, want)
 		}
@@ -219,7 +222,15 @@ func TestCommitDate(t *testing.T) {
 	if want := "2024-05-06T07:08:09Z 1714979289"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	if c := NewContext("demo", "main", &gitinfo.Info{}, false, time.Now(), nil); c.CommitDate != "" || c.CommitTimestamp != 0 {
+	if c := NewContext(
+		"demo",
+		"main",
+		&gitinfo.Info{},
+		false,
+		time.Now(),
+		nil,
+	); c.CommitDate != "" ||
+		c.CommitTimestamp != 0 {
 		t.Errorf("no commit: CommitDate, CommitTimestamp = %q, %d", c.CommitDate, c.CommitTimestamp)
 	}
 }

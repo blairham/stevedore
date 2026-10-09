@@ -65,7 +65,19 @@ func TestAdvanceMarkerOutcomes(t *testing.T) {
 		if err := AdvanceMarker(t.Context(), clone, ref); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := git(clone, "ls-remote", "origin", ref), git(clone, "rev-parse", "HEAD"); !strings.HasPrefix(got, want) {
+		if got, want := git(
+			clone,
+			"ls-remote",
+			"origin",
+			ref,
+		), git(
+			clone,
+			"rev-parse",
+			"HEAD",
+		); !strings.HasPrefix(
+			got,
+			want,
+		) {
 			t.Errorf("origin marker = %q, want %s", got, want)
 		}
 	})
@@ -79,7 +91,19 @@ func TestAdvanceMarkerOutcomes(t *testing.T) {
 		if err := AdvanceMarker(t.Context(), clone, ref); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := git(clone, "ls-remote", "origin", ref), git(clone, "rev-parse", "HEAD"); !strings.HasPrefix(got, want) {
+		if got, want := git(
+			clone,
+			"ls-remote",
+			"origin",
+			ref,
+		), git(
+			clone,
+			"rev-parse",
+			"HEAD",
+		); !strings.HasPrefix(
+			got,
+			want,
+		) {
 			t.Errorf("origin marker = %q, want %s", got, want)
 		}
 	})

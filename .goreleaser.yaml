@@ -39,8 +39,9 @@ checksum:
   name_template: "checksums.txt"
 
 # Keyless cosign signature over checksums.txt, from the release workflow's own
-# GitHub OIDC identity: no key to store or leak, and the certificate names the
-# exact workflow and tag that produced the release. Signing checksums.txt
+# GitHub OIDC identity: no key to store or leak. The signing workflow is
+# blairham/.github's go-release.yml, which release.yml calls; the certificate
+# names it, and this repository and the tag. Signing checksums.txt
 # covers every archive, since it lists each one's digest. See SECURITY.md for
 # how to verify. (The image is signed separately, by the dogfood release.)
 signs:
@@ -57,7 +58,7 @@ signs:
 # and no service; `brew test` is worth keeping, and formulae work on Homebrew
 # for Linux exactly as they do on macOS.
 #
-# GoReleaser marks `brews` deprecated in favour of `homebrew_casks`, on the
+# GoReleaser marks `brews` deprecated in favor of `homebrew_casks`, on the
 # grounds that formulae installing pre-compiled binaries are "hackyish" and
 # were only needed because Linuxbrew could not handle casks. There is no
 # announced removal date, and the Linuxbrew limitation is not our reason for
@@ -101,8 +102,8 @@ release:
     owner: blairham
     name: stevedore
 
-# The release notes are the tag's CHANGELOG.md section, passed by release.yml
-# with --release-notes, which replaces this generated list; the list is used
+# The release notes are the tag's CHANGELOG.md section, passed by go-release.yml
+# (via release.yml) with --release-notes, which replaces this generated list; the list is used
 # only for tags from before CHANGELOG.md existed. Do not set
 # `changelog.disable`: it also skips the stage that loads --release-notes, and
 # the release would go out with empty notes.

@@ -31,7 +31,9 @@ func notifyCount(t *testing.T) (*Prepared, *atomic.Int32) {
 	return p, &posts
 }
 
-var pushedImage = []summary.Image{{ID: "app", Version: "1.0.0", Digest: "sha256:built", Refs: []string{"ghcr.io/x/app:1.0.0"}}}
+var pushedImage = []summary.Image{
+	{ID: "app", Version: "1.0.0", Digest: "sha256:built", Refs: []string{"ghcr.io/x/app:1.0.0"}},
+}
 
 // build --push is an inner-loop push; it must not fire the CD trigger.
 func TestBuildPushDoesNotNotify(t *testing.T) {

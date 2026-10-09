@@ -99,11 +99,17 @@ func Plan(h Host, mode string, platforms []string) []Target {
 		switch {
 		case h.native(p):
 		case !emulate:
-			t.Skip = fmt.Sprintf("not native to the docker host (%s); set test.platforms: all to run it under emulation", h.Native)
+			t.Skip = fmt.Sprintf(
+				"not native to the docker host (%s); set test.platforms: all to run it under emulation",
+				h.Native,
+			)
 		case h.emulates(p):
 			t.Emulated = true
 		default:
-			t.Skip = fmt.Sprintf("the docker host (%s) has no emulator for it; register one (e.g. docker/setup-qemu-action or tonistiigi/binfmt) to test it", h.Native)
+			t.Skip = fmt.Sprintf(
+				"the docker host (%s) has no emulator for it; register one (e.g. docker/setup-qemu-action or tonistiigi/binfmt) to test it",
+				h.Native,
+			)
 		}
 		out = append(out, t)
 	}

@@ -218,7 +218,9 @@ func TestNotifyPayloadTemplate(t *testing.T) {
 	t.Setenv("TEST_NOTIFY_URL", srv.URL)
 	t.Setenv("TEST_NOTIFY_SECRET", "s3cret")
 	cfg := config.NotifyWebhook{
-		Enabled: true, URLEnv: "TEST_NOTIFY_URL", HMACEnv: "TEST_NOTIFY_SECRET",
+		Enabled:         true,
+		URLEnv:          "TEST_NOTIFY_URL",
+		HMACEnv:         "TEST_NOTIFY_SECRET",
 		PayloadTemplate: `{"service": {{ json .Image }}, "version": {{ json .Version }}, "first_ref": {{ json (index .Refs 0) }}}`,
 	}
 	notes := []Notification{{Image: `a"pi`, Version: "1.2.3", Refs: []string{"ghcr.io/acme/api:1.2.3"}}}
@@ -251,7 +253,12 @@ func TestNotifyPayloadTemplateErrorsBeforeAnyPost(t *testing.T) {
 		`{"service": {{ json .Nope }}}`, // no such field
 	} {
 		cfg := config.NotifyWebhook{Enabled: true, URLEnv: "TEST_NOTIFY_URL", Required: ptr(false), PayloadTemplate: tpl}
-		if _, err := Notify(&run.Runner{}, cfg, []Notification{{Image: "api"}, {Image: "web"}}); err == nil || !strings.Contains(err.Error(), "payload_template") {
+		if _, err := Notify(
+			&run.Runner{},
+			cfg,
+			[]Notification{{Image: "api"}, {Image: "web"}},
+		); err == nil ||
+			!strings.Contains(err.Error(), "payload_template") {
 			t.Errorf("%s: want a payload_template error, got %v", tpl, err)
 		}
 	}

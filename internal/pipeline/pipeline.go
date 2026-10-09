@@ -28,6 +28,7 @@ import (
 	"github.com/blairham/stevedore/internal/fingerprint"
 	"github.com/blairham/stevedore/internal/gitinfo"
 	"github.com/blairham/stevedore/internal/preflight"
+	"github.com/blairham/stevedore/internal/progress"
 	"github.com/blairham/stevedore/internal/projgraph"
 	"github.com/blairham/stevedore/internal/publish"
 	"github.com/blairham/stevedore/internal/run"
@@ -42,9 +43,9 @@ import (
 	"github.com/blairham/stevedore/internal/versioner"
 )
 
-// progress is where human-readable progress is written. Release redirects it to
+// progressOut is where human-readable progress is written. Release redirects it to
 // stderr under --output json so stdout carries only the JSON document.
-var progress io.Writer = os.Stdout
+var progressOut io.Writer = os.Stdout
 
 // Options controls a pipeline invocation.
 type Options struct {
@@ -227,7 +228,12 @@ func loadConfig(o Options) (*config.Config, error) {
 // bump). The other strategies apply one version to every image and need none,
 // so Prepare only calls this under the registry strategy. When versioning.repo
 // is pinned, all images resolve from that one repo (i.e. a unified version).
-func imageVersionResolver(cfg *config.Config, gi *gitinfo.Info, o Options, ctx *tmpl.Context) (func(string) (string, error), error) {
+func imageVersionResolver(
+	cfg *config.Config,
+	gi *gitinfo.Info,
+	o Options,
+	ctx *tmpl.Context,
+) (func(string) (string, error), error) {
 	vcfg := cfg.Versioning
 	if vcfg.Repo != "" {
 		rendered, err := tmpl.Render(vcfg.Repo, ctx)
@@ -346,7 +352,14 @@ func firstSelectedImage(cfg *config.Config, only []string) *config.Image {
 // those image IDs (config order preserved) — excluded images are skipped
 // before version resolution, so a matrix job's credentials only need registry
 // access to its own repositories.
-func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionFor func(string) (string, error), pins map[string]string, only []string) ([]ImagePlan, error) {
+func resolvePlans(
+	cfg *config.Config,
+	ctx *tmpl.Context,
+	snapshot bool,
+	versionFor func(string) (string, error),
+	pins map[string]string,
+	only []string,
+) ([]ImagePlan, error) {
 	selected := map[string]bool{}
 	for _, id := range only {
 		selected[id] = true
@@ -360,7 +373,14 @@ func resolvePlans(cfg *config.Config, ctx *tmpl.Context, snapshot bool, versionF
 		if len(selected) > 0 && !selected[img.ID] {
 			continue
 		}
-		plan, err := resolvePlan(img, ctx, floatingPolicy{snapshot: snapshot, onPrerelease: cfg.PrereleaseFloatingTags}, versionFor, pins, withheld)
+		plan, err := resolvePlan(
+			img,
+			ctx,
+			floatingPolicy{snapshot: snapshot, onPrerelease: cfg.PrereleaseFloatingTags},
+			versionFor,
+			pins,
+			withheld,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -478,7 +498,14 @@ func (w *withheldTags) add(tag, reason, version string) {
 }
 
 // resolvePlan renders one image's plan; see resolvePlans.
-func resolvePlan(img config.Image, ctx *tmpl.Context, fp floatingPolicy, versionFor func(string) (string, error), pins map[string]string, withheld *withheldTags) (ImagePlan, error) {
+func resolvePlan(
+	img config.Image,
+	ctx *tmpl.Context,
+	fp floatingPolicy,
+	versionFor func(string) (string, error),
+	pins map[string]string,
+	withheld *withheldTags,
+) (ImagePlan, error) {
 	// Repositories are rendered with the release context (they key on .Env
 	// and .ID, not .Version), and drive per-image version resolution.
 	ctx = ctx.WithImage(img.ID)
@@ -541,7 +568,13 @@ func resolvePlan(img config.Image, ctx *tmpl.Context, fp floatingPolicy, version
 // carries it. A pin (from the plan) wins outright; under per-image registry
 // versioning it comes from the image's own repo; otherwise it's the release
 // version.
-func imageVersion(id string, repos []string, ctx *tmpl.Context, versionFor func(string) (string, error), pins map[string]string) (string, *tmpl.Context, error) {
+func imageVersion(
+	id string,
+	repos []string,
+	ctx *tmpl.Context,
+	versionFor func(string) (string, error),
+	pins map[string]string,
+) (string, *tmpl.Context, error) {
 	if pin, ok := pins[id]; ok {
 		return pin, ctx.WithVersion(pin), nil
 	}
@@ -558,7 +591,12 @@ func imageVersion(id string, repos []string, ctx *tmpl.Context, versionFor func(
 // publishedRefs is the repo:tag product, minus floating tags (floating[i] for
 // tags[i]) when withholdFloating is set; each withheld tag is passed to
 // onWithheld. The floating refs that are published are returned as a set.
-func publishedRefs(repos, tags []string, floating []bool, withholdFloating bool, onWithheld func(string)) ([]string, map[string]bool) {
+func publishedRefs(
+	repos, tags []string,
+	floating []bool,
+	withholdFloating bool,
+	onWithheld func(string),
+) ([]string, map[string]bool) {
 	var refs []string
 	floatingRefs := map[string]bool{}
 	for _, repo := range repos {
@@ -625,7 +663,19 @@ func isFloating(tag string) bool {
 // rather than a line of them: a tag that uses any of these is never floating
 // on account of also using .Major or .Minor ("{{ .Major }}.{{ .Minor }}.{{
 // .Patch }}" is a version tag, not a pointer).
-var pinningFields = []string{"Patch", "Prerelease", "Version", "Tag", "LatestTag", "Commit", "ShortCommit", "Date", "Timestamp", "CommitDate", "CommitTimestamp"}
+var pinningFields = []string{
+	"Patch",
+	"Prerelease",
+	"Version",
+	"Tag",
+	"LatestTag",
+	"Commit",
+	"ShortCommit",
+	"Date",
+	"Timestamp",
+	"CommitDate",
+	"CommitTimestamp",
+}
 
 // floatingTag reports whether the tag rendered as tag from the template src is
 // floating — a pointer that moves from release to release, so it may only
@@ -644,7 +694,8 @@ func floatingTag(src, tag string, ctx *tmpl.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if (fields["Major"] || fields["Minor"]) && !slices.ContainsFunc(pinningFields, func(f string) bool { return fields[f] }) {
+	if (fields["Major"] || fields["Minor"]) &&
+		!slices.ContainsFunc(pinningFields, func(f string) bool { return fields[f] }) {
 		return true, nil
 	}
 	if v, ok := semver.Parse(ctx.Version); ok {
@@ -671,8 +722,8 @@ func Release(o Options) error {
 	}
 	if o.OutputJSON {
 		// Keep stdout clean for the JSON document.
-		progress = os.Stderr
-		defer func() { progress = os.Stdout }()
+		progressOut = os.Stderr
+		defer func() { progressOut = os.Stdout }()
 	}
 	o, err = applyRequireTag(o)
 	if err != nil {
@@ -717,7 +768,15 @@ func Release(o Options) error {
 // summary the next run would release them again as a new version. So the tail
 // always runs for whatever was built, and the build failure is returned with
 // whatever else went wrong.
-func buildAndFinish(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, skipped []imageEval, fpPath string, state fingerprint.State) error {
+func buildAndFinish(
+	o Options,
+	p *Prepared,
+	r *run.Runner,
+	toBuild [][]imageEval,
+	skipped []imageEval,
+	fpPath string,
+	state fingerprint.State,
+) error {
 	result := summary.Result{Project: p.Config.ProjectName, Snapshot: o.Snapshot, Degraded: degradedStages(o, p.Config)}
 	result.Images = reportGroups(toBuild, skipped)
 
@@ -739,7 +798,16 @@ func buildAndFinish(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval
 // did are recorded as usual, but the release as a whole is incomplete, so it
 // writes no changelog and is not published (GitHub release, announce); the
 // re-run that builds the rest does that.
-func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result, fpPath string, state fingerprint.State, depDiffSections []string, buildErr error) error {
+func finishRelease(
+	o Options,
+	p *Prepared,
+	r *run.Runner,
+	result summary.Result,
+	fpPath string,
+	state fingerprint.State,
+	depDiffSections []string,
+	buildErr error,
+) error {
 	var errs []error
 	if buildErr != nil {
 		errs = append(errs, buildErr)
@@ -757,7 +825,10 @@ func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result,
 	}
 
 	if buildErr != nil {
-		fmt.Fprintln(progress, "==> a build failed: recorded what was pushed, but no changelog, GitHub release or announcement")
+		progress.Println(
+			progressOut,
+			"==> a build failed: recorded what was pushed, but no changelog, GitHub release or announcement",
+		)
 	} else if changelogPath, err := writeChangelog(o, p, depDiffSections); err != nil {
 		errs = append(errs, err)
 	} else if err := publishStage(o, p, r, changelogPath, result.Images); err != nil {
@@ -776,9 +847,9 @@ func finishRelease(o Options, p *Prepared, r *run.Runner, result summary.Result,
 		return errors.Join(errs...)
 	}
 	if len(o.SplitPlatforms) > 0 {
-		fmt.Fprintln(progress, "==> split build complete — assemble with `stevedore merge`")
+		progress.Println(progressOut, "==> split build complete — assemble with `stevedore merge`")
 	} else {
-		fmt.Fprintln(progress, "==> release complete")
+		progress.Println(progressOut, "==> release complete")
 	}
 	return nil
 }
@@ -798,13 +869,16 @@ func publishStage(o Options, p *Prepared, r *run.Runner, changelogPath string, i
 	}
 	if len(o.Only) > 0 {
 		if p.Config.Release.AnyEnabled() || p.Config.Announce.Slack.Enabled || p.Config.Announce.Discord.Enabled {
-			fmt.Fprintln(progress, "==> --only: no release or announcement from a matrix job; run `stevedore publish` once after the matrix")
+			progress.Println(
+				progressOut,
+				"==> --only: no release or announcement from a matrix job; run `stevedore publish` once after the matrix",
+			)
 		}
 		return nil
 	}
 	refs := builtRefs(images)
 	if len(refs) == 0 {
-		fmt.Fprintln(progress, "==> nothing was built; no GitHub release or announcement")
+		progress.Println(progressOut, "==> nothing was built; no GitHub release or announcement")
 		return nil
 	}
 	return publishRelease(r, p, changelogPath, refs)
@@ -831,7 +905,15 @@ func Publish(o Options) error {
 		err = guardDefaultBranch(o, p.Config.DefaultBranch)
 	}
 	if err == nil && !o.DryRun {
-		err = checkTools(o.context(), p.Config, preflight.Opts{GitHubRelease: p.Config.Release.GitHub.Enabled, GitLabRelease: p.Config.Release.GitLab.Enabled, VersionsPinned: allPinned(p.Plans, o.PinVersions)})
+		err = checkTools(
+			o.context(),
+			p.Config,
+			preflight.Opts{
+				GitHubRelease:  p.Config.Release.GitHub.Enabled,
+				GitLabRelease:  p.Config.Release.GitLab.Enabled,
+				VersionsPinned: allPinned(p.Plans, o.PinVersions),
+			},
+		)
 	}
 	if err == nil && !o.DryRun && p.Config.Release.GitHub.Enabled {
 		err = checkGitHubAuth(o)
@@ -855,7 +937,7 @@ func Publish(o Options) error {
 	if err := publishRelease(r, p, changelogPath, refs); err != nil {
 		return err
 	}
-	fmt.Fprintln(progress, "==> publish complete")
+	progress.Println(progressOut, "==> publish complete")
 	return nil
 }
 
@@ -874,12 +956,12 @@ func recordsFingerprints(o Options) bool {
 func reportGroups(toBuild [][]imageEval, skipped []imageEval) []summary.Image {
 	images := make([]summary.Image, 0, len(skipped))
 	for _, m := range skipped {
-		fmt.Fprintf(progress, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
+		progress.Printf(progressOut, "==> skipping %s (%s)\n", m.plan.Image.ID, m.reason)
 		images = append(images, summary.Image{ID: m.plan.Image.ID, Skipped: true, Reason: m.reason})
 	}
 	for _, grp := range toBuild {
 		if len(grp) > 1 {
-			fmt.Fprintf(progress, "==> %d images share one build: %s\n", len(grp), strings.Join(evalIDs(grp), ", "))
+			progress.Printf(progressOut, "==> %d images share one build: %s\n", len(grp), strings.Join(evalIDs(grp), ", "))
 		}
 	}
 	return images
@@ -997,13 +1079,19 @@ func preflightRelease(o Options, p *Prepared) error {
 // summaries and dependency-diff sections — of every group that succeeded,
 // even when another failed — and the failures, joined. The first failure
 // stops dispatch unless o.KeepGoing.
-func buildGroups(o Options, p *Prepared, r *run.Runner, toBuild [][]imageEval, state fingerprint.State) ([]summary.Image, []string, error) {
+func buildGroups(
+	o Options,
+	p *Prepared,
+	r *run.Runner,
+	toBuild [][]imageEval,
+	state fingerprint.State,
+) ([]summary.Image, []string, error) {
 	workers := max(o.Parallel, 1)
 	if len(toBuild) > 0 {
 		workers = min(workers, len(toBuild))
 	}
 	if workers > 1 {
-		fmt.Fprintf(progress, "==> building %d group(s), up to %d in parallel\n", len(toBuild), workers)
+		progress.Printf(progressOut, "==> building %d group(s), up to %d in parallel\n", len(toBuild), workers)
 	}
 	var (
 		mu       sync.Mutex
@@ -1085,11 +1173,11 @@ func advanceMarkers(o Options, p *Prepared, images []summary.Image) []error {
 		err := changed.AdvanceMarker(o.context(), o.Dir, ref)
 		switch {
 		case err == nil:
-			fmt.Fprintf(progress, "==> advanced release marker %s\n", ref)
+			progress.Printf(progressOut, "==> advanced release marker %s\n", ref)
 		case errors.Is(err, changed.ErrMarkerAhead):
-			fmt.Fprintf(progress, "==> left release marker %s: %v\n", ref, err)
+			progress.Printf(progressOut, "==> left release marker %s: %v\n", ref, err)
 		default:
-			fmt.Fprintf(progress, "error: advance release marker %s: %v\n", ref, err)
+			progress.Printf(progressOut, "error: advance release marker %s: %v\n", ref, err)
 			markerErrs = append(markerErrs, fmt.Errorf("advance release marker %s: %w", ref, err))
 		}
 	}
@@ -1127,11 +1215,11 @@ func notifyWebhook(o Options, p *Prepared, r *run.Runner, images []summary.Image
 	switch {
 	case len(notes) == 0:
 	case r.DryRun || sent == len(notes):
-		fmt.Fprintf(progress, "==> notified webhook of %d pushed image(s)\n", len(notes))
+		progress.Printf(progressOut, "==> notified webhook of %d pushed image(s)\n", len(notes))
 	default:
 		// Only reachable with notify.webhook.required: false; each failure was
 		// already reported as a warning.
-		fmt.Fprintf(progress, "==> notified webhook of %d of %d pushed image(s)\n", sent, len(notes))
+		progress.Printf(progressOut, "==> notified webhook of %d of %d pushed image(s)\n", sent, len(notes))
 	}
 	return nil
 }
@@ -1153,13 +1241,13 @@ func writeChangelog(o Options, p *Prepared, depDiffSections []string) (string, e
 	if o.DryRun {
 		// Generated, so a broken changelog config still fails the dry run,
 		// but not written: the path is only what the echoed commands name.
-		fmt.Fprintf(progress, "==> changelog would be written to %s\n", path)
+		progress.Printf(progressOut, "==> changelog would be written to %s\n", path)
 		return path, nil
 	}
 	if err := writeDistFile(path, []byte(notes)); err != nil {
 		return "", fmt.Errorf("write changelog: %w", err)
 	}
-	fmt.Fprintf(progress, "==> changelog written to %s\n", path)
+	progress.Printf(progressOut, "==> changelog written to %s\n", path)
 	return path, nil
 }
 
@@ -1204,10 +1292,10 @@ func emitSummary(o Options, p *Prepared, result summary.Result) error {
 	}
 	if !o.DryRun {
 		if err := result.WriteGitHubStepSummary(); err != nil {
-			fmt.Fprintf(progress, "warning: could not write GitHub step summary: %v\n", err)
+			progress.Printf(progressOut, "warning: could not write GitHub step summary: %v\n", err)
 		}
 		if err := result.WriteGitHubOutput(); err != nil {
-			fmt.Fprintf(progress, "warning: could not write GitHub summary output: %v\n", err)
+			progress.Printf(progressOut, "warning: could not write GitHub summary output: %v\n", err)
 		}
 	}
 	data, err := result.JSON()
@@ -1219,10 +1307,14 @@ func emitSummary(o Options, p *Prepared, result summary.Result) error {
 		if err := writeDistFile(out, append(data, '\n')); err != nil {
 			return fmt.Errorf("write release summary: %w", err)
 		}
-		fmt.Fprintf(progress, "==> summary written to %s\n", out)
+		progress.Printf(progressOut, "==> summary written to %s\n", out)
 	}
 	if o.OutputJSON {
-		fmt.Fprintln(os.Stdout, string(data))
+		// The document is the command's result, not progress: a failed write
+		// must fail the run rather than leave a consumer with a partial JSON.
+		if _, err := fmt.Fprintln(os.Stdout, string(data)); err != nil {
+			return fmt.Errorf("write release summary to stdout: %w", err)
+		}
 	}
 	return nil
 }
@@ -1242,20 +1334,37 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string, refs []str
 		}
 		var assets []string // SBOMs, if generated, make good release assets
 		title := fmt.Sprintf("%s %s", p.Config.ProjectName, p.Ctx.Version)
-		if err := publish.GitHubRelease(r, p.Config.Release.GitHub, tag, p.Git.Commit, title, notes, p.Ctx.IsPrerelease(), assets); err != nil {
+		if err := publish.GitHubRelease(
+			r,
+			p.Config.Release.GitHub,
+			tag,
+			p.Git.Commit,
+			title,
+			notes,
+			p.Ctx.IsPrerelease(),
+			assets,
+		); err != nil {
 			return err
 		}
-		fmt.Fprintf(progress, "==> GitHub release %s created\n", tag)
+		progress.Printf(progressOut, "==> GitHub release %s created\n", tag)
 	}
 	if p.Config.Release.GitLab.Enabled {
 		if changelogPath == "" {
 			return fmt.Errorf("gitlab release needs changelog notes; enable changelog or drop --skip-changelog")
 		}
 		title := fmt.Sprintf("%s %s", p.Config.ProjectName, p.Ctx.Version)
-		if err := publish.GitLabRelease(r, p.Config.Release.GitLab, tag, p.Git.Commit, title, changelogPath, nil); err != nil {
+		if err := publish.GitLabRelease(
+			r,
+			p.Config.Release.GitLab,
+			tag,
+			p.Git.Commit,
+			title,
+			changelogPath,
+			nil,
+		); err != nil {
 			return err
 		}
-		fmt.Fprintf(progress, "==> GitLab release %s created\n", tag)
+		progress.Printf(progressOut, "==> GitLab release %s created\n", tag)
 	}
 
 	if p.Config.Announce.Slack.Enabled || p.Config.Announce.Discord.Enabled {
@@ -1273,7 +1382,7 @@ func publishRelease(r *run.Runner, p *Prepared, changelogPath string, refs []str
 		if err := publish.Announce(r, p.Config.Announce, msg); err != nil {
 			return err
 		}
-		fmt.Fprintln(progress, "==> release announced")
+		progress.Println(progressOut, "==> release announced")
 	}
 	return nil
 }
@@ -1286,7 +1395,7 @@ func dependencyDiff(r *run.Runner, p *Prepared, plan ImagePlan, currentPath, pla
 	format := p.Config.SBOM.Format
 	curData, err := os.ReadFile(filepath.Clean(currentPath))
 	if err != nil {
-		fmt.Fprintf(progress, "    (dependency diff skipped: %v)\n", err)
+		progress.Printf(progressOut, "    (dependency diff skipped: %v)\n", err)
 		return ""
 	}
 	prevVersion := strings.TrimPrefix(p.Git.PreviousTag, "v")
@@ -1297,17 +1406,22 @@ func dependencyDiff(r *run.Runner, p *Prepared, plan ImagePlan, currentPath, pla
 	}
 	prevOut, err := r.Capture("syft", append(args, "-o", format)...)
 	if err != nil {
-		fmt.Fprintf(progress, "    (dependency diff skipped for %s: previous image %s not scannable)\n", plan.Image.ID, prevRef)
+		progress.Printf(
+			progressOut,
+			"    (dependency diff skipped for %s: previous image %s not scannable)\n",
+			plan.Image.ID,
+			prevRef,
+		)
 		return ""
 	}
 	curPkgs, err := sbomdiff.Packages(curData, format)
 	if err != nil {
-		fmt.Fprintf(progress, "    (dependency diff skipped: %v)\n", err)
+		progress.Printf(progressOut, "    (dependency diff skipped: %v)\n", err)
 		return ""
 	}
 	prevPkgs, err := sbomdiff.Packages([]byte(prevOut), format)
 	if err != nil {
-		fmt.Fprintf(progress, "    (dependency diff skipped: %v)\n", err)
+		progress.Printf(progressOut, "    (dependency diff skipped: %v)\n", err)
 		return ""
 	}
 	res := sbomdiff.Diff(prevPkgs, curPkgs)
@@ -1359,7 +1473,12 @@ func buildGroup(o Options, p *Prepared, r *run.Runner, grp []imageEval) ([]summa
 			rest = append(rest, m)
 			continue
 		}
-		fmt.Fprintf(progress, "==> %s already released from this commit (%s exists); not rebuilding\n", m.plan.Image.ID, at.Ref)
+		progress.Printf(
+			progressOut,
+			"==> %s already released from this commit (%s exists); not rebuilding\n",
+			m.plan.Image.ID,
+			at.Ref,
+		)
 		ir := irs[i]
 		ir.Skipped, ir.AlreadyReleased, ir.Pushed = true, true, false
 		ir.Signed, ir.SBOM, ir.Provenance, ir.Tested = false, false, false, false
@@ -1515,15 +1634,27 @@ func dryRunDigest(digest string, dryRun bool) string {
 
 // buildSplitLeg builds the leg's platform(s), pushes them untagged by digest,
 // and records the digest under dist/digests/ for the merge run.
-func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label string, repos []string, irs []summary.Image) error {
+func buildSplitLeg(
+	o Options,
+	p *Prepared,
+	r *run.Runner,
+	grp []imageEval,
+	label string,
+	repos []string,
+	irs []summary.Image,
+) error {
 	// Only the leg's platforms the image is configured for: splitLegGroups
 	// already dropped the groups with none, so this is never empty.
 	platforms := legPlatforms(o.SplitPlatforms, grp[0].plan.Image.Platforms)
 	if len(platforms) == 0 {
 		// An empty list would drop --platform and build the host's default.
-		return fmt.Errorf("image %s is not configured for split platform(s) %s", grp[0].plan.Image.ID, strings.Join(o.SplitPlatforms, ","))
+		return fmt.Errorf(
+			"image %s is not configured for split platform(s) %s",
+			grp[0].plan.Image.ID,
+			strings.Join(o.SplitPlatforms, ","),
+		)
 	}
-	fmt.Fprintf(progress, "==> building %s (%s, by digest)\n", label, strings.Join(platforms, ","))
+	progress.Printf(progressOut, "==> building %s (%s, by digest)\n", label, strings.Join(platforms, ","))
 	spec := toSpec(grp[0].plan, o.Dir, true, false, p.Config.Provenance)
 	if c := grp[0].plan.Cache; c != nil {
 		// Each leg its own scope: legs run in parallel on different runners,
@@ -1556,14 +1687,21 @@ func buildSplitLeg(o Options, p *Prepared, r *run.Runner, grp []imageEval, label
 // assembled from the per-arch digests the split legs already pushed. Nothing
 // is tagged here; applyTags does that once the gates have passed. Under
 // --no-push the build only validates and returns no digest.
-func buildOrMerge(o Options, p *Prepared, r *run.Runner, rep ImagePlan, label string, refs, repos []string) (string, error) {
+func buildOrMerge(
+	o Options,
+	p *Prepared,
+	r *run.Runner,
+	rep ImagePlan,
+	label string,
+	refs, repos []string,
+) (string, error) {
 	verb := "building"
 	if o.FromDigests {
 		verb = "merging"
 	}
-	fmt.Fprintf(progress, "==> %s %s\n", verb, label)
+	progress.Printf(progressOut, "==> %s %s\n", verb, label)
 	for _, ref := range refs {
-		fmt.Fprintf(progress, "    - %s\n", ref)
+		progress.Printf(progressOut, "    - %s\n", ref)
 	}
 	if o.FromDigests {
 		// Merge mode: the split legs already built and pushed per-arch images
@@ -1585,7 +1723,15 @@ func buildOrMerge(o Options, p *Prepared, r *run.Runner, rep ImagePlan, label st
 // digest, gates first: scan, smoke test, sign, then SBOM. It returns the
 // dependency-diff section, if one was produced. Signing and attesting happen
 // before tagging, so a tag never names an unsigned image, not even briefly.
-func postBuild(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string, irs []summary.Image) (string, error) {
+func postBuild(
+	o Options,
+	p *Prepared,
+	r *run.Runner,
+	rep ImagePlan,
+	repos []string,
+	digest string,
+	irs []summary.Image,
+) (string, error) {
 	ref := digestRef(repos[0], digest)
 
 	// Gate every platform of the artifact, not just the variant the host
@@ -1633,14 +1779,14 @@ func scanGate(o Options, p *Prepared, r *run.Runner, id, ref string, plats []str
 		if n == 0 {
 			// The ignores are the same for every platform: warn once.
 			for _, w := range res.ExpiredWarnings() {
-				fmt.Fprintf(progress, "    warning: %s\n", w)
+				progress.Printf(progressOut, "    warning: %s\n", w)
 			}
 		}
 		if o.DryRun {
 			continue
 		}
 		reports = append(reports, res)
-		fmt.Fprintf(progress, "    scan %s%s (%s): %s\n", id, platformLabel(plat), res.Scanner, res.Summary())
+		progress.Printf(progressOut, "    scan %s%s (%s): %s\n", id, platformLabel(plat), res.Scanner, res.Summary())
 		counts := res.Counts
 		recordPlatform(irs, plat, func(e *summary.Platform) { e.Scanned, e.Vulns = true, counts })
 		if err := res.GateError(p.Config.Scan.FailOn); err != nil {
@@ -1672,7 +1818,7 @@ func testGate(o Options, p *Prepared, r *run.Runner, id, ref string, plats []str
 	ran := 0
 	for _, t := range targets {
 		if t.Skip != "" {
-			fmt.Fprintf(progress, "    warning: smoke test %s on %s skipped: %s\n", id, t.Platform, t.Skip)
+			progress.Printf(progressOut, "    warning: smoke test %s on %s skipped: %s\n", id, t.Platform, t.Skip)
 			skip := t.Skip
 			recordPlatform(irs, t.Platform, func(e *summary.Platform) { e.TestSkipped = skip })
 			continue
@@ -1681,7 +1827,7 @@ func testGate(o Options, p *Prepared, r *run.Runner, id, ref string, plats []str
 		if t.Emulated {
 			label = " (" + t.Platform + ", emulated)"
 		}
-		fmt.Fprintf(progress, "    smoke test %s%s: docker run %s\n", id, label, cmd)
+		progress.Printf(progressOut, "    smoke test %s%s: docker run %s\n", id, label, cmd)
 		if err := tester.Run(r, p.Config.Test, ref, t.Platform); err != nil {
 			return fmt.Errorf("smoke test gate failed: %w", err)
 		}
@@ -1690,7 +1836,7 @@ func testGate(o Options, p *Prepared, r *run.Runner, id, ref string, plats []str
 	}
 	if ran < len(targets) {
 		if ran == 0 {
-			fmt.Fprintf(progress, "    warning: no platform of %s could be smoke tested on this docker host\n", id)
+			progress.Printf(progressOut, "    warning: no platform of %s could be smoke tested on this docker host\n", id)
 		}
 		for i := range irs {
 			irs[i].Tested = false
@@ -1719,7 +1865,16 @@ func testTargets(o Options, p *Prepared, r *run.Runner, plats []string) ([]teste
 // sbomStage generates an SBOM per platform, attests each when signing is on,
 // and returns the dependency diff of the first platform against the previous
 // release when one is configured.
-func sbomStage(o Options, p *Prepared, r *run.Runner, rep ImagePlan, repos []string, digest string, plats []string, irs []summary.Image) (string, error) {
+func sbomStage(
+	o Options,
+	p *Prepared,
+	r *run.Runner,
+	rep ImagePlan,
+	repos []string,
+	digest string,
+	plats []string,
+	irs []summary.Image,
+) (string, error) {
 	ref := digestRef(repos[0], digest)
 	dist := filepath.Join(o.Dir, p.Config.Dist)
 	var first string
@@ -1791,17 +1946,19 @@ func platformLabel(platform string) string {
 // group together and build once. Repositories, tags, and cache settings are
 // excluded — they don't change the artifact.
 func buildKey(dir string, plan ImagePlan) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "dockerfile=%s\n", abs(dir, plan.Image.Dockerfile))
-	fmt.Fprintf(h, "context=%s\n", abs(dir, plan.Image.Context))
-	fmt.Fprintf(h, "target=%s\n", plan.Image.Target)
+	// Composed in a builder and hashed once: the same bytes, with no write
+	// error to drop on the floor.
+	var b strings.Builder
+	fmt.Fprintf(&b, "dockerfile=%s\n", abs(dir, plan.Image.Dockerfile))
+	fmt.Fprintf(&b, "context=%s\n", abs(dir, plan.Image.Context))
+	fmt.Fprintf(&b, "target=%s\n", plan.Image.Target)
 	plats := append([]string(nil), plan.Image.Platforms...)
 	sort.Strings(plats)
-	fmt.Fprintf(h, "platforms=%s\n", strings.Join(plats, ","))
+	fmt.Fprintf(&b, "platforms=%s\n", strings.Join(plats, ","))
 	args := append([]string(nil), plan.BuildArgs...)
 	sort.Strings(args)
 	for _, a := range args {
-		fmt.Fprintf(h, "arg=%s\n", a)
+		fmt.Fprintf(&b, "arg=%s\n", a)
 	}
 	lkeys := make([]string, 0, len(plan.Labels))
 	for k := range plan.Labels {
@@ -1809,7 +1966,7 @@ func buildKey(dir string, plan ImagePlan) string {
 	}
 	sort.Strings(lkeys)
 	for _, k := range lkeys {
-		fmt.Fprintf(h, "label=%s=%s\n", k, plan.Labels[k])
+		fmt.Fprintf(&b, "label=%s=%s\n", k, plan.Labels[k])
 	}
 	akeys := make([]string, 0, len(plan.Annotations))
 	for k := range plan.Annotations {
@@ -1817,15 +1974,16 @@ func buildKey(dir string, plan ImagePlan) string {
 	}
 	sort.Strings(akeys)
 	for _, k := range akeys {
-		fmt.Fprintf(h, "annotation=%s=%s\n", k, plan.Annotations[k])
+		fmt.Fprintf(&b, "annotation=%s=%s\n", k, plan.Annotations[k])
 	}
 	for _, s := range plan.Image.Secrets {
-		fmt.Fprintf(h, "secret=%s\n", s.ID)
+		fmt.Fprintf(&b, "secret=%s\n", s.ID)
 	}
 	for _, f := range plan.Image.ExtraFlags {
-		fmt.Fprintf(h, "flag=%s\n", f)
+		fmt.Fprintf(&b, "flag=%s\n", f)
 	}
-	return hex.EncodeToString(h.Sum(nil))
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // builtRefs flattens the published references of the images this run built.
@@ -1873,9 +2031,9 @@ func Build(o Options) error {
 		if len(spec.Platforms) > 1 {
 			spec.Platforms = []string{localPlatform(spec.Platforms, runtime.GOARCH)}
 		}
-		fmt.Fprintf(progress, "==> building %s (local, %s)\n", plan.Image.ID, strings.Join(spec.Platforms, ","))
+		progress.Printf(progressOut, "==> building %s (local, %s)\n", plan.Image.ID, strings.Join(spec.Platforms, ","))
 		for _, ref := range spec.Refs {
-			fmt.Fprintf(progress, "    - %s\n", ref)
+			progress.Printf(progressOut, "    - %s\n", ref)
 		}
 		if _, err := builder.Build(r, spec); err != nil {
 			return err
@@ -2066,7 +2224,10 @@ func guardReleasable(gi *gitinfo.Info, strategy string) error {
 	// commit, and reusing it would overwrite that release's image tags.
 	if (strategy == "git" || strategy == "") && gi.Tag == "" {
 		if gi.LatestTag != "" {
-			return fmt.Errorf("no git tag on HEAD (latest reachable tag %s is on an earlier commit); tag a release, switch versioning.strategy, or use --snapshot", gi.LatestTag)
+			return fmt.Errorf(
+				"no git tag on HEAD (latest reachable tag %s is on an earlier commit); tag a release, switch versioning.strategy, or use --snapshot",
+				gi.LatestTag,
+			)
 		}
 		return fmt.Errorf("no git tag on HEAD; tag a release, switch versioning.strategy, or use --snapshot")
 	}
@@ -2086,11 +2247,20 @@ func guardDefaultBranch(o Options, branch string) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, gitinfo.ErrNotOnBranch):
-		return fmt.Errorf("HEAD is not on the default branch (%s); release from a merged commit, use --snapshot, or pass --allow-non-default-branch", ref)
+		return fmt.Errorf(
+			"HEAD is not on the default branch (%s); release from a merged commit, use --snapshot, or pass --allow-non-default-branch",
+			ref,
+		)
 	case errors.Is(err, gitinfo.ErrShallow):
-		return fmt.Errorf("cannot tell whether HEAD is on the default branch (%s): the clone is shallow; fetch full history (actions/checkout `fetch-depth: 0`, or `git fetch --unshallow`), or pass --allow-non-default-branch", ref)
+		return fmt.Errorf(
+			"cannot tell whether HEAD is on the default branch (%s): the clone is shallow; fetch full history (actions/checkout `fetch-depth: 0`, or `git fetch --unshallow`), or pass --allow-non-default-branch",
+			ref,
+		)
 	default:
-		return fmt.Errorf("check HEAD is on the default branch: %w; set default_branch, or pass --allow-non-default-branch", err)
+		return fmt.Errorf(
+			"check HEAD is on the default branch: %w; set default_branch, or pass --allow-non-default-branch",
+			err,
+		)
 	}
 }
 

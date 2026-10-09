@@ -1,6 +1,6 @@
 module github.com/blairham/stevedore
 
-go 1.26.8
+go 1.26.9
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.2

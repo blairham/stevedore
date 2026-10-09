@@ -41,7 +41,16 @@ func CheckReachable(ctx context.Context, dir, branch string) (string, error) {
 	if hasCommit(ctx, dir, ref) && reachable(ctx, dir, ref) == nil {
 		return name, nil
 	}
-	if err := runner.Refresh(ctx, "git", "-C", dir, "fetch", "--quiet", "origin", "+refs/heads/"+branch+":"+ref); err != nil {
+	if err := runner.Refresh(
+		ctx,
+		"git",
+		"-C",
+		dir,
+		"fetch",
+		"--quiet",
+		"origin",
+		"+refs/heads/"+branch+":"+ref,
+	); err != nil {
 		return name, fmt.Errorf("fetch %s: %w", name, err)
 	}
 	return name, reachable(ctx, dir, ref)

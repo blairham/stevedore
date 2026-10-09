@@ -37,7 +37,10 @@ func TestExpandOnly(t *testing.T) {
 		t.Errorf("--only a = %v, want it untouched", o.Only)
 	}
 	// An image really named "all" keeps the literal meaning.
-	named := writeConfig(t, "version: 1\nimages:\n  - {id: all, repositories: [r/all]}\n  - {id: x, repositories: [r/x]}\n")
+	named := writeConfig(
+		t,
+		"version: 1\nimages:\n  - {id: all, repositories: [r/all]}\n  - {id: x, repositories: [r/x]}\n",
+	)
 	o, _ = expandOnly(Options{ConfigPath: named, Only: []string{"all"}})
 	if !slices.Equal(o.Only, []string{"all"}) {
 		t.Errorf("--only all with an image named all = %v, want [all]", o.Only)
@@ -72,7 +75,14 @@ func TestReasonsFromPlanReachTheSummary(t *testing.T) {
 
 	o := Options{Only: []string{"b", "c"}, PlanReasons: reasons}
 	for id, want := range map[string]string{"b": "src/a changed since its release marker", "c": "selected via --only"} {
-		_, got, err := changeDecision(o, config.ChangeDetection{}, ImagePlan{Image: config.Image{ID: id}}, changed.Scope{}, nil, false)
+		_, got, err := changeDecision(
+			o,
+			config.ChangeDetection{},
+			ImagePlan{Image: config.Image{ID: id}},
+			changed.Scope{},
+			nil,
+			false,
+		)
 		if err != nil || got != want {
 			t.Errorf("%s: reason = %q, %v; want %q", id, got, err, want)
 		}
@@ -100,7 +110,9 @@ func TestPlanFlatOnlyAndPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(data), "only=a,b,c\npins=--pin-version a=1.0.0 --pin-version b=1.0.0 --pin-version c=2.1.0\n"; got != want {
+	if got, want := string(
+		data,
+	), "only=a,b,c\npins=--pin-version a=1.0.0 --pin-version b=1.0.0 --pin-version c=2.1.0\n"; got != want {
 		t.Errorf("GITHUB_OUTPUT = %q, want %q", got, want)
 	}
 	if strings.Contains(string(data), "plan=") {

@@ -145,7 +145,11 @@ func TestMergeRefusesWhatTheLegsDidNotBuild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := writeSplitVersions(dir, "dist", []imageEval{{plan: ImagePlan{Image: config.Image{ID: "app"}, Version: "0.1.0"}}}); err != nil {
+	if err := writeSplitVersions(
+		dir,
+		"dist",
+		[]imageEval{{plan: ImagePlan{Image: config.Image{ID: "app"}, Version: "0.1.0"}}},
+	); err != nil {
 		t.Fatal(err)
 	}
 	// The marker moves to HEAD: app now reads as unchanged.

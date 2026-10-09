@@ -85,8 +85,10 @@ func newVerifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&key, "key", "", "cosign public key (default sign.cosign.public_key; omit for keyless)")
-	cmd.Flags().StringVar(&identity, "certificate-identity", "", "expected certificate identity regexp, matched against the whole identity (keyless)")
-	cmd.Flags().StringVar(&issuer, "certificate-oidc-issuer", "", "expected OIDC issuer regexp, matched against the whole issuer (keyless)")
+	cmd.Flags().
+		StringVar(&identity, "certificate-identity", "", "expected certificate identity regexp, matched against the whole identity (keyless)")
+	cmd.Flags().
+		StringVar(&issuer, "certificate-oidc-issuer", "", "expected OIDC issuer regexp, matched against the whole issuer (keyless)")
 	cmd.Flags().BoolVar(&noSBOM, "no-sbom", false, "skip SBOM attestation verification")
 	cmd.Flags().BoolVar(&noProv, "no-provenance", false, "skip provenance verification")
 	return cmd
@@ -105,7 +107,9 @@ func verifyKey(flagKey string, keyless bool, cfg *config.Config) (string, error)
 		return cfg.Sign.Cosign.PublicKey, nil
 	}
 	if cfg.Sign.Cosign.Key != "" {
-		return "", fmt.Errorf("sign.cosign.key is the private signing key and cannot verify; set sign.cosign.public_key or pass --key <public key>")
+		return "", fmt.Errorf(
+			"sign.cosign.key is the private signing key and cannot verify; set sign.cosign.public_key or pass --key <public key>",
+		)
 	}
 	return "", nil
 }

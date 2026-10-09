@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/blairham/stevedore/internal/progress"
 )
 
 // Runner executes external commands, honoring dry-run and verbose settings.
@@ -157,7 +159,7 @@ func Has(name string) bool {
 
 // echoRan echoes a command that executes whatever the mode.
 func (r *Runner) echoRan(name string, args []string) {
-	fmt.Fprintln(r.err(), "+ "+name+" "+strings.Join(quote(args), " "))
+	progress.Println(r.err(), "+ "+name+" "+strings.Join(quote(args), " "))
 }
 
 func (r *Runner) echo(name string, args []string) {
@@ -165,7 +167,7 @@ func (r *Runner) echo(name string, args []string) {
 	if r.DryRun {
 		prefix = "[dry-run] "
 	}
-	fmt.Fprintln(r.err(), prefix+name+" "+strings.Join(quote(args), " "))
+	progress.Println(r.err(), prefix+name+" "+strings.Join(quote(args), " "))
 }
 
 // Context returns the context the Runner binds its work to, or Background for

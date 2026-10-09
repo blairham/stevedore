@@ -127,7 +127,10 @@ func TestResolvePlans_OnlySkipsExcludedImages(t *testing.T) {
 func TestValidateImageIDs(t *testing.T) {
 	cfg := &config.Config{Images: []config.Image{{ID: "a"}, {ID: "b"}}}
 
-	if err := validateImageIDs(cfg, Options{Only: []string{"a"}, PinVersions: map[string]string{"b": "1.0.0"}}); err != nil {
+	if err := validateImageIDs(
+		cfg,
+		Options{Only: []string{"a"}, PinVersions: map[string]string{"b": "1.0.0"}},
+	); err != nil {
 		t.Errorf("valid ids should pass, got %v", err)
 	}
 	if err := validateImageIDs(cfg, Options{Only: []string{"nope"}}); err == nil {
@@ -326,7 +329,17 @@ func TestEvaluateImages_MarkerWithChangedSince(t *testing.T) {
 }
 
 func TestUnion(t *testing.T) {
-	if got, want := union([]string{"a", "b"}, []string{"b", "c", "c"}), []string{"a", "b", "c"}; !reflect.DeepEqual(got, want) {
+	if got, want := union(
+		[]string{"a", "b"},
+		[]string{"b", "c", "c"},
+	), []string{
+		"a",
+		"b",
+		"c",
+	}; !reflect.DeepEqual(
+		got,
+		want,
+	) {
 		t.Errorf("union = %v, want %v", got, want)
 	}
 }

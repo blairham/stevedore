@@ -109,7 +109,11 @@ func Scan(r *run.Runner, cfg config.Scan, distDir, name, ref, platform string) (
 		return nil, fmt.Errorf("%s scan of %s: %w", cfg.Scanner, ref, err)
 	}
 	if raw != "" {
-		if werr := os.WriteFile(raw, []byte(out), 0o644); werr != nil { //nolint:gosec // G306: dist/ is read by non-owners (see pipeline.mkdirDist)
+		if werr := os.WriteFile( //nolint:gosec // G306: dist/ is read by non-owners (see pipeline.mkdirDist)
+			raw,
+			[]byte(out),
+			0o644,
+		); werr != nil {
 			return nil, fmt.Errorf("write scan report: %w", werr)
 		}
 	}
@@ -209,7 +213,15 @@ func (rep *Report) GateError(failOn string) error {
 		return severityRank[rep.Blocking[i].Severity] > severityRank[rep.Blocking[j].Severity]
 	})
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d vulnerabilit%s at or above %q in %s%s:", len(rep.Blocking), plural(len(rep.Blocking)), failOn, rep.Ref, onPlatform(rep.Platform))
+	fmt.Fprintf(
+		&b,
+		"%d vulnerabilit%s at or above %q in %s%s:",
+		len(rep.Blocking),
+		plural(len(rep.Blocking)),
+		failOn,
+		rep.Ref,
+		onPlatform(rep.Platform),
+	)
 	shown := rep.Blocking
 	const maxShown = 20
 	if len(shown) > maxShown {
@@ -263,7 +275,12 @@ func requireKeys(scanner string, data []byte, keys ...string) error {
 	for _, k := range keys {
 		v, ok := top[k]
 		if !ok || string(v) == "null" {
-			return fmt.Errorf("parse %s output: not a %s JSON report (no %q key); is the output format overridden in scan.args?", scanner, scanner, k)
+			return fmt.Errorf(
+				"parse %s output: not a %s JSON report (no %q key); is the output format overridden in scan.args?",
+				scanner,
+				scanner,
+				k,
+			)
 		}
 	}
 	return nil
@@ -325,7 +342,11 @@ func parseTrivy(data []byte) ([]Vuln, error) {
 		return nil, fmt.Errorf("parse trivy output: %w", err)
 	}
 	if doc.SchemaVersion != trivySchemaVersion {
-		return nil, fmt.Errorf("parse trivy output: unsupported SchemaVersion %d (want %d)", doc.SchemaVersion, trivySchemaVersion)
+		return nil, fmt.Errorf(
+			"parse trivy output: unsupported SchemaVersion %d (want %d)",
+			doc.SchemaVersion,
+			trivySchemaVersion,
+		)
 	}
 	var vulns []Vuln
 	for _, r := range doc.Results {

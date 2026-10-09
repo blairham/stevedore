@@ -62,7 +62,8 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 		Version:       version,
 	}
-	root.PersistentFlags().StringVarP(&flagConfig, "config", "f", "", "path to config file (default: autodiscover .stevedore.yaml)")
+	root.PersistentFlags().
+		StringVarP(&flagConfig, "config", "f", "", "path to config file (default: autodiscover .stevedore.yaml)")
 	root.PersistentFlags().StringVar(&flagDir, "dir", ".", "project/repository root")
 	root.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "verbose output")
 	root.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "print commands without executing")

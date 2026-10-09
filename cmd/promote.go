@@ -83,12 +83,19 @@ func newPromoteCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&from, "from", "", "source tag or sha256 digest in the image's first repository (required)")
 	cmd.Flags().StringArrayVar(&to, "to", nil, "tag to point at the promoted digest (repeatable, required)")
-	cmd.Flags().StringArrayVar(&toRepo, "to-repo", nil, "destination repository (repeatable; default: the image's configured repositories)")
+	cmd.Flags().
+		StringArrayVar(&toRepo, "to-repo", nil, "destination repository (repeatable; default: the image's configured repositories)")
 	cmd.Flags().StringVar(&key, "key", "", "cosign public key (default sign.cosign.public_key; omit for keyless)")
-	cmd.Flags().StringVar(&identity, "certificate-identity", "", "expected certificate identity regexp, matched against the whole identity (keyless)")
-	cmd.Flags().StringVar(&issuer, "certificate-oidc-issuer", "", "expected OIDC issuer regexp, matched against the whole issuer (keyless)")
-	_ = cmd.MarkFlagRequired("from")
-	_ = cmd.MarkFlagRequired("to")
+	cmd.Flags().
+		StringVar(&identity, "certificate-identity", "", "expected certificate identity regexp, matched against the whole identity (keyless)")
+	cmd.Flags().
+		StringVar(&issuer, "certificate-oidc-issuer", "", "expected OIDC issuer regexp, matched against the whole issuer (keyless)")
+	for _, name := range []string{"from", "to"} {
+		// Fails only for a flag that was never defined: a bug in this file.
+		if err := cmd.MarkFlagRequired(name); err != nil {
+			panic(err)
+		}
+	}
 	return cmd
 }
 

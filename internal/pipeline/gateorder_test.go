@@ -76,7 +76,11 @@ func gateHarness(t *testing.T) (dir, log string, o Options, p *Prepared, grp []i
 		t.Fatal(err)
 	}
 	for name, body := range map[string]string{"docker": fakeDocker, "grype": fakeGrype, "cosign": fakeCosign} {
-		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil { //nolint:gosec // G306: a test fake must be executable
+		if err := os.WriteFile(
+			filepath.Join(bin, name),
+			[]byte(body),
+			0o755,
+		); err != nil { //nolint:gosec // G306: a test fake must be executable
 			t.Fatal(err)
 		}
 	}
@@ -99,7 +103,12 @@ func gateHarness(t *testing.T) (dir, log string, o Options, p *Prepared, grp []i
 		Sign: config.Sign{Cosign: config.Cosign{Enabled: true}},
 	}}
 	plan := ImagePlan{
-		Image: config.Image{ID: "app", Dockerfile: "Dockerfile", Context: ".", Platforms: []string{"linux/amd64", "linux/arm64"}},
+		Image: config.Image{
+			ID:         "app",
+			Dockerfile: "Dockerfile",
+			Context:    ".",
+			Platforms:  []string{"linux/amd64", "linux/arm64"},
+		},
 		Repos: []string{"ghcr.io/x/app", "reg.io/x/app"},
 		Refs:  []string{"ghcr.io/x/app:1.0.0", "ghcr.io/x/app:latest", "reg.io/x/app:1.0.0", "reg.io/x/app:latest"},
 	}
@@ -162,7 +171,13 @@ func assertTaggedAfterGates(t *testing.T, calls []string, digest string) {
 	smoke := indexOf(calls, "docker run --rm --name stevedore-test-", " --platform linux/amd64 ghcr.io/x/app@"+digest)
 	sign := indexOf(calls, "cosign sign", "reg.io/x/app@"+digest)
 	if scan < 0 || smoke < 0 || sign < 0 {
-		t.Fatalf("gates did not run on the digest (scan=%d smoke=%d sign=%d):\n%s", scan, smoke, sign, strings.Join(calls, "\n"))
+		t.Fatalf(
+			"gates did not run on the digest (scan=%d smoke=%d sign=%d):\n%s",
+			scan,
+			smoke,
+			sign,
+			strings.Join(calls, "\n"),
+		)
 	}
 	gatesDone := max(scan, smoke, sign)
 	tagging := taggingCalls(calls)

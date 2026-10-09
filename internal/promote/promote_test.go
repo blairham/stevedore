@@ -46,7 +46,11 @@ func harness(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range map[string]string{"crane": fakeCrane, "cosign": fakeCosign, "oras": fakeOras} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil { //nolint:gosec // G306: a test fake must be executable
+		if err := os.WriteFile(
+			filepath.Join(dir, name),
+			[]byte(body),
+			0o755,
+		); err != nil { //nolint:gosec // G306: a test fake must be executable
 			t.Fatal(err)
 		}
 	}

@@ -18,7 +18,7 @@ func FuzzMatch(f *testing.F) {
 	} {
 		f.Add(seed[0], seed[1])
 	}
-	f.Fuzz(func(t *testing.T, pattern, path string) {
+	f.Fuzz(func(_ *testing.T, pattern, path string) {
 		_ = Match([]string{pattern}, path)
 		_ = Evaluate(Scope{Paths: []string{pattern}}, nil, []string{path})
 	})

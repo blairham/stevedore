@@ -136,8 +136,10 @@ outputs:
 
 The action verifies the stevedore binary before running it: it checks the
 release's `checksums.txt` against its keyless cosign signature, which must come
-from this repository's `release.yml` for that tag (or for `main`, for a release
-re-run by hand), and then checks the archive's sha256 against that file. Any
+from stevedore's release for that tag (or for `main`, for a release re-run by
+hand) — signed by the shared `go-release.yml` in blairham/.github that
+stevedore's `release.yml` calls, or, for `v1.1.0` and earlier, by that
+`release.yml` itself — and then checks the archive's sha256 against that file. Any
 mismatch, or a release with no signed `checksums.txt` (`v1.0.0` and `v1.0.1`),
 fails the step before the binary is extracted. To run a binary the action did
 not verify, install it yourself and set `install-stevedore: false`.

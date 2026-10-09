@@ -18,7 +18,8 @@ func TestAuthArgs(t *testing.T) {
 		t.Errorf("keyed authArgs = %v", got)
 	}
 	got := authArgs(Options{Identity: "https://github.com/x/.+", Issuer: "https://token.actions.githubusercontent.com"})
-	if !slices.Contains(got, "--certificate-identity-regexp") || !slices.Contains(got, "--certificate-oidc-issuer-regexp") {
+	if !slices.Contains(got, "--certificate-identity-regexp") ||
+		!slices.Contains(got, "--certificate-oidc-issuer-regexp") {
 		t.Errorf("keyless authArgs missing flags: %v", got)
 	}
 }
@@ -27,7 +28,12 @@ func TestAuthArgs(t *testing.T) {
 // matches its regexp flags anywhere in the value. Compile the regexps cosign
 // would receive and check what they accept.
 func TestAuthArgsAnchorsIdentityAndIssuer(t *testing.T) {
-	args := authArgs(Options{Identity: "release@acme.com", Issuer: "https://token.actions.githubusercontent.com|https://accounts.google.com"})
+	args := authArgs(
+		Options{
+			Identity: "release@acme.com",
+			Issuer:   "https://token.actions.githubusercontent.com|https://accounts.google.com",
+		},
+	)
 	value := func(flag string) *regexp.Regexp {
 		i := slices.Index(args, flag)
 		if i < 0 || i+1 >= len(args) {

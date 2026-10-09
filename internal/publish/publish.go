@@ -32,7 +32,13 @@ import (
 //
 // prerelease is whether the version is a semver prerelease; it marks the
 // release as one unless cfg.Prerelease says otherwise.
-func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, target, title, notesPath string, prerelease bool, assets []string) error {
+func GitHubRelease(
+	r *run.Runner,
+	cfg config.GitHubRelease,
+	tag, target, title, notesPath string,
+	prerelease bool,
+	assets []string,
+) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -66,7 +72,12 @@ func GitHubRelease(r *run.Runner, cfg config.GitHubRelease, tag, target, title, 
 // notesPath as the body and assets attached. target is the commit the tag is
 // created at when it does not exist yet (--ref); it is omitted when empty.
 // GitLab has no draft or prerelease flag, so neither is offered.
-func GitLabRelease(r *run.Runner, cfg config.GitLabRelease, tag, target, title, notesPath string, assets []string) error {
+func GitLabRelease(
+	r *run.Runner,
+	cfg config.GitLabRelease,
+	tag, target, title, notesPath string,
+	assets []string,
+) error {
 	if !cfg.Enabled {
 		return nil
 	}
@@ -147,7 +158,12 @@ func renderPayload(kind, text string) ([]byte, error) {
 }
 
 func post(ctx context.Context, url string, payload []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload)) //nolint:gosec // G704: the operator's own webhook, checked by checkWebhookURL
+	req, err := http.NewRequestWithContext( //nolint:gosec // G704: the operator's own webhook, checked by checkWebhookURL
+		ctx,
+		http.MethodPost,
+		url,
+		bytes.NewReader(payload),
+	)
 	if err != nil {
 		return err
 	}
@@ -169,11 +185,10 @@ func send(req *http.Request) error {
 		}
 		return err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook returned %s: %s", resp.Status, bodyPrefix(resp.Body))
+		err = fmt.Errorf("webhook returned %s: %s", resp.Status, bodyPrefix(resp.Body))
 	}
-	return nil
+	return errors.Join(err, resp.Body.Close())
 }
 
 // bodyPrefix returns up to 512 bytes of an error response for the message. A
@@ -201,7 +216,10 @@ func checkWebhookURL(env, raw string) error {
 		return fmt.Errorf("%s is not an absolute http(s) URL", env)
 	}
 	if u.Scheme == "http" && !isLoopback(u.Hostname()) {
-		return fmt.Errorf("%s is a plain http URL; webhooks must use https (http is allowed only for localhost, 127.0.0.0/8 and [::1])", env)
+		return fmt.Errorf(
+			"%s is a plain http URL; webhooks must use https (http is allowed only for localhost, 127.0.0.0/8 and [::1])",
+			env,
+		)
 	}
 	return nil
 }

@@ -12,6 +12,21 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ## [Unreleased]
 
+### Changed
+
+- The release binaries' `checksums.txt` is signed, and their provenance
+  attested, by the shared `go-release.yml` in blairham/.github, which this
+  repository's `release.yml` now calls. The certificate names that workflow,
+  with this repository and the tag as its workflow repository and ref;
+  SECURITY.md has the new `cosign verify-blob` and `gh attestation verify`
+  commands. The image is still signed by this repository's `release.yml`.
+- The GitHub Action's verified download accepts either signer: the shared
+  workflow for new releases, this repository's `release.yml` for `v1.1.0` and
+  earlier.
+- `--output json` fails the run if the summary cannot be written to stdout,
+  and a write to the GitHub step summary, the Actions outputs file or
+  `.gitignore` that only fails at close is reported rather than lost.
+
 ## [1.1.0] - 2026-10-05
 
 ### Security

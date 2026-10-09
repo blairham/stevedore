@@ -117,10 +117,24 @@ func TestCosignFailureStops(t *testing.T) {
 	calls := fakeCosign(t, 1)
 	cfg := config.Cosign{Enabled: true}
 	repos := []string{"ghcr.io/x/a", "ghcr.io/x/b"}
-	if err := Sign(quiet(t), cfg, repos, "sha256:abc"); err == nil || !strings.Contains(err.Error(), "ghcr.io/x/a@sha256:abc") {
+	if err := Sign(
+		quiet(t),
+		cfg,
+		repos,
+		"sha256:abc",
+	); err == nil ||
+		!strings.Contains(err.Error(), "ghcr.io/x/a@sha256:abc") {
 		t.Errorf("Sign error = %v, want one naming the first ref", err)
 	}
-	if err := Attest(quiet(t), cfg, repos, "sha256:abc", "p", "t"); err == nil || !strings.Contains(err.Error(), "cosign attest") {
+	if err := Attest(
+		quiet(t),
+		cfg,
+		repos,
+		"sha256:abc",
+		"p",
+		"t",
+	); err == nil ||
+		!strings.Contains(err.Error(), "cosign attest") {
 		t.Errorf("Attest error = %v, want a cosign attest error", err)
 	}
 	if got := calls(); len(got) != 2 {
@@ -170,10 +184,24 @@ func TestDryRunNeedsNoCosign(t *testing.T) {
 func TestMissingCosignFails(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	cfg := config.Cosign{Enabled: true}
-	if err := Sign(quiet(t), cfg, []string{"ghcr.io/x/a"}, "sha256:abc"); err == nil || !strings.Contains(err.Error(), "cosign not found") {
+	if err := Sign(
+		quiet(t),
+		cfg,
+		[]string{"ghcr.io/x/a"},
+		"sha256:abc",
+	); err == nil ||
+		!strings.Contains(err.Error(), "cosign not found") {
 		t.Errorf("Sign err = %v", err)
 	}
-	if err := Attest(quiet(t), cfg, []string{"ghcr.io/x/a"}, "sha256:abc", "p", "spdxjson"); err == nil || !strings.Contains(err.Error(), "cosign") {
+	if err := Attest(
+		quiet(t),
+		cfg,
+		[]string{"ghcr.io/x/a"},
+		"sha256:abc",
+		"p",
+		"spdxjson",
+	); err == nil ||
+		!strings.Contains(err.Error(), "cosign") {
 		t.Errorf("Attest err = %v", err)
 	}
 }

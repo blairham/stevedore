@@ -41,7 +41,15 @@ func checkSecrets(plans []ImagePlan) error {
 				continue
 			}
 			if os.Getenv(env) == "" {
-				errs = append(errs, fmt.Errorf("image %s: secret %q: $%s is unset; set it, mark the secret `optional: true`, or use --snapshot", plan.Image.ID, s.ID, env))
+				errs = append(
+					errs,
+					fmt.Errorf(
+						"image %s: secret %q: $%s is unset; set it, mark the secret `optional: true`, or use --snapshot",
+						plan.Image.ID,
+						s.ID,
+						env,
+					),
+				)
 			}
 		}
 	}
@@ -68,7 +76,10 @@ func checkGitHubAuth(o Options) error {
 				detail = msg
 			}
 		}
-		return fmt.Errorf("release.github is enabled but gh is not authenticated (%s); set GH_TOKEN, run `gh auth login`, or pass --skip-publish", detail)
+		return fmt.Errorf(
+			"release.github is enabled but gh is not authenticated (%s); set GH_TOKEN, run `gh auth login`, or pass --skip-publish",
+			detail,
+		)
 	}
 	return nil
 }

@@ -28,7 +28,10 @@ func TestSinkPaths(t *testing.T) {
 		t.Errorf("STEVEDORE_* should win: %q, %q", OutputsPath(), MarkdownPath())
 	}
 
-	r := Result{Project: "demo", Images: []Image{{ID: "api", Digest: "sha256:abc", Repositories: []string{"r/api"}, Pushed: true}}}
+	r := Result{
+		Project: "demo",
+		Images:  []Image{{ID: "api", Digest: "sha256:abc", Repositories: []string{"r/api"}, Pushed: true}},
+	}
 	if err := r.WriteGitHubOutput(); err != nil {
 		t.Fatal(err)
 	}

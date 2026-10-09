@@ -51,11 +51,19 @@ func TestFloatingTag(t *testing.T) {
 func semverCfg(allow bool) *config.Config {
 	return &config.Config{
 		PrereleaseFloatingTags: allow,
-		Images: []config.Image{{
-			ID:           "app",
-			Repositories: []string{"reg/app"},
-			Tags:         []string{"{{ .Version }}", "{{ .ShortCommit }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}", "latest"},
-		}},
+		Images: []config.Image{
+			{
+				ID:           "app",
+				Repositories: []string{"reg/app"},
+				Tags: []string{
+					"{{ .Version }}",
+					"{{ .ShortCommit }}",
+					"{{ .Major }}",
+					"{{ .Major }}.{{ .Minor }}",
+					"latest",
+				},
+			},
+		},
 	}
 }
 
@@ -75,7 +83,16 @@ func TestResolvePlans_MajorMinorTags(t *testing.T) {
 	}
 	// Applied after the immutable tags, commit tag first.
 	got := orderRefsForTagging(plans[0].Refs, plans[0].Floating, "deadbeefcafe", "deadbee")
-	if want := []string{"reg/app:deadbee", "reg/app:1.2.3", "reg/app:1", "reg/app:1.2", "reg/app:latest"}; !slices.Equal(got, want) {
+	if want := []string{
+		"reg/app:deadbee",
+		"reg/app:1.2.3",
+		"reg/app:1",
+		"reg/app:1.2",
+		"reg/app:latest",
+	}; !slices.Equal(
+		got,
+		want,
+	) {
 		t.Errorf("tag order = %v, want %v", got, want)
 	}
 }
@@ -105,7 +122,16 @@ func TestResolvePlans_PrereleaseWithholdsFloating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"reg/app:1.3.0-rc.1", "reg/app:deadbee", "reg/app:1", "reg/app:1.3", "reg/app:latest"}; !slices.Equal(plans[0].Refs, want) {
+	if want := []string{
+		"reg/app:1.3.0-rc.1",
+		"reg/app:deadbee",
+		"reg/app:1",
+		"reg/app:1.3",
+		"reg/app:latest",
+	}; !slices.Equal(
+		plans[0].Refs,
+		want,
+	) {
 		t.Errorf("prerelease_floating_tags: refs = %v, want %v", plans[0].Refs, want)
 	}
 }

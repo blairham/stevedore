@@ -47,7 +47,13 @@ type Context struct {
 }
 
 // NewContext builds a template context from git info and options.
-func NewContext(projectName, defaultBranch string, gi *gitinfo.Info, snapshot bool, now time.Time, env map[string]string) *Context {
+func NewContext(
+	projectName, defaultBranch string,
+	gi *gitinfo.Info,
+	snapshot bool,
+	now time.Time,
+	env map[string]string,
+) *Context {
 	c := &Context{
 		ProjectName: projectName,
 		Version:     gi.Version,

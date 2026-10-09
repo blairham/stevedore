@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,11 +104,15 @@ func (r *PlanResult) WriteGitHubOutput() error {
 	if path == "" {
 		return nil
 	}
-	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G703: a file the Actions runner names
+	f, err := os.OpenFile(
+		filepath.Clean(path),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o600,
+	) //nolint:gosec // G703: a file the Actions runner names
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	_, err = fmt.Fprintf(f, "only=%s\npins=%s\n", r.FlatOnly(), r.FlatPins())
-	return err
+	// Close reports a write the kernel deferred; it is part of the write.
+	return errors.Join(err, f.Close())
 }

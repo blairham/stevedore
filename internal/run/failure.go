@@ -65,7 +65,14 @@ var hints = []struct {
 		"the repository does not exist in the registry: create it, or fix the repository name in the config",
 	},
 	{
-		[]string{"401 unauthorized", "unauthorized:", "authentication required", "no basic auth credentials", "expiredtokenexception", "unrecognizedclientexception"},
+		[]string{
+			"401 unauthorized",
+			"unauthorized:",
+			"authentication required",
+			"no basic auth credentials",
+			"expiredtokenexception",
+			"unrecognizedclientexception",
+		},
 		"the registry rejected the credentials: log in to it (docker login, or the cloud provider's login) and check the token has not expired",
 	},
 	{
