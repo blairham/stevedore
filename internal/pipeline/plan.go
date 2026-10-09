@@ -13,6 +13,7 @@ import (
 	"github.com/blairham/stevedore/internal/changed"
 	"github.com/blairham/stevedore/internal/config"
 	"github.com/blairham/stevedore/internal/fingerprint"
+	"github.com/blairham/stevedore/internal/progress"
 )
 
 // imageEval is one image's change-detection outcome from the pre-pass.
@@ -110,7 +111,14 @@ func changeScope(o Options, repoRoot string, plan ImagePlan) (changed.Scope, err
 // selects unconditionally, marker mode diffs against the image's own release
 // marker (or --changed-since, when that is older), --changed-since alone
 // against that ref, and otherwise everything changed.
-func changeDecision(o Options, cd config.ChangeDetection, plan ImagePlan, scope changed.Scope, changedFiles []string, markerMode bool) (bool, string, error) {
+func changeDecision(
+	o Options,
+	cd config.ChangeDetection,
+	plan ImagePlan,
+	scope changed.Scope,
+	changedFiles []string,
+	markerMode bool,
+) (bool, string, error) {
 	switch {
 	case len(o.Only) > 0:
 		if r := o.PlanReasons[plan.Image.ID]; r != "" {
@@ -158,7 +166,12 @@ func markerDiff(o Options, ref string, changedFiles []string) ([]string, string,
 	}
 	since := "its release marker"
 	if diverged {
-		fmt.Fprintf(progress, "warning: release marker %s has diverged from HEAD; diffing from merge base %.8s until it is reset\n", ref, base)
+		progress.Printf(
+			progressOut,
+			"warning: release marker %s has diverged from HEAD; diffing from merge base %.8s until it is reset\n",
+			ref,
+			base,
+		)
 		since = fmt.Sprintf("merge base %.8s (release marker diverged)", base)
 	}
 	if o.ChangedSince == "" {
@@ -287,8 +300,8 @@ type PlanResult struct {
 // <entry.pins>`.
 func Plan(o Options) (*PlanResult, error) {
 	// Progress goes to stderr so stdout carries only the plan document.
-	progress = os.Stderr
-	defer func() { progress = os.Stdout }()
+	progressOut = os.Stderr
+	defer func() { progressOut = os.Stdout }()
 
 	o, err := applyRequireTag(o)
 	if err != nil {

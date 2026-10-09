@@ -158,8 +158,13 @@ func memberReleased(r *run.Runner, plan ImagePlan, commit, short string) (releas
 		case !found:
 			missing = append(missing, ref)
 		case got.Revision != "" && got.Revision != commit:
-			return releasedAt{}, false, fmt.Errorf("image %s: %s already exists, built from commit %s, not %s — refusing to publish a tag set that disagrees with it",
-				plan.Image.ID, ref, got.Revision, commit)
+			return releasedAt{}, false, fmt.Errorf(
+				"image %s: %s already exists, built from commit %s, not %s — refusing to publish a tag set that disagrees with it",
+				plan.Image.ID,
+				ref,
+				got.Revision,
+				commit,
+			)
 		default:
 			have = append(have, ref)
 			if digest == "" {
@@ -171,9 +176,13 @@ func memberReleased(r *run.Runner, plan ImagePlan, commit, short string) (releas
 	case len(have) == 0:
 		return releasedAt{}, false, nil
 	case len(missing) > 0:
-		return releasedAt{}, false, fmt.Errorf("image %s: commit tag(s) %s already exist but %s do not — an earlier release of this commit stopped partway; "+
-			"tag the missing refs from the existing digest, or delete the existing ones, and re-run",
-			plan.Image.ID, strings.Join(have, ", "), strings.Join(missing, ", "))
+		return releasedAt{}, false, fmt.Errorf(
+			"image %s: commit tag(s) %s already exist but %s do not — an earlier release of this commit stopped partway; "+
+				"tag the missing refs from the existing digest, or delete the existing ones, and re-run",
+			plan.Image.ID,
+			strings.Join(have, ", "),
+			strings.Join(missing, ", "),
+		)
 	}
 	return releasedAt{Ref: have[0], Digest: digest}, true, nil
 }

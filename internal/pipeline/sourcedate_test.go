@@ -52,7 +52,14 @@ func TestResolvePlans_ImageID(t *testing.T) {
 			Tags: []string{"{{ .ID }}-{{ .Version }}"}, BuildArgs: []string{"SERVICE={{ .ID }}"},
 		}
 	}
-	plans, err := resolvePlans(&config.Config{Images: []config.Image{img("api"), img("worker")}}, newCtx("main", false), false, nil, nil, nil)
+	plans, err := resolvePlans(
+		&config.Config{Images: []config.Image{img("api"), img("worker")}},
+		newCtx("main", false),
+		false,
+		nil,
+		nil,
+		nil,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

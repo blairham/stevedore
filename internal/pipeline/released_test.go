@@ -72,7 +72,11 @@ const (
 func rereleaseHarness(t *testing.T, existing string) (log string, o Options, p *Prepared, grp []imageEval) {
 	t.Helper()
 	dir, log, o, p, grp := gateHarness(t)
-	if err := os.WriteFile(filepath.Join(dir, "bin", "docker"), []byte(fakeImmutableDocker), 0o755); err != nil { //nolint:gosec // G306: a test fake must be executable
+	if err := os.WriteFile(
+		filepath.Join(dir, "bin", "docker"),
+		[]byte(fakeImmutableDocker),
+		0o755,
+	); err != nil { //nolint:gosec // G306: a test fake must be executable
 		t.Fatal(err)
 	}
 	t.Setenv("FAKE_EXISTING", existing)

@@ -47,7 +47,12 @@ func TestRunEnvReachesChild(t *testing.T) {
 	outf := stderrFile(t)
 	t.Setenv("STEVEDORE_INHERITED", "kept")
 	r := &Runner{Stdout: outf, Stderr: stderrFile(t)}
-	if err := r.RunEnv([]string{"STEVEDORE_ADDED=yes"}, "sh", "-c", `echo "$STEVEDORE_ADDED $STEVEDORE_INHERITED"`); err != nil {
+	if err := r.RunEnv(
+		[]string{"STEVEDORE_ADDED=yes"},
+		"sh",
+		"-c",
+		`echo "$STEVEDORE_ADDED $STEVEDORE_INHERITED"`,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if got := readAll(t, outf); got != "yes kept\n" {

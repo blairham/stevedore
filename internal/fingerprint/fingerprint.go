@@ -9,7 +9,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -66,21 +68,21 @@ func Compute(dir string, img config.Image, distDir string, scopedPaths []string)
 	h := sha256.New()
 
 	// Stable header of non-file inputs.
-	fmt.Fprintf(h, "target=%s\n", img.Target)
+	hashf(h, "target=%s\n", img.Target)
 	plats := append([]string(nil), img.Platforms...)
 	sort.Strings(plats)
-	fmt.Fprintf(h, "platforms=%s\n", strings.Join(plats, ","))
+	hashf(h, "platforms=%s\n", strings.Join(plats, ","))
 	buildArgs := append([]string(nil), img.BuildArgs...)
 	sort.Strings(buildArgs)
 	for _, a := range buildArgs {
-		fmt.Fprintf(h, "arg=%s\n", a)
+		hashf(h, "arg=%s\n", a)
 	}
 	// extra_flags reach buildx verbatim and can carry build inputs of their own
 	// (--build-arg, --secret, --build-context). They are hashed in order, not
 	// sorted: a flag and its value are separate elements, so sorting would mix
 	// pairs up, and a reorder costing one rebuild is the safe direction.
 	for _, f := range img.ExtraFlags {
-		fmt.Fprintf(h, "flag=%s\n", f)
+		hashf(h, "flag=%s\n", f)
 	}
 
 	// The Dockerfile (it may live outside the context).
@@ -116,7 +118,7 @@ func Compute(dir string, img config.Image, distDir string, scopedPaths []string)
 
 // hashMatching folds every file under root whose repo-relative path matches one
 // of patterns into h, in deterministic order.
-func hashMatching(h io.Writer, root string, patterns []string, distDir string) error {
+func hashMatching(h hash.Hash, root string, patterns []string, distDir string) error {
 	rels, err := walkFiles(root, distDir, func(rel string) bool {
 		return changed.Match(patterns, filepath.ToSlash(rel))
 	})
@@ -128,7 +130,7 @@ func hashMatching(h io.Writer, root string, patterns []string, distDir string) e
 
 // hashTree folds every file under root (except skipped dirs and the dist dir)
 // into h as (relpath, content) pairs, walked in a deterministic order.
-func hashTree(h io.Writer, root, distDir string) error {
+func hashTree(h hash.Hash, root, distDir string) error {
 	info, err := os.Stat(root)
 	if err != nil {
 		return fmt.Errorf("stat context %s: %w", root, err)
@@ -180,7 +182,7 @@ func walkFiles(root, distDir string, keep func(rel string) bool) ([]string, erro
 }
 
 // hashFiles hashes each root-relative file under label+its slash path.
-func hashFiles(h io.Writer, label, root string, rels []string) error {
+func hashFiles(h hash.Hash, label, root string, rels []string) error {
 	for _, rel := range rels {
 		if err := hashFile(h, label+filepath.ToSlash(rel), filepath.Join(root, rel)); err != nil {
 			return err
@@ -193,26 +195,35 @@ func hashFiles(h io.Writer, label, root string, rels []string) error {
 // mode counts because COPY preserves it: a `chmod +x entrypoint.sh` changes the
 // image without changing a byte of the file. A missing file is recorded as
 // absent rather than erroring, so an optional Dockerfile path is tolerated.
-func hashFile(h io.Writer, label, path string) error {
+func hashFile(h hash.Hash, label, path string) error {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintf(h, "%s=<absent>\n", label)
+			hashf(h, "%s=<absent>\n", label)
 			return nil
 		}
 		return err
 	}
-	defer f.Close()
+	return errors.Join(hashOpen(h, label, f), f.Close())
+}
+
+func hashOpen(h hash.Hash, label string, f *os.File) error {
 	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(h, "%s=%04o:", label, info.Mode().Perm())
+	hashf(h, "%s=%04o:", label, info.Mode().Perm())
 	if _, err := io.Copy(h, f); err != nil {
 		return err
 	}
-	fmt.Fprint(h, "\n")
+	hashf(h, "\n")
 	return nil
+}
+
+// hashf mixes formatted text into h. hash.Hash's Write is documented never
+// to return an error, so there is none to check.
+func hashf(h hash.Hash, format string, a ...any) {
+	h.Write(fmt.Appendf(nil, format, a...))
 }
 
 func absPath(dir, p string) string {
@@ -251,5 +262,9 @@ func (s State) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0o644) //nolint:gosec // G306: it lives in dist/, read by non-owners (see pipeline.mkdirDist)
+	return os.WriteFile( //nolint:gosec // G306: it lives in dist/, read by non-owners (see pipeline.mkdirDist)
+		path,
+		append(data, '\n'),
+		0o644,
+	)
 }

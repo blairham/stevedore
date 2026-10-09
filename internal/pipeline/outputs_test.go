@@ -19,7 +19,13 @@ func TestPinDigests(t *testing.T) {
 		{ID: "pushed", Pushed: true, Digest: "sha256:aa", Repositories: []string{"reg/a", "mirror/a"}},
 		{ID: "released", AlreadyReleased: true, Skipped: true, Digest: "sha256:bb", Repositories: []string{"reg/b"}},
 		{ID: "validated", Pushed: false, Digest: "", Repositories: []string{"reg/c"}},
-		{ID: "unchanged", Pushed: true, Skipped: true, Digest: "sha256:dd", Repositories: []string{"reg/d"}}, // a skip carries no fresh push
+		{
+			ID:           "unchanged",
+			Pushed:       true,
+			Skipped:      true,
+			Digest:       "sha256:dd",
+			Repositories: []string{"reg/d"},
+		}, // a skip carries no fresh push
 	}
 	out := pinDigests(in)
 	if !slices.Equal(out[0].DigestRefs, []string{"reg/a@sha256:aa", "mirror/a@sha256:aa"}) {
@@ -44,8 +50,11 @@ const kustomizeTemplate = `images:
 func TestWriteOutputsFile(t *testing.T) {
 	dir := t.TempDir()
 	p := &Prepared{
-		Config: &config.Config{ProjectName: "acme", Outputs: config.Outputs{File: "deploy/images.yaml", Template: kustomizeTemplate}},
-		Ctx:    &tmpl.Context{Version: "1.2.3"},
+		Config: &config.Config{
+			ProjectName: "acme",
+			Outputs:     config.Outputs{File: "deploy/images.yaml", Template: kustomizeTemplate},
+		},
+		Ctx: &tmpl.Context{Version: "1.2.3"},
 	}
 	result := summary.Result{Images: pinDigests([]summary.Image{
 		{ID: "api", Pushed: true, Digest: "sha256:aa", Repositories: []string{"ghcr.io/acme/api"}},

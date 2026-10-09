@@ -1,5 +1,10 @@
-# golangci-lint v2 configuration for stevedore
+# golangci-lint v2 configuration for stevedore.
 # See: https://golangci-lint.run/usage/configuration/
+#
+# Rendered from blairham/.github baseline/golangci.yml.tmpl by `make sync`.
+# Edit the baseline (or, with a reason, the override file
+# overrides/stevedore.yml), not this file: the weekly drift check
+# reports any difference.
 #
 # golangci-lint is pinned twice and the two must move together: go.mod's `tool`
 # block (`go tool golangci-lint`) and the hook `rev` in .pre-commit-config.yaml.
@@ -22,12 +27,12 @@ output:
       colors: true
 
 linters:
-  # The same linter set as localiam. Every linter this repo runs is listed
-  # here; a new finding is a real finding — fix it rather than disabling.
+  # The hook reports only what a commit introduces, so an older finding surfaces
+  # when its lines are next touched: fix it then rather than adding a disable.
   enable:
     # Core linters (enabled by default)
     - errcheck # Check for unchecked errors
-    - govet # Suspicious constructs, incl. shadow (see settings)
+    - govet # Suspicious constructs; the analyzers are in settings
     - ineffassign # Detect ineffectual assignments
     - staticcheck # The staticcheck rule set
     - unused # Check for unused constants, variables, functions and types
@@ -89,17 +94,12 @@ linters:
           - errcheck
           - gosec
           - gocritic
-          - revive
           - funlen
           - gocognit
           - gocyclo
           - nestif
-          - goconst # test fixtures legitimately repeat literals
+          - goconst # test fixtures legitimately repeat literals (JSON, expected values)
           - noctx # httptest.NewRequest et al. are test-only, not real HTTP calls
-
-      - path: cmd/
-        linters:
-          - errcheck
 
       # Allow init() in main packages
       - path: cmd/
@@ -116,7 +116,7 @@ linters:
       confidence: medium
       excludes:
         - G107 # URL provided to HTTP request as taint input
-        - G204 # Subprocess launched with variable — stevedore drives docker, git, syft, grype by design
+        - G204 # Subprocess launched with variable
         - G404 # Weak random number generator
         - G115 # Integer overflow conversion (safe when values are properly clamped)
 
@@ -133,47 +133,6 @@ linters:
       lines: 80
       statements: 50
 
-    errcheck:
-      check-type-assertions: true
-      check-blank: true
-      exclude-functions:
-        - os.Setenv
-        - os.Unsetenv
-        - os.Remove
-        - os.RemoveAll
-        - os.MkdirAll
-        - os.WriteFile
-        - (os.File).Close
-        - (*os.File).Close
-        - (io.ReadCloser).Close
-        - (net.Conn).Close
-        - (net.Listener).Close
-        - (*os/exec.Cmd).Run
-        - syscall.Flock
-        # Progress/diagnostic writes — the error is unactionable, and several
-        # targets (hash.Hash, bytes.Buffer) never return one.
-        - fmt.Fprint
-        - fmt.Fprintf
-        - fmt.Fprintln
-
-    govet:
-      # localiam's set minus fieldalignment. Its fixes reorder struct fields by
-      # size, and here field order is output: summary.Result, PlanEntry and
-      # publish.Notification are marshaled as JSON (`--output json`, the plan
-      # matrix, webhook payloads), whose keys follow the struct. The bytes it
-      # saves are a handful per process.
-      enable:
-        - atomicalign
-        - nilness
-        - reflectvaluecompare
-        - shadow
-        - timeformat
-        - unusedwrite
-
-    goconst:
-      min-len: 3
-      min-occurrences: 3
-
     gocritic:
       enabled-tags:
         - diagnostic
@@ -182,8 +141,8 @@ linters:
         - performance
         - style
       disabled-checks:
-        - hugeParam # Noisy for large config structs
-        - rangeValCopy # Noisy for large config structs
+        - hugeParam # Noisy for SDK structs
+        - rangeValCopy # Noisy for SDK structs
         - unnamedResult # Acceptable in some cases
         - paramTypeCombine # Explicit types can be clearer
 
@@ -215,16 +174,53 @@ linters:
         - name: unreachable-code
         - name: redefines-builtin-id
 
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    govet:
+      enable:
+        - atomicalign
+        - nilness
+        - reflectvaluecompare
+        - shadow
+        - timeformat
+        - unusedwrite
+
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+
 formatters:
   enable:
+    - gofmt
     - gofumpt
     - goimports
+    - gci
+    - golines
 
   settings:
     goimports:
       local-prefixes:
         - github.com/blairham/stevedore
 
+    gofumpt:
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
+
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/blairham/stevedore)
+
+    golines:
+      max-len: 120
+      tab-len: 1
+
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  new: false

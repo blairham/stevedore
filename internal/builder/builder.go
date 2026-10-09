@@ -6,7 +6,9 @@ package builder
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -239,8 +241,15 @@ func tempMetaFile(r *run.Runner) (string, func(), error) {
 		return "", func() {}, err
 	}
 	name := f.Name()
-	f.Close()
-	return name, func() { os.Remove(name) }, nil
+	if err := f.Close(); err != nil {
+		return "", func() {}, errors.Join(err, os.Remove(name))
+	}
+	return name, func() {
+		// Nothing to return the error to; a leaked temp file is worth a line.
+		if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		}
+	}, nil
 }
 
 func sortedKeys(m map[string]string) []string {

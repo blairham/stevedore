@@ -97,7 +97,16 @@ func TestAnnounceDisabledIsNoop(t *testing.T) {
 }
 
 func TestGitHubReleaseNeedsTag(t *testing.T) {
-	err := GitHubRelease(&run.Runner{DryRun: true}, config.GitHubRelease{Enabled: true}, "", "", "title", "notes.md", false, nil)
+	err := GitHubRelease(
+		&run.Runner{DryRun: true},
+		config.GitHubRelease{Enabled: true},
+		"",
+		"",
+		"title",
+		"notes.md",
+		false,
+		nil,
+	)
 	if err == nil {
 		t.Error("expected error when tag is empty")
 	}

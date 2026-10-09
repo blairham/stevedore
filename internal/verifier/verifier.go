@@ -128,7 +128,9 @@ func provenanceCheck(r *run.Runner, ref string) Check {
 // ErrKeyAndIdentity reports that both a key and keyless identity flags were
 // given. They select different verification modes, and cosign would silently
 // ignore one of them.
-var ErrKeyAndIdentity = errors.New("--key and --certificate-identity/--certificate-oidc-issuer are mutually exclusive: a keyed signature has no certificate identity to check")
+var ErrKeyAndIdentity = errors.New(
+	"--key and --certificate-identity/--certificate-oidc-issuer are mutually exclusive: a keyed signature has no certificate identity to check",
+)
 
 // Valid reports whether the options are usable: keyed or keyless, not both,
 // and keyless needs an identity.

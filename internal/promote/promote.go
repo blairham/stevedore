@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/blairham/stevedore/internal/progress"
 	"github.com/blairham/stevedore/internal/run"
 	"github.com/blairham/stevedore/internal/verifier"
 )
@@ -61,7 +62,7 @@ func Promote(r *run.Runner, o Options, out io.Writer) (string, error) {
 		return "", err
 	}
 	src := o.Source + "@" + digest
-	fmt.Fprintf(out, "==> promoting %s\n", src)
+	progress.Printf(out, "==> promoting %s\n", src)
 	if err := verifySignature(r, src, o.Verify, out); err != nil {
 		return "", fmt.Errorf("source not promotable: %w", err)
 	}
@@ -78,7 +79,7 @@ func Promote(r *run.Runner, o Options, out io.Writer) (string, error) {
 	}
 	for _, repo := range o.Repos {
 		for _, tag := range o.Tags {
-			fmt.Fprintf(out, "    tag %s:%s\n", repo, tag)
+			progress.Printf(out, "    tag %s:%s\n", repo, tag)
 			if err := r.Run("crane", "tag", repo+"@"+digest, tag); err != nil {
 				return "", fmt.Errorf("tag %s:%s: %w", repo, tag, err)
 			}
@@ -133,7 +134,7 @@ func resolve(r *run.Runner, source, from string) (string, error) {
 // destination's referrers tag with the image index.
 func copyTo(r *run.Runner, src, repo, digest string, out io.Writer) error {
 	dst := repo + "@" + digest
-	fmt.Fprintf(out, "    copy %s\n", dst)
+	progress.Printf(out, "    copy %s\n", dst)
 	if err := r.Run("oras", "copy", "-r", src, dst); err != nil {
 		return fmt.Errorf("copy to %s: %w", repo, err)
 	}
@@ -164,7 +165,7 @@ func verifySignature(r *run.Runner, ref string, o verifier.Options, out io.Write
 		if !c.OK {
 			return fmt.Errorf("%s of %s: %s", c.Name, ref, c.Detail)
 		}
-		fmt.Fprintf(out, "    ✓ %s %s\n", c.Name, ref)
+		progress.Printf(out, "    ✓ %s %s\n", c.Name, ref)
 	}
 	return nil
 }

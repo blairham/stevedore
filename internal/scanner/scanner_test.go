@@ -232,7 +232,8 @@ func TestBuildReportIgnoreExpiry(t *testing.T) {
 		t.Fatalf("expired = %+v, want CVE-1", rep.Expired)
 	}
 	w := rep.ExpiredWarnings()
-	if len(w) != 1 || !strings.Contains(w[0], "CVE-1") || !strings.Contains(w[0], "2026-03-31") || !strings.Contains(w[0], "no fix upstream") {
+	if len(w) != 1 || !strings.Contains(w[0], "CVE-1") || !strings.Contains(w[0], "2026-03-31") ||
+		!strings.Contains(w[0], "no fix upstream") {
 		t.Errorf("warning = %q", w)
 	}
 }

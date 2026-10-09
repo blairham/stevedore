@@ -118,7 +118,9 @@ func TestDryRunWritesNothing(t *testing.T) {
 
 	for _, snapshot := range []bool{true, false} {
 		stderr, err := captureStderr(t, func() error {
-			return Release(Options{Dir: dir, ConfigPath: filepath.Join(dir, ".stevedore.yaml"), DryRun: true, Snapshot: snapshot})
+			return Release(
+				Options{Dir: dir, ConfigPath: filepath.Join(dir, ".stevedore.yaml"), DryRun: true, Snapshot: snapshot},
+			)
 		})
 		if err != nil {
 			t.Fatalf("snapshot=%v: %v\n%s", snapshot, err, stderr)

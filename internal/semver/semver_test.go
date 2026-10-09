@@ -7,7 +7,22 @@ import "testing"
 
 func TestParse(t *testing.T) {
 	good := []string{"v1.2.3", "1.2.3", "0.0.0", "v1.2.3-rc.1", "1.2.3-alpha-x.0", "v1.2.3+build.5", "1.2.3-rc.1+meta"}
-	bad := []string{"", "v", "deploy-prod", "v1", "v1.2", "1.2.3.4", "v01.2.3", "1.2.3-", "1.2.3-rc..1", "1.2.3-01", "1.2.3+", "v2-legacy", "vv1.2.3", "1.2.3-rc_1"}
+	bad := []string{
+		"",
+		"v",
+		"deploy-prod",
+		"v1",
+		"v1.2",
+		"1.2.3.4",
+		"v01.2.3",
+		"1.2.3-",
+		"1.2.3-rc..1",
+		"1.2.3-01",
+		"1.2.3+",
+		"v2-legacy",
+		"vv1.2.3",
+		"1.2.3-rc_1",
+	}
 	for _, s := range good {
 		if _, ok := Parse(s); !ok {
 			t.Errorf("Parse(%q) rejected, want accepted", s)

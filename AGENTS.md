@@ -141,9 +141,11 @@ publishes the CLI binary + Homebrew formula + GitHub release. See
 `.github/workflows/release.yml`.
 
 The GitHub release's notes are the tag's section of `CHANGELOG.md`, passed to
-GoReleaser as `--release-notes`; the `binary` job fails a tag whose section is
-missing or empty (tags from before the file existed fall back to GoReleaser's
-generated list). A user-visible change adds a line under `[Unreleased]`, and a
+GoReleaser as `--release-notes` by blairham/.github's shared `go-release.yml`,
+which `release.yml` calls; it fails a tag whose section is missing or empty
+(tags from before the file existed fall back to GoReleaser's generated list,
+chosen by release.yml's `notes` job). The image job and the moving-tags job
+stay in `release.yml`: they are stevedore's own. A user-visible change adds a line under `[Unreleased]`, and a
 release starts with a PR that moves those lines under `## [X.Y.Z] - <date>`.
 Never set `changelog.disable` in `.goreleaser.yaml`: it also skips the stage
 that loads `--release-notes`, and the release goes out with empty notes.
@@ -163,8 +165,13 @@ workflow enforces it by releasing from a copy of `.stevedore.yaml` without the
 - **Linter is golangci-lint v2**, `go tool`-pinned, config in `.golangci.yml`.
   It runs **only** as the pre-commit hook and in CI — there is no `lint` make
   target, and it is never run by hand. `run.concurrency` bounds its footprint.
-  The linter set matches localiam's, minus govet's `fieldalignment`, and the
-  tree is clean against all of it: a finding is a real finding, so fix it
-  rather than adding a disable. A `//nolint` names the rule and the reason.
+  The config (with the pre-commit, yamllint, gitleaks, editorconfig,
+  dependabot, CODEOWNERS, CodeQL and Scorecard files) is synced from
+  blairham/.github's baseline by `make sync`; edit it there, or argue a
+  departure into `overrides/stevedore.yml` there (today: govet's
+  `fieldalignment` off, and the gitleaks allowlist). A finding is a real
+  finding, so fix it rather than adding a disable. A `//nolint` names the
+  rule and the reason. Best-effort progress lines go through
+  `internal/progress`, which is the one place a write error is ignored.
 - Add/extend table tests for pure logic you touch.
 - Don't commit, push, tag, or create releases unless explicitly asked.

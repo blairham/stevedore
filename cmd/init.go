@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,7 +49,14 @@ func newInitCmd() *cobra.Command {
 			}
 			name := filepath.Base(mustAbs(flagDir))
 
-			content, summary, err := scaffoldContent(run.New(c.Context(), false, flagVerbose), from, file, name, mapFields, mapBuildArgs)
+			content, summary, err := scaffoldContent(
+				run.New(c.Context(), false, flagVerbose),
+				from,
+				file,
+				name,
+				mapFields,
+				mapBuildArgs,
+			)
 			if err != nil {
 				return err
 			}
@@ -72,12 +80,18 @@ func newInitCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing config")
 	cmd.Flags().StringVar(&from, "from", "dockerfiles", "source: dockerfiles | goreleaser | bake | services")
 	cmd.Flags().StringVar(&file, "file", "", "source file (for --from goreleaser|bake) or directory (for --from services)")
-	cmd.Flags().StringArrayVar(&mapFields, "map", nil, "services: map a config field to a manifest key, field=key (fields: id, repositories, dockerfile, context, target, paths)")
-	cmd.Flags().StringArrayVar(&mapBuildArgs, "map-build-arg", nil, "services: emit a build arg from a manifest key, ARG=key (replaces the default PROJECT=project)")
+	cmd.Flags().
+		StringArrayVar(&mapFields, "map", nil, "services: map a config field to a manifest key, field=key (fields: id, repositories, dockerfile, context, target, paths)")
+	cmd.Flags().
+		StringArrayVar(&mapBuildArgs, "map-build-arg", nil, "services: emit a build arg from a manifest key, ARG=key (replaces the default PROJECT=project)")
 	return cmd
 }
 
-func scaffoldContent(r *run.Runner, from, file, name string, mapFields, mapBuildArgs []string) (content, summary string, err error) {
+func scaffoldContent(
+	r *run.Runner,
+	from, file, name string,
+	mapFields, mapBuildArgs []string,
+) (content, summary string, err error) {
 	switch from {
 	case "", "dockerfiles":
 		imgs, err := scaffold.ScanDockerfiles(flagDir, name)
@@ -101,14 +115,29 @@ func scaffoldContent(r *run.Runner, from, file, name string, mapFields, mapBuild
 		if err != nil {
 			return "", "", err
 		}
-		return importer.RenderYAML(name, "goreleaser ("+file+")", imgs), fmt.Sprintf("imported %d image(s) from %s", len(imgs), file), nil
+		return importer.RenderYAML(
+				name,
+				"goreleaser ("+file+")",
+				imgs,
+			), fmt.Sprintf(
+				"imported %d image(s) from %s",
+				len(imgs),
+				file,
+			), nil
 
 	case "bake":
 		imgs, err := bakeImages(r, file)
 		if err != nil {
 			return "", "", err
 		}
-		return importer.RenderYAML(name, "docker-bake", imgs), fmt.Sprintf("imported %d image(s) from docker-bake", len(imgs)), nil
+		return importer.RenderYAML(
+				name,
+				"docker-bake",
+				imgs,
+			), fmt.Sprintf(
+				"imported %d image(s) from docker-bake",
+				len(imgs),
+			), nil
 
 	case "services":
 		if file == "" {
@@ -122,7 +151,15 @@ func scaffoldContent(r *run.Runner, from, file, name string, mapFields, mapBuild
 		if err != nil {
 			return "", "", err
 		}
-		return importer.RenderYAML(name, "services ("+file+")", imgs), fmt.Sprintf("imported %d image(s) from %s", len(imgs), file), nil
+		return importer.RenderYAML(
+				name,
+				"services ("+file+")",
+				imgs,
+			), fmt.Sprintf(
+				"imported %d image(s) from %s",
+				len(imgs),
+				file,
+			), nil
 
 	default:
 		return "", "", fmt.Errorf("unknown --from %q (want dockerfiles, goreleaser, bake, or services)", from)
@@ -149,12 +186,18 @@ func ignoreDist(dir string) (bool, error) {
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		prefix = "\n"
 	}
-	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // G302: .gitignore is committed, like the config
+	f, err := os.OpenFile( //nolint:gosec // G302: .gitignore is committed, like the config
+		filepath.Clean(path),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o644,
+	)
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
-	if _, err := f.WriteString(prefix + "dist/\n"); err != nil {
+	_, err = f.WriteString(prefix + "dist/\n")
+	// Close reports a write the kernel deferred; it is part of the write.
+	err = errors.Join(err, f.Close())
+	if err != nil {
 		return false, err
 	}
 	return true, nil

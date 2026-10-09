@@ -15,7 +15,16 @@ func demo() Result {
 	return Result{
 		Project: "acme",
 		Images: []Image{
-			{ID: "checkout", Version: "0.0.336", Digest: "sha256:abcdef0123456789", Signed: true, SBOM: true, Provenance: true, Tested: true, Vulns: map[string]int{"high": 2, "low": 5}},
+			{
+				ID:         "checkout",
+				Version:    "0.0.336",
+				Digest:     "sha256:abcdef0123456789",
+				Signed:     true,
+				SBOM:       true,
+				Provenance: true,
+				Tested:     true,
+				Vulns:      map[string]int{"high": 2, "low": 5},
+			},
 			{ID: "reconciler", Skipped: true},
 		},
 	}

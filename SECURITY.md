@@ -83,30 +83,47 @@ cosign verify ghcr.io/blairham/stevedore:1.0.0 \
 ```
 
 **Binaries.** Releases after `v1.0.1` sign `checksums.txt`, which lists the
-digest of every archive. Verify the signature, then the archives against it:
+digest of every archive. The binaries are released by
+`.github/workflows/release.yml`, which runs the shared release workflow in
+[blairham/.github](https://github.com/blairham/.github)
+(`.github/workflows/go-release.yml`): the signing identity is that shared
+workflow, and the certificate also names this repository and the tag. Verify
+the signature, then the archives against it, then the provenance:
 
 ```sh
-VERSION=v1.0.2
+VERSION=v1.2.0
 cosign verify-blob \
-  --certificate-identity "https://github.com/blairham/stevedore/.github/workflows/release.yml@refs/tags/$VERSION" \
+  --certificate-identity-regexp '^https://github\.com/blairham/\.github/\.github/workflows/go-release\.yml@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-github-workflow-repository blairham/stevedore \
+  --certificate-github-workflow-ref "refs/tags/$VERSION" \
   --bundle checksums.txt.sigstore.json checksums.txt
 sha256sum --check --ignore-missing checksums.txt
+gh attestation verify stevedore_*_Linux_x86_64.tar.gz --repo blairham/stevedore \
+  --signer-workflow blairham/.github/.github/workflows/go-release.yml
 ```
 
 A release re-run by hand (the workflow's `workflow_dispatch` input) is signed
-by the ref it was dispatched from, usually `refs/heads/main`, rather than by
-the tag, so use `@refs/heads/main` in `--certificate-identity` for that release.
+for the ref it was dispatched from, usually `refs/heads/main`, rather than
+the tag, so use `--certificate-github-workflow-ref refs/heads/main` for that
+release.
 
-The GitHub Action runs exactly these two checks on the archive it installs,
-accepting either the tag or `main` as the signing ref, and fails rather than
-running a binary it could not verify.
+**Tags released before the move to blairham/.github** (`v1.1.0` and earlier)
+were signed by this repository's own `release.yml`. Verify those with
+`--certificate-identity "https://github.com/blairham/stevedore/.github/workflows/release.yml@refs/tags/$VERSION"`
+(or `@refs/heads/main` for a re-run) in place of the three identity flags
+above, and without `--signer-workflow`.
+
+The GitHub Action runs exactly these checks on the archive it installs,
+accepting either identity and either the tag or `main` as the signing ref,
+and fails rather than running a binary it could not verify.
 
 The macOS builds are additionally Developer ID signed and notarized.
 
 **Build provenance.** From `v1.0.7`, every archive carries SLSA build
-provenance recording that it was built by this repository's release workflow from the tagged
-commit. It is stored in the repository's attestations and attached to the
+provenance recording the workflow that built it (the shared go-release.yml
+from the release after `v1.1.0`, this repository's release workflow before)
+and the tagged commit. It is stored in the repository's attestations and attached to the
 release as `stevedore-<tag>.intoto.jsonl`. Check an archive with the
 [GitHub CLI](https://cli.github.com/):
 

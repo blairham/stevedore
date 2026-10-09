@@ -31,10 +31,16 @@ esac
 // keepGoingHarness sets up two independent groups, "good" and "bad", whose
 // only difference is that bad fails its scan gate, and a notify webhook that
 // records which images it was told about.
-func keepGoingHarness(t *testing.T) (dir, log string, o Options, p *Prepared, groups map[string][]imageEval, notified func() []string) {
+func keepGoingHarness(
+	t *testing.T,
+) (dir, log string, o Options, p *Prepared, groups map[string][]imageEval, notified func() []string) {
 	t.Helper()
 	dir, log, o, p, _ = gateHarness(t)
-	if err := os.WriteFile(filepath.Join(dir, "bin", "grype"), []byte(fakeGrypeFailsBad), 0o755); err != nil { //nolint:gosec // G306: a test fake must be executable
+	if err := os.WriteFile(
+		filepath.Join(dir, "bin", "grype"),
+		[]byte(fakeGrypeFailsBad),
+		0o755,
+	); err != nil { //nolint:gosec // G306: a test fake must be executable
 		t.Fatal(err)
 	}
 	t.Setenv("GITHUB_STEP_SUMMARY", "")
@@ -42,7 +48,12 @@ func keepGoingHarness(t *testing.T) (dir, log string, o Options, p *Prepared, gr
 	groups = map[string][]imageEval{}
 	for _, id := range []string{"good", "bad"} {
 		groups[id] = []imageEval{{plan: ImagePlan{
-			Image:   config.Image{ID: id, Dockerfile: "Dockerfile", Context: ".", Platforms: []string{"linux/amd64", "linux/arm64"}},
+			Image: config.Image{
+				ID:         id,
+				Dockerfile: "Dockerfile",
+				Context:    ".",
+				Platforms:  []string{"linux/amd64", "linux/arm64"},
+			},
 			Repos:   []string{"ghcr.io/x/" + id},
 			Refs:    []string{"ghcr.io/x/" + id + ":1.0.0"},
 			Version: "1.0.0",
@@ -96,7 +107,15 @@ func TestReleaseRecordsGroupsPushedBeforeAFailure(t *testing.T) {
 	dir, _, o, p, g, notified := keepGoingHarness(t)
 	posts := announceServer(t, p)
 	toBuild := [][]imageEval{g["good"], g["bad"]}
-	err := buildAndFinish(o, p, quietRunner(t), toBuild, nil, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{})
+	err := buildAndFinish(
+		o,
+		p,
+		quietRunner(t),
+		toBuild,
+		nil,
+		filepath.Join(dir, "dist", "fingerprints.json"),
+		fingerprint.State{},
+	)
 	if err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatalf("want the bad group's failure, got %v", err)
 	}
@@ -121,7 +140,15 @@ func TestKeepGoingBuildsEveryGroup(t *testing.T) {
 			dir, log, o, p, g, notified := keepGoingHarness(t)
 			o.KeepGoing = keepGoing
 			toBuild := [][]imageEval{g["bad"], g["good"]}
-			err := buildAndFinish(o, p, quietRunner(t), toBuild, nil, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{})
+			err := buildAndFinish(
+				o,
+				p,
+				quietRunner(t),
+				toBuild,
+				nil,
+				filepath.Join(dir, "dist", "fingerprints.json"),
+				fingerprint.State{},
+			)
 			if err == nil || !strings.Contains(err.Error(), "bad") {
 				t.Fatalf("want the bad group's failure, got %v", err)
 			}
@@ -146,7 +173,11 @@ func TestMergeKeepGoingMergesCompleteImages(t *testing.T) {
 	dir, log, o, p, g, notified := keepGoingHarness(t)
 	// Only good's legs ran; bad is missing every digest. Its scan would pass:
 	// the failure here is the missing leg.
-	if err := os.WriteFile(filepath.Join(dir, "bin", "grype"), []byte(fakeGrype), 0o755); err != nil { //nolint:gosec // G306: a test fake must be executable
+	if err := os.WriteFile(
+		filepath.Join(dir, "bin", "grype"),
+		[]byte(fakeGrype),
+		0o755,
+	); err != nil { //nolint:gosec // G306: a test fake must be executable
 		t.Fatal(err)
 	}
 	for _, platform := range []string{"linux/amd64", "linux/arm64"} {
@@ -157,7 +188,15 @@ func TestMergeKeepGoingMergesCompleteImages(t *testing.T) {
 	o.FromDigests = true
 	o.KeepGoing = true
 	toBuild := [][]imageEval{g["bad"], g["good"]}
-	err := buildAndFinish(o, p, quietRunner(t), toBuild, nil, filepath.Join(dir, "dist", "fingerprints.json"), fingerprint.State{})
+	err := buildAndFinish(
+		o,
+		p,
+		quietRunner(t),
+		toBuild,
+		nil,
+		filepath.Join(dir, "dist", "fingerprints.json"),
+		fingerprint.State{},
+	)
 	if err == nil || !strings.Contains(err.Error(), "no split digest") {
 		t.Fatalf("want bad's missing digests reported, got %v", err)
 	}

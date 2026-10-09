@@ -48,7 +48,13 @@ func TestClassifyFooterAndCase(t *testing.T) {
 		name, subject, body string
 		wantGroup, wantLine string
 	}{
-		{"footer", "feat: new api", "Details.\n\nBREAKING CHANGE: the old api is gone", "Features", "**BREAKING** new api (abc1234)"},
+		{
+			"footer",
+			"feat: new api",
+			"Details.\n\nBREAKING CHANGE: the old api is gone",
+			"Features",
+			"**BREAKING** new api (abc1234)",
+		},
 		{"hyphen footer", "fix: x", "BREAKING-CHANGE: y", "Bug Fixes", "**BREAKING** x (abc1234)"},
 		{"footer on plain subject", "rework", "BREAKING CHANGE: z", "Other", "**BREAKING** rework (abc1234)"},
 		{"mention is not a footer", "fix: x", "this is not a BREAKING CHANGE: really", "Bug Fixes", "x (abc1234)"},

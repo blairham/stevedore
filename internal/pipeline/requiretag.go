@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/blairham/stevedore/internal/gitinfo"
+	"github.com/blairham/stevedore/internal/progress"
 )
 
 // applyRequireTag turns versioning.require_tag into run options, so a
@@ -39,9 +40,14 @@ func applyRequireTag(o Options) (Options, error) {
 		return o, nil
 	}
 	if len(o.SplitPlatforms) > 0 || o.FromDigests {
-		return o, fmt.Errorf("versioning.require_tag: HEAD has no version tag, and a split leg or merge only runs for a tagged release; tag HEAD, or validate with a plain `release`")
+		return o, fmt.Errorf(
+			"versioning.require_tag: HEAD has no version tag, and a split leg or merge only runs for a tagged release; tag HEAD, or validate with a plain `release`",
+		)
 	}
-	fmt.Fprintln(progress, "==> versioning.require_tag: HEAD has no version tag; validate-only build (snapshot, nothing pushed)")
+	progress.Println(
+		progressOut,
+		"==> versioning.require_tag: HEAD has no version tag; validate-only build (snapshot, nothing pushed)",
+	)
 	o.Snapshot = true
 	o.NoPush = true
 	o.Push = false

@@ -39,10 +39,12 @@ images:
 		t.Fatalf("merged config should validate: %v", err)
 	}
 	api, worker, web := c.Images[0], c.Images[1], c.Images[2]
-	if !slices.Equal(api.Repositories, []string{"ghcr.io/acme/{{ .ID }}"}) || !slices.Equal(api.Platforms, []string{"linux/amd64", "linux/arm64"}) {
+	if !slices.Equal(api.Repositories, []string{"ghcr.io/acme/{{ .ID }}"}) ||
+		!slices.Equal(api.Platforms, []string{"linux/amd64", "linux/arm64"}) {
 		t.Errorf("api did not inherit: %+v", api)
 	}
-	if !slices.Equal(api.Tags, []string{"{{ .Version }}", "latest"}) || !slices.Equal(api.CacheFrom, []string{"type=gha,scope={{ .ID }}"}) {
+	if !slices.Equal(api.Tags, []string{"{{ .Version }}", "latest"}) ||
+		!slices.Equal(api.CacheFrom, []string{"type=gha,scope={{ .ID }}"}) {
 		t.Errorf("api tags/cache = %v / %v", api.Tags, api.CacheFrom)
 	}
 	if !maps.Equal(api.Labels, map[string]string{"team": "platform", "tier": "backend"}) {
@@ -66,8 +68,15 @@ images:
 
 // Defaults are checked as strictly as images, against the file as written.
 func TestImageDefaultsStrict(t *testing.T) {
-	p := writeTemp(t, ".stevedore.yaml", "image_defaults:\n  base_platforms: [linux/amd64]\nimages:\n  - id: a\n    repositories: [r/a]\n")
-	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "base_platforms") || !strings.Contains(err.Error(), "line 2") {
+	p := writeTemp(
+		t,
+		".stevedore.yaml",
+		"image_defaults:\n  base_platforms: [linux/amd64]\nimages:\n  - id: a\n    repositories: [r/a]\n",
+	)
+	if _, err := Load(
+		p,
+	); err == nil || !strings.Contains(err.Error(), "base_platforms") ||
+		!strings.Contains(err.Error(), "line 2") {
 		t.Errorf("unknown field in image_defaults: err = %v", err)
 	}
 	p = writeTemp(t, ".stevedore.yaml", "image_defaults:\n  id: shared\n  repositories: [r/x]\nimages:\n  - id: a\n")

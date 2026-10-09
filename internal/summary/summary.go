@@ -7,6 +7,7 @@ package summary
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,13 +160,17 @@ func (r Result) WriteGitHubOutput() error {
 		lines = append(lines, "ref="+pinned[0].DigestRefs[0], "digest="+pinned[0].Digest)
 	}
 	sort.Strings(lines[1:])
-	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G703: a file the Actions runner names
+	f, err := os.OpenFile(
+		filepath.Clean(path),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o600,
+	) //nolint:gosec // G703: a file the Actions runner names
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	_, err = fmt.Fprintln(f, strings.Join(lines, "\n"))
-	return err
+	// Close reports a write the kernel deferred; it is part of the write.
+	return errors.Join(err, f.Close())
 }
 
 // Markdown renders a GitHub-friendly summary table.
@@ -217,7 +222,15 @@ func platformTable(b *strings.Builder, imgs []Image) {
 			if pl.TestSkipped != "" {
 				test = "_skipped_"
 			}
-			fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n", img.ID, pl.Platform, check(pl.Scanned), test, vulnCell(pl.Scanned, pl.Vulns))
+			fmt.Fprintf(
+				b,
+				"| `%s` | %s | %s | %s | %s |\n",
+				img.ID,
+				pl.Platform,
+				check(pl.Scanned),
+				test,
+				vulnCell(pl.Scanned, pl.Vulns),
+			)
 		}
 	}
 }
@@ -228,13 +241,16 @@ func (r Result) WriteGitHubStepSummary() error {
 	if path == "" {
 		return nil
 	}
-	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G703: a file the Actions runner names
+	f, err := os.OpenFile(
+		filepath.Clean(path),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o600,
+	) //nolint:gosec // G703: a file the Actions runner names
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	_, err = f.WriteString(r.Markdown() + "\n")
-	return err
+	return errors.Join(err, f.Close())
 }
 
 func check(ok bool) string {

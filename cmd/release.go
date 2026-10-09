@@ -108,17 +108,27 @@ func newReleaseCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&skipSBOM, "skip-sbom", false, "skip SBOM generation")
 	cmd.Flags().BoolVar(&skipScan, "skip-scan", false, "skip vulnerability scanning")
 	cmd.Flags().BoolVar(&skipTest, "skip-test", false, "skip the post-build smoke test")
-	cmd.Flags().BoolVar(&noPush, "no-push", false, "build (and change-detect) without pushing; skips the scan, smoke test, signing, SBOM and publish")
+	cmd.Flags().
+		BoolVar(&noPush, "no-push", false, "build (and change-detect) without pushing; skips the scan, smoke test, signing, SBOM and publish")
 	cmd.Flags().IntVar(&parallel, "parallel", 1, "build up to N images concurrently")
 	cmd.Flags().BoolVar(&skipChangelog, "skip-changelog", false, "skip changelog generation")
-	cmd.Flags().BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
-	cmd.Flags().StringVar(&changedSince, "changed-since", "", "git ref: only build images whose paths changed since this ref (stateless, CI-native; under marker_refs, since the older of this and the image's marker)")
-	cmd.Flags().StringSliceVar(&only, "only", nil, "image id(s) to build unconditionally, skipping change detection (matrix mode: one plan entry per job); 'all' selects every image")
-	cmd.Flags().StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; from the plan's pins)")
-	cmd.Flags().StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
-	cmd.Flags().BoolVar(&skipPublish, "skip-publish", false, "skip the GitHub/GitLab release, announcements, and notify webhooks")
-	cmd.Flags().BoolVar(&keepGoing, "keep-going", false, "build every image even after one fails, then fail at the end (the ones that built are still tagged, recorded and notified)")
-	cmd.Flags().StringSliceVar(&split, "split", nil, "platform(s) to build natively on this runner, pushed untagged by digest for a later stevedore merge (native multi-arch CI: one matrix leg per arch)")
-	cmd.Flags().BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
+	cmd.Flags().
+		BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
+	cmd.Flags().
+		StringVar(&changedSince, "changed-since", "", "git ref: only build images whose paths changed since this ref (stateless, CI-native; under marker_refs, since the older of this and the image's marker)")
+	cmd.Flags().
+		StringSliceVar(&only, "only", nil, "image id(s) to build unconditionally, skipping change detection (matrix mode: one plan entry per job); 'all' selects every image")
+	cmd.Flags().
+		StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; from the plan's pins)")
+	cmd.Flags().
+		StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
+	cmd.Flags().
+		BoolVar(&skipPublish, "skip-publish", false, "skip the GitHub/GitLab release, announcements, and notify webhooks")
+	cmd.Flags().
+		BoolVar(&keepGoing, "keep-going", false, "build every image even after one fails, then fail at the end (the ones that built are still tagged, recorded and notified)")
+	cmd.Flags().
+		StringSliceVar(&split, "split", nil, "platform(s) to build natively on this runner, pushed untagged by digest for a later stevedore merge (native multi-arch CI: one matrix leg per arch)")
+	cmd.Flags().
+		BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
 	return cmd
 }

@@ -786,7 +786,12 @@ func (c *Config) Validate() error {
 	switch c.Test.Platforms {
 	case "", TestPlatformsNative, TestPlatformsAll:
 	default:
-		return fmt.Errorf("test.platforms %q invalid (want %s or %s)", c.Test.Platforms, TestPlatformsNative, TestPlatformsAll)
+		return fmt.Errorf(
+			"test.platforms %q invalid (want %s or %s)",
+			c.Test.Platforms,
+			TestPlatformsNative,
+			TestPlatformsAll,
+		)
 	}
 	if c.Test.Enabled && c.Test.Timeout != "" {
 		if _, err := time.ParseDuration(c.Test.Timeout); err != nil {
@@ -805,7 +810,10 @@ func (c *Config) Validate() error {
 	switch c.ChangeDetection.Resolver {
 	case "", "dotnet":
 	default:
-		return fmt.Errorf("change_detection.resolver %q unsupported (want dotnet, or empty to disable)", c.ChangeDetection.Resolver)
+		return fmt.Errorf(
+			"change_detection.resolver %q unsupported (want dotnet, or empty to disable)",
+			c.ChangeDetection.Resolver,
+		)
 	}
 	return c.Versioning.validate()
 }
@@ -845,7 +853,12 @@ func (s Scan) validate() error {
 		return fmt.Errorf("scan.scanner %q unsupported (want grype or trivy)", s.Scanner)
 	}
 	if !ValidSeverity(s.FailOn) {
-		return fmt.Errorf("scan.fail_on %q invalid (want one of: %s, %s)", s.FailOn, strings.Join(Severities, ", "), FailOnNone)
+		return fmt.Errorf(
+			"scan.fail_on %q invalid (want one of: %s, %s)",
+			s.FailOn,
+			strings.Join(Severities, ", "),
+			FailOnNone,
+		)
 	}
 	for i, ig := range s.Ignore {
 		if strings.TrimSpace(ig.ID) == "" {
@@ -864,7 +877,11 @@ func (s Scan) validate() error {
 	}
 	for _, a := range s.Args {
 		if flag := outputFlag(s.Scanner, a); flag != "" {
-			return fmt.Errorf("scan.args: %q changes the %s output format or destination, which stevedore must control to read the JSON report; remove it (the raw JSON report is saved under dist/)", flag, s.Scanner)
+			return fmt.Errorf(
+				"scan.args: %q changes the %s output format or destination, which stevedore must control to read the JSON report; remove it (the raw JSON report is saved under dist/)",
+				flag,
+				s.Scanner,
+			)
 		}
 	}
 	return nil
@@ -934,7 +951,11 @@ func (c Cache) validate() error {
 		}
 	case CacheRegistry, CacheLocal:
 		if c.Ref == "" {
-			return fmt.Errorf("cache.type %s needs cache.ref (a %s)", c.Type, map[string]string{CacheRegistry: "repository", CacheLocal: "directory"}[c.Type])
+			return fmt.Errorf(
+				"cache.type %s needs cache.ref (a %s)",
+				c.Type,
+				map[string]string{CacheRegistry: "repository", CacheLocal: "directory"}[c.Type],
+			)
 		}
 	default:
 		return fmt.Errorf("cache.type %q unsupported (want gha, registry, local or none)", c.Type)

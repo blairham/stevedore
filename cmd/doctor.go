@@ -26,7 +26,10 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 			// Consider every optional feature the config enables.
-			reqs := preflight.Requirements(cfg, preflight.Opts{Sign: true, SBOM: true, Scan: true, GitHubRelease: true, GitLabRelease: true})
+			reqs := preflight.Requirements(
+				cfg,
+				preflight.Opts{Sign: true, SBOM: true, Scan: true, GitHubRelease: true, GitLabRelease: true},
+			)
 			results := preflight.Check(c.Context(), reqs)
 
 			missingRequired := false

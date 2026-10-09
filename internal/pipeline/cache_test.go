@@ -17,8 +17,16 @@ func TestAutoCacheEntries(t *testing.T) {
 		from, to string
 	}{
 		{autoCache{Type: "gha"}, "type=gha,scope=api", "type=gha,scope=api,mode=max"},
-		{autoCache{Type: "registry", Ref: "ghcr.io/acme/cache", Mode: "min"}, "type=registry,ref=ghcr.io/acme/cache:api", "type=registry,ref=ghcr.io/acme/cache:api,mode=min"},
-		{autoCache{Type: "local", Ref: "/tmp/cache/"}, "type=local,src=/tmp/cache/api", "type=local,dest=/tmp/cache/api,mode=max"},
+		{
+			autoCache{Type: "registry", Ref: "ghcr.io/acme/cache", Mode: "min"},
+			"type=registry,ref=ghcr.io/acme/cache:api",
+			"type=registry,ref=ghcr.io/acme/cache:api,mode=min",
+		},
+		{
+			autoCache{Type: "local", Ref: "/tmp/cache/"},
+			"type=local,src=/tmp/cache/api",
+			"type=local,dest=/tmp/cache/api,mode=max",
+		},
 	}
 	for _, c := range cases {
 		from, to := c.c.entries("api")

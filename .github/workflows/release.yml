@@ -1,27 +1,38 @@
-name: release
+name: Release
 
 # On a version tag: stevedore releases its own multi-arch image (signed + SBOM +
-# provenance) by dogfooding itself, while GoReleaser publishes the CLI binary,
-# the GitHub release, and the Homebrew formula. Two tools, two artifact kinds.
+# provenance) by dogfooding itself, while blairham/.github's go-release.yml
+# runs GoReleaser for the CLI binary, the GitHub release and the Homebrew
+# formula, signs checksums.txt with keyless cosign and attests build
+# provenance. Two tools, two artifact kinds. The binaries' signing identity is
+# go-release.yml itself; the image's is still this workflow. SECURITY.md
+# shows how to verify both.
 on:
   push:
     tags: ["v*"]
   # Re-run a release for a tag that already exists — after a failed publish,
-  # say — without moving or re-creating the tag.
+  # say — without moving or re-creating the tag; or, with dry-run, prove the
+  # GoReleaser configuration without publishing anything.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v1.0.2). Must already exist."
-        required: true
+        description: "Tag to release (e.g. v1.0.2). Must already exist. Leave empty for a dry run."
+        required: false
         type: string
+      dry-run:
+        description: "Build the binaries with GoReleaser --snapshot; publish, sign and attest nothing, and skip the image."
+        required: false
+        type: boolean
+        default: false
 
 # Read-only by default; each job asks for exactly what it writes.
 permissions:
   contents: read
 
 jobs:
-  # A release that publishes before its tests run ships whatever the tag points
-  # at. Both artifact jobs wait on this one.
+  # A release that publishes before its tests run ships whatever the tag
+  # points at. The image waits on this; go-release.yml runs the same tests
+  # before GoReleaser publishes anything.
   test:
     runs-on: ubuntu-latest
     steps:
@@ -34,8 +45,35 @@ jobs:
           check-latest: true
       - run: go test -race ./...
 
+  # Tags from before CHANGELOG.md existed (v1.0.6 and older, re-run by
+  # dispatch) keep GoReleaser's generated notes; every later tag must have its
+  # CHANGELOG.md section, and go-release.yml fails one that does not.
+  notes:
+    name: Release notes source
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - id: mode
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [ -f CHANGELOG.md ]; then
+            echo "mode=changelog" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$TAG predates CHANGELOG.md; using GoReleaser's generated notes"
+            echo "mode=generated" >> "$GITHUB_OUTPUT"
+          fi
+
   image:
+    name: Image
     needs: test
+    # A dry run proves the binary build; the image job has no dry mode that
+    # pushes nothing, signs nothing and still exercises this path.
+    if: ${{ !inputs.dry-run }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -121,110 +159,34 @@ jobs:
         run: stevedore release --config "$CONFIG"
 
   # GoReleaser publishes the CLI binary, checksums, the GitHub release, and the
-  # Homebrew formula (to blairham/homebrew-tap).
-  binary:
-    needs: test
-    runs-on: ubuntu-latest
+  # Homebrew formula (to blairham/homebrew-tap); go-release.yml signs
+  # checksums.txt and attaches the provenance as stevedore-<tag>.intoto.jsonl.
+  release:
+    name: Release
+    needs: notes
     permissions:
       contents: write # the GitHub release and its assets
       # Keyless cosign over checksums.txt and the provenance attestation both
       # sign with the workflow's OIDC identity — see `signs` in .goreleaser.yaml.
       id-token: write
       attestations: write # store the provenance in the repository's attestations
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          check-latest: true
-          cache: false # replaced by the release-scoped cache below
-      # Release-scoped Go cache: setup-go's built-in cache is exact-match on
-      # go.sum and usually saved by CI test jobs (host-platform builds only);
-      # this one falls back on a restore-keys prefix and is saved at job end —
-      # after goreleaser — so it warms every cross-compiled GOOS/GOARCH target.
-      - name: Restore release Go cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-release-${{ runner.os }}-${{ hashFiles('go.mod', 'go.sum') }}
-          restore-keys: |
-            go-release-${{ runner.os }}-
-      # cosign v3 here, writing the .sigstore.json bundle format. The image job
-      # keeps the installer major the composite action ships to users.
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      # The notes are the tag's section of CHANGELOG.md, written for people
-      # upgrading, rather than GoReleaser's list of commit subjects. A tag
-      # whose section is missing or empty fails here instead of publishing
-      # empty notes. A tag from before CHANGELOG.md existed (a dispatch
-      # re-run of v1.0.6 or older) keeps the generated list.
-      - name: Extract release notes
-        id: notes
-        env:
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          set -euo pipefail
-          if [ ! -f CHANGELOG.md ]; then
-            echo "::notice::$TAG predates CHANGELOG.md; using GoReleaser's generated notes"
-            echo "args=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          version="${TAG#v}"
-          awk -v head="## [$version]" '
-            index($0, head) == 1 { on = 1; next }
-            on && /^## \[/      { exit }
-            on                   { print }
-          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            echo "::error::CHANGELOG.md has no section for $version; move [Unreleased] under '## [$version] - <date>' before tagging"
-            exit 1
-          fi
-          echo "args=--release-notes $RUNNER_TEMP/notes.md" >> "$GITHUB_OUTPUT"
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          version: "~> v2"
-          args: release --clean ${{ steps.notes.outputs.args }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # A PAT with contents:write on blairham/homebrew-tap, so the formula can
-          # be committed to that separate repo.
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # Apple Developer ID signing + notarization of the darwin binaries.
-          # The notarize block in .goreleaser.yaml self-disables when
-          # MACOS_SIGN_P12 is unset, so releases still work without these.
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-      # SLSA build provenance for every archive checksums.txt lists. GitHub
-      # stores it (`gh attestation verify`), and the bundle is also attached to
-      # the release as stevedore-<tag>.intoto.jsonl, so it can be checked
-      # offline and is found by tools that look for an .intoto.jsonl beside the
-      # artifacts. The image carries its own provenance from the dogfood
-      # release above.
-      #
-      # A SHA-pinned step here rather than slsa-github-generator's reusable
-      # workflow, which verifies its own ref and so can only be tag-pinned.
-      - name: Attest build provenance
-        id: attest
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-checksums: dist/checksums.txt
-
-      - name: Attach the provenance to the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
-        run: |
-          set -euo pipefail
-          cp "$BUNDLE" "$RUNNER_TEMP/stevedore-$TAG.intoto.jsonl"
-          gh release upload "$TAG" "$RUNNER_TEMP/stevedore-$TAG.intoto.jsonl" --clobber
+    uses: blairham/.github/.github/workflows/go-release.yml@99060d62d0693570a360127ab698307d276630da # v0.0.0
+    with:
+      tag: ${{ inputs.tag }}
+      snapshot: ${{ inputs.dry-run == true }}
+      release-notes: ${{ needs.notes.outputs.mode }}
+    secrets:
+      # A PAT with contents:write on blairham/homebrew-tap, so the formula can
+      # be committed to that separate repo.
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      # Apple Developer ID signing + notarization of the darwin binaries. The
+      # notarize block in .goreleaser.yaml self-disables when MACOS_SIGN_P12 is
+      # unset, so releases still work without these.
+      MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+      MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+      MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+      MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
 
   # Repoint the moving major and minor tags (v1, v1.0) at this release, so
   # `uses: blairham/stevedore@v1` — the form the README documents and the form
@@ -233,7 +195,7 @@ jobs:
   # Gated on both artifact jobs: a moving tag pointing at a release that failed
   # halfway is worse than one that does not exist, because it resolves.
   moving-tags:
-    needs: [image, binary]
+    needs: [image, release]
     runs-on: ubuntu-latest
     permissions:
       contents: write

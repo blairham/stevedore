@@ -41,7 +41,8 @@ func TestCLIDocListsEveryFlag(t *testing.T) {
 			if f.Name == "help" {
 				return
 			}
-			if !strings.Contains(sec, "`--"+f.Name+"`") && !strings.Contains(sec, "`--"+f.Name+" <") && !strings.Contains(sec, ", --"+f.Name) {
+			if !strings.Contains(sec, "`--"+f.Name+"`") && !strings.Contains(sec, "`--"+f.Name+" <") &&
+				!strings.Contains(sec, ", --"+f.Name) {
 				t.Errorf("%s --%s is not in its docs/cli.md section", c.Name(), f.Name)
 			}
 		})

@@ -63,7 +63,11 @@ func fakeTool(t *testing.T, name, body string) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body), 0o755); err != nil { //nolint:gosec // G306: a test fake must be executable
+	if err := os.WriteFile(
+		filepath.Join(bin, name),
+		[]byte("#!/bin/sh\n"+body),
+		0o755,
+	); err != nil { //nolint:gosec // G306: a test fake must be executable
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -143,7 +147,11 @@ func TestReleasePreflightRefusesBeforePushing(t *testing.T) {
 	// A snapshot never publishes and may build without the secret.
 	t.Setenv("PREFLIGHT_NPM_TOKEN", "")
 	o.Snapshot, o.DryRun = true, true
-	if _, err := captureStderr(t, func() error { return Release(o) }); err != nil && strings.Contains(err.Error(), "is unset") {
+	if _, err := captureStderr(
+		t,
+		func() error { return Release(o) },
+	); err != nil &&
+		strings.Contains(err.Error(), "is unset") {
 		t.Errorf("snapshot refused an unset secret: %v", err)
 	}
 }

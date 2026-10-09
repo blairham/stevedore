@@ -13,7 +13,12 @@ import (
 // A captured command's error carries its stderr: a missing repository used
 // to read as nothing more than "aws: exit status 254".
 func TestCaptureErrorCarriesStderr(t *testing.T) {
-	_, err := Query(t.Context(), "sh", "-c", `echo "An error occurred (RepositoryNotFoundException) when calling the DescribeImages operation: The repository with name 'app' does not exist" >&2; exit 254`)
+	_, err := Query(
+		t.Context(),
+		"sh",
+		"-c",
+		`echo "An error occurred (RepositoryNotFoundException) when calling the DescribeImages operation: The repository with name 'app' does not exist" >&2; exit 254`,
+	)
 	if err == nil {
 		t.Fatal("want an error")
 	}

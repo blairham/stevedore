@@ -99,7 +99,13 @@ func TestRequireTagUntaggedValidatesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !o.NoPush || o.Push || !o.Snapshot || o.BuildAll {
-		t.Errorf("untagged: NoPush=%v Push=%v Snapshot=%v BuildAll=%v, want a validate-only snapshot", o.NoPush, o.Push, o.Snapshot, o.BuildAll)
+		t.Errorf(
+			"untagged: NoPush=%v Push=%v Snapshot=%v BuildAll=%v, want a validate-only snapshot",
+			o.NoPush,
+			o.Push,
+			o.Snapshot,
+			o.BuildAll,
+		)
 	}
 
 	for name, leg := range map[string]Options{
@@ -115,9 +121,9 @@ func TestRequireTagUntaggedValidatesOnly(t *testing.T) {
 	// A real release in the untagged repo would refuse (no tag on HEAD);
 	// under require_tag it is a validation build and succeeds.
 	stderr, err := captureStderr(t, func() error {
-		saved := progress
-		defer func() { progress = saved }()
-		progress = os.Stderr
+		saved := progressOut
+		defer func() { progressOut = saved }()
+		progressOut = os.Stderr
 		o := base
 		o.DryRun = true
 		return Release(o)

@@ -132,14 +132,35 @@ runs:
           fi
         done
 
-        # 1. checksums.txt was signed by this repository's release workflow,
-        #    for this tag. A release re-run by hand is signed from the branch
-        #    it was dispatched from, so main is accepted too (see SECURITY.md).
+        # 1. checksums.txt was signed by stevedore's release, for this tag. A
+        #    release re-run by hand is signed from the branch it was
+        #    dispatched from, so main is accepted too (see SECURITY.md).
+        #    Releases after the move to blairham/.github are signed by its
+        #    shared go-release.yml, called from this repository; the
+        #    certificate's workflow repository and ref name this repository
+        #    and the tag. Earlier ones were signed by this repository's own
+        #    release.yml. Either identity passes, nothing else does.
         tag_re=$(printf '%s' "$tag" | sed 's/[][\.*^$+?(){}|/]/\\&/g')
-        cosign verify-blob \
-          --certificate-identity-regexp "^https://github\\.com/blairham/stevedore/\\.github/workflows/release\\.yml@refs/(tags/${tag_re}|heads/main)\$" \
-          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-          --bundle checksums.txt.sigstore.json checksums.txt
+        verified=""
+        for ref in "refs/tags/$tag" refs/heads/main; do
+          if cosign verify-blob \
+              --certificate-identity-regexp '^https://github\.com/blairham/\.github/\.github/workflows/go-release\.yml@' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-github-workflow-repository "$repo" \
+              --certificate-github-workflow-ref "$ref" \
+              --bundle checksums.txt.sigstore.json checksums.txt 2>/dev/null; then
+            verified="go-release.yml ($ref)"
+            break
+          fi
+        done
+        if [ -z "$verified" ]; then
+          cosign verify-blob \
+            --certificate-identity-regexp "^https://github\\.com/blairham/stevedore/\\.github/workflows/release\\.yml@refs/(tags/${tag_re}|heads/main)\$" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --bundle checksums.txt.sigstore.json checksums.txt
+          verified="release.yml"
+        fi
+        echo "checksums.txt of $tag is signed by $verified"
 
         # 2. The archive is the one checksums.txt lists. Exactly one line must
         #    name it: `--ignore-missing` would pass an archive it never saw.

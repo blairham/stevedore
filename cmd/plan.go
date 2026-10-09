@@ -58,9 +58,12 @@ func newPlanCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
-	cmd.Flags().StringVar(&changedSince, "changed-since", "", "git ref: plan only images whose paths changed since this ref (under marker_refs, since the older of this and the image's marker)")
+	cmd.Flags().
+		BoolVar(&onlyChanged, "only-changed", false, "skip images whose build inputs are unchanged since the last release (fingerprint state)")
+	cmd.Flags().
+		StringVar(&changedSince, "changed-since", "", "git ref: plan only images whose paths changed since this ref (under marker_refs, since the older of this and the image's marker)")
 	cmd.Flags().BoolVar(&snapshot, "snapshot", false, "plan a snapshot release (affects floating tags and versioning)")
-	cmd.Flags().BoolVar(&splitPlatforms, "split-platforms", false, "emit one matrix entry per build group per platform, with native runner hints (pair with release --split and merge)")
+	cmd.Flags().
+		BoolVar(&splitPlatforms, "split-platforms", false, "emit one matrix entry per build group per platform, with native runner hints (pair with release --split and merge)")
 	return cmd
 }

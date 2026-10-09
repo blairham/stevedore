@@ -113,7 +113,10 @@ func TestBuildPushByDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := string(out)
-	if !strings.Contains(cmd, `type=image,"name=ghcr.io/x/app,reg.io/x/app",push-by-digest=true,name-canonical=true,push=true`) {
+	if !strings.Contains(
+		cmd,
+		`type=image,"name=ghcr.io/x/app,reg.io/x/app",push-by-digest=true,name-canonical=true,push=true`,
+	) {
 		t.Errorf("push-by-digest output flag missing: %s", cmd)
 	}
 	if strings.Contains(cmd, "--tag") {
@@ -176,7 +179,13 @@ func TestSourceDateEpochBuildArg(t *testing.T) {
 	if strings.Count(args, "SOURCE_DATE_EPOCH=") != 1 {
 		t.Errorf("SOURCE_DATE_EPOCH passed more than once: %s", args)
 	}
-	if args := strings.Join(buildxArgs(Spec{Dockerfile: "Dockerfile", Context: "."}, ""), " "); strings.Contains(args, "SOURCE_DATE_EPOCH") {
+	if args := strings.Join(
+		buildxArgs(Spec{Dockerfile: "Dockerfile", Context: "."}, ""),
+		" ",
+	); strings.Contains(
+		args,
+		"SOURCE_DATE_EPOCH",
+	) {
 		t.Errorf("SOURCE_DATE_EPOCH passed when unset: %s", args)
 	}
 }
@@ -192,7 +201,10 @@ func TestSourceDateEpochEnv(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SOURCE_DATE_EPOCH", "")
-	if _, err := Build(&run.Runner{}, Spec{Dockerfile: "Dockerfile", Context: ".", SourceDateEpoch: "1714979289"}); err != nil {
+	if _, err := Build(
+		&run.Runner{},
+		Spec{Dockerfile: "Dockerfile", Context: ".", SourceDateEpoch: "1714979289"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(out)
@@ -206,11 +218,23 @@ func TestSourceDateEpochEnv(t *testing.T) {
 
 func TestAnnotationArgs(t *testing.T) {
 	ann := map[string]string{"org.opencontainers.image.description": "an app", "a.b": "c"}
-	single := strings.Join(buildxArgs(Spec{Dockerfile: "D", Context: ".", Push: true, Platforms: []string{"linux/amd64"}, Annotations: ann}, ""), " ")
-	if !strings.Contains(single, "--annotation manifest:a.b=c --annotation manifest:org.opencontainers.image.description=an app") {
+	single := strings.Join(
+		buildxArgs(Spec{Dockerfile: "D", Context: ".", Push: true, Platforms: []string{"linux/amd64"}, Annotations: ann}, ""),
+		" ",
+	)
+	if !strings.Contains(
+		single,
+		"--annotation manifest:a.b=c --annotation manifest:org.opencontainers.image.description=an app",
+	) {
 		t.Errorf("single-platform annotations: %s", single)
 	}
-	multi := strings.Join(buildxArgs(Spec{Dockerfile: "D", Context: ".", Push: true, Platforms: []string{"linux/amd64", "linux/arm64"}, Annotations: ann}, ""), " ")
+	multi := strings.Join(
+		buildxArgs(
+			Spec{Dockerfile: "D", Context: ".", Push: true, Platforms: []string{"linux/amd64", "linux/arm64"}, Annotations: ann},
+			"",
+		),
+		" ",
+	)
 	if !strings.Contains(multi, "--annotation manifest,index:a.b=c") {
 		t.Errorf("multi-platform annotations: %s", multi)
 	}

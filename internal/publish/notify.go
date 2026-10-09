@@ -129,7 +129,12 @@ func notificationPayload(tpl string, n Notification) ([]byte, error) {
 }
 
 func postNotification(ctx context.Context, t webhookTarget, payload []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(payload)) //nolint:gosec // G704: the operator's own webhook, checked by checkWebhookURL
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		t.url,
+		bytes.NewReader(payload),
+	) //nolint:gosec // G704: the operator's own webhook, checked by checkWebhookURL
 	if err != nil {
 		return err
 	}

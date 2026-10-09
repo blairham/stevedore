@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/blairham/stevedore/internal/progress"
 	"github.com/blairham/stevedore/internal/run"
 )
 
@@ -90,7 +91,7 @@ func writeSplitDigest(dir, dist string, ids, platforms []string, digest string) 
 		if err := writeDistFile(path, []byte(digest+"\n")); err != nil {
 			return fmt.Errorf("write split digest: %w", err)
 		}
-		fmt.Fprintf(progress, "    digest recorded: %s\n", path)
+		progress.Printf(progressOut, "    digest recorded: %s\n", path)
 	}
 	return nil
 }
@@ -149,7 +150,9 @@ func checkMergeInputs(o Options, dist string, toBuild [][]imageEval, skipped []i
 	var problems []string
 	for _, grp := range toBuild {
 		for _, m := range grp {
-			data, err := os.ReadFile(filepath.Clean(filepath.Join(splitDigestDir(o.Dir, dist, m.plan.Image.ID), splitVersionFile)))
+			data, err := os.ReadFile(
+				filepath.Clean(filepath.Join(splitDigestDir(o.Dir, dist, m.plan.Image.ID), splitVersionFile)),
+			)
 			if err != nil {
 				continue // an older leg, or no digests at all (mergeGroup reports that)
 			}
@@ -162,16 +165,21 @@ func checkMergeInputs(o Options, dist string, toBuild [][]imageEval, skipped []i
 	if len(o.Only) == 0 {
 		for _, m := range skipped {
 			if hasSplitDigests(o.Dir, dist, m.plan.Image.ID) {
-				problems = append(problems, fmt.Sprintf("image %s: the split legs pushed digests for it (%s), but merge skipped it: %s",
-					m.plan.Image.ID, splitDigestDir(o.Dir, dist, m.plan.Image.ID), m.reason))
+				problems = append(
+					problems,
+					fmt.Sprintf("image %s: the split legs pushed digests for it (%s), but merge skipped it: %s",
+						m.plan.Image.ID, splitDigestDir(o.Dir, dist, m.plan.Image.ID), m.reason),
+				)
 			}
 		}
 	}
 	if len(problems) == 0 {
 		return nil
 	}
-	return fmt.Errorf("merge disagrees with what the split legs built:\n  %s\npass merge the plan's only and pins outputs (--only <ids> --pin-version <id>=<version>) so it releases exactly what the legs built",
-		strings.Join(problems, "\n  "))
+	return fmt.Errorf(
+		"merge disagrees with what the split legs built:\n  %s\npass merge the plan's only and pins outputs (--only <ids> --pin-version <id>=<version>) so it releases exactly what the legs built",
+		strings.Join(problems, "\n  "),
+	)
 }
 
 // readSplitDigests loads an image's per-arch digests and the (sanitized)
@@ -180,7 +188,10 @@ func checkMergeInputs(o Options, dist string, toBuild [][]imageEval, skipped []i
 // not something to skip: it is either a leftover from an earlier run in a
 // persistent dist/ or a leg that built a platform the image excludes, and in
 // both cases merging it would publish a platform the config does not ask for.
-func readSplitDigests(dir, dist, id string, configured []string) (digests []string, covered map[string]bool, err error) {
+func readSplitDigests(
+	dir, dist, id string,
+	configured []string,
+) (digests []string, covered map[string]bool, err error) {
 	allowed := make(map[string]bool, len(configured))
 	for _, p := range configured {
 		allowed[strings.ReplaceAll(p, "/", "-")] = true
@@ -188,7 +199,12 @@ func readSplitDigests(dir, dist, id string, configured []string) (digests []stri
 	d := splitDigestDir(dir, dist, id)
 	entries, err := os.ReadDir(d)
 	if err != nil {
-		return nil, nil, fmt.Errorf("image %s: no split digests under %s (run `stevedore release --split <platform>` legs first): %w", id, d, err)
+		return nil, nil, fmt.Errorf(
+			"image %s: no split digests under %s (run `stevedore release --split <platform>` legs first): %w",
+			id,
+			d,
+			err,
+		)
 	}
 	covered = map[string]bool{}
 	var names []string
@@ -199,33 +215,57 @@ func readSplitDigests(dir, dist, id string, configured []string) (digests []stri
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		data, err := os.ReadFile(filepath.Clean(filepath.Join(d, name)))
+		digest, platforms, err := readSplitDigest(d, name, id, allowed, configured)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read split digest: %w", err)
-		}
-		digest := strings.TrimSpace(string(data))
-		if digest == "" {
-			return nil, nil, fmt.Errorf("image %s: empty split digest file %s", id, name)
-		}
-		var unexpected []string
-		for p := range strings.SplitSeq(name, ",") {
-			if !allowed[p] {
-				unexpected = append(unexpected, p)
-			}
-		}
-		if len(unexpected) > 0 {
-			return nil, nil, fmt.Errorf("image %s: split digest %s covers %s, which the image does not configure (platforms: %s) — remove the stale file, or the leg that wrote it",
-				id, filepath.Join(d, name), strings.Join(unexpected, ","), strings.Join(configured, ","))
+			return nil, nil, err
 		}
 		digests = append(digests, digest)
-		for p := range strings.SplitSeq(name, ",") {
+		for _, p := range platforms {
 			covered[p] = true
 		}
 	}
 	if len(digests) == 0 {
-		return nil, nil, fmt.Errorf("image %s: no split digests under %s (run `stevedore release --split <platform>` legs first)", id, d)
+		return nil, nil, fmt.Errorf(
+			"image %s: no split digests under %s (run `stevedore release --split <platform>` legs first)",
+			id,
+			d,
+		)
 	}
 	return digests, covered, nil
+}
+
+// readSplitDigest reads one leg's digest file, named for the (sanitized)
+// platforms it covers, and refuses one covering a platform outside allowed.
+func readSplitDigest(
+	d, name, id string,
+	allowed map[string]bool,
+	configured []string,
+) (digest string, platforms []string, err error) {
+	data, err := os.ReadFile(filepath.Clean(filepath.Join(d, name)))
+	if err != nil {
+		return "", nil, fmt.Errorf("read split digest: %w", err)
+	}
+	digest = strings.TrimSpace(string(data))
+	if digest == "" {
+		return "", nil, fmt.Errorf("image %s: empty split digest file %s", id, name)
+	}
+	platforms = strings.Split(name, ",")
+	var unexpected []string
+	for _, p := range platforms {
+		if !allowed[p] {
+			unexpected = append(unexpected, p)
+		}
+	}
+	if len(unexpected) > 0 {
+		return "", nil, fmt.Errorf(
+			"image %s: split digest %s covers %s, which the image does not configure (platforms: %s) — remove the stale file, or the leg that wrote it",
+			id,
+			filepath.Join(d, name),
+			strings.Join(unexpected, ","),
+			strings.Join(configured, ","),
+		)
+	}
+	return digest, platforms, nil
 }
 
 // mergeGroup assembles the split legs' digests into one manifest list per
@@ -247,8 +287,11 @@ func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos []st
 		}
 	}
 	if len(missing) > 0 {
-		return "", fmt.Errorf("image %s: no split digest covers platform(s) %s — did every matrix leg run and share dist/digests?",
-			rep.Image.ID, strings.Join(missing, ", "))
+		return "", fmt.Errorf(
+			"image %s: no split digest covers platform(s) %s — did every matrix leg run and share dist/digests?",
+			rep.Image.ID,
+			strings.Join(missing, ", "),
+		)
 	}
 
 	// imagetools create has no "push untagged" switch, but it accepts a digest
@@ -274,7 +317,9 @@ func mergeGroup(r *run.Runner, o Options, rep ImagePlan, dist string, repos []st
 
 	// One untagged create per repository, addressed by the list's digest.
 	for _, repo := range repos {
-		args := imagetoolsCreate(append(append([]string{"--tag", repo + "@" + listDigest}, annotations...), sources(repo, digests)...)...)
+		args := imagetoolsCreate(
+			append(append([]string{"--tag", repo + "@" + listDigest}, annotations...), sources(repo, digests)...)...,
+		)
 		if err := r.Run("docker", args...); err != nil {
 			return "", err
 		}
