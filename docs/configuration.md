@@ -125,8 +125,13 @@ test:
 
 versioning:
   strategy: git           # git (default) | registry | ecr | static | env | command
+  # bump: patch           # registry/ecr: patch | minor | major | auto
+                          # git: auto releases an untagged HEAD as the latest
+                          # tag + the bump its commits call for
+  # bump: auto only (see versioning.md):
+  # bump_types: {revert: patch}   # over the default feat: minor, fix/perf: patch
+  # on_no_changes: skip   # skip (default): nothing to release | patch
   # registry/ecr strategies:
-  # bump: patch           # patch | minor | major
   # repo: ghcr.io/acme/myapp   # defaults to each image's own repository
   # region: us-east-1     # ecr only; inferred from the ECR host otherwise
   # initial: "0.1.0"      # when the repo has no semver tags yet
@@ -138,6 +143,7 @@ versioning:
   # command strategy:
   # command: ./scripts/version.sh   # its trimmed stdout is the version
   # require_tag: true    # tag on HEAD = release every image; untagged = validate-only build
+                          # (not with bump: auto)
 
 change_detection:         # scope --only-changed / --changed-since for monorepos
   resolver: ""            # "dotnet" auto-derives per-image paths from .csproj refs

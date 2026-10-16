@@ -15,56 +15,45 @@ func gi() *gitinfo.Info {
 	return &gitinfo.Info{Version: "1.2.3", Tag: "v1.2.3", LatestTag: "v1.2.3", ShortCommit: "abc1234"}
 }
 
-func TestParseSemver(t *testing.T) {
+func TestParseRelease(t *testing.T) {
 	cases := map[string]struct {
 		ok bool
 		s  string
 	}{
 		"1.2.3":        {true, "1.2.3"},
 		"v1.2.3":       {true, "1.2.3"},
+		" v1.2.3 ":     {true, "1.2.3"},
 		"0.0.0":        {true, "0.0.0"},
 		"10.20.30":     {true, "10.20.30"},
+		"v1.2.3+build": {true, "1.2.3"}, // build metadata is not precedence
 		"1.2":          {false, ""},
 		"1.2.3.4":      {false, ""},
 		"latest":       {false, ""},
+		"01.2.3":       {false, ""},
 		"1.2.3-rc1":    {false, ""}, // prereleases excluded from selection
-		"v1.2.3+build": {false, ""},
+		"1.2.3-rc.1":   {false, ""},
 		"sha-abc":      {false, ""},
 	}
 	for in, want := range cases {
-		got, ok := parseSemver(in)
+		got, ok := parseRelease(in)
 		if ok != want.ok {
-			t.Errorf("parseSemver(%q) ok=%v, want %v", in, ok, want.ok)
+			t.Errorf("parseRelease(%q) ok=%v, want %v", in, ok, want.ok)
 			continue
 		}
 		if ok && got.String() != want.s {
-			t.Errorf("parseSemver(%q) = %s, want %s", in, got.String(), want.s)
+			t.Errorf("parseRelease(%q) = %s, want %s", in, got.String(), want.s)
 		}
 	}
 }
 
-func TestHighestSemver(t *testing.T) {
-	tags := []string{"v1.0.0", "1.2.0", "latest", "1.10.0", "1.2.9", "v0.9.0", "nightly"}
-	h, ok := highestSemver(tags)
+func TestHighestRelease(t *testing.T) {
+	tags := []string{"v1.0.0", "1.2.0", "latest", "1.10.0", "1.2.9", "v0.9.0", "nightly", "2.0.0-rc.1"}
+	h, ok := highestRelease(tags)
 	if !ok || h.String() != "1.10.0" {
-		t.Errorf("highestSemver = %v (%v), want 1.10.0", h.String(), ok)
+		t.Errorf("highestRelease = %v (%v), want 1.10.0", h.String(), ok)
 	}
-	if _, ok := highestSemver([]string{"latest", "edge"}); ok {
+	if _, ok := highestRelease([]string{"latest", "edge"}); ok {
 		t.Error("expected no semver among non-semver tags")
-	}
-}
-
-func TestBump(t *testing.T) {
-	base, _ := parseSemver("1.4.9")
-	cases := map[string]string{
-		"patch": "1.4.10",
-		"minor": "1.5.0",
-		"major": "2.0.0",
-	}
-	for part, want := range cases {
-		if got := bump(base, part).String(); got != want {
-			t.Errorf("bump(1.4.9, %s) = %s, want %s", part, got, want)
-		}
 	}
 }
 

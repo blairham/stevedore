@@ -26,3 +26,27 @@ func TestCommitsSinceBody(t *testing.T) {
 		t.Errorf("oldest = %+v, want empty body", c)
 	}
 }
+
+// VersionTag finds a release's tag with or without the "v", and nothing for a
+// version that was never tagged or a tag that only shares a prefix.
+func TestVersionTag(t *testing.T) {
+	isolateGit(t)
+	r := newRepo(t, t.TempDir())
+	r.commit("first")
+	r.git("tag", "v1.2.0")
+	r.git("tag", "1.3.0")
+	r.git("tag", "v1.4.0-rc.1")
+	for version, want := range map[string]string{
+		"1.2.0":        "v1.2.0",
+		"1.3.0":        "1.3.0",
+		"1.4.0-rc.1":   "v1.4.0-rc.1",
+		"1.4.0":        "",
+		"1.2":          "",
+		"9.9.9":        "",
+		"1.2.0^{tree}": "",
+	} {
+		if got := VersionTag(t.Context(), r.dir, version); got != want {
+			t.Errorf("VersionTag(%q) = %q, want %q", version, got, want)
+		}
+	}
+}

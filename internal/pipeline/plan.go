@@ -74,6 +74,11 @@ func evaluateImages(o Options, p *Prepared, state fingerprint.State) ([]imageEva
 		if err != nil {
 			return nil, err
 		}
+		// Changed or not, an image with no new version has nothing to
+		// publish: building it would re-release its last version.
+		if plan.NoRelease != "" {
+			ch, reason = false, plan.NoRelease
+		}
 		fpScoped := scopedFingerprintPaths(plan.Paths, shared)
 		fp, err := fingerprint.Compute(o.Dir, plan.Image, p.Config.Dist, fpScoped)
 		if err != nil {
@@ -258,6 +263,10 @@ type PlanEntry struct {
 	// Platform is set under --split-platforms: this entry builds one platform
 	// of its group, via `release --only <only> <pins> --split <platform>`.
 	Platform string `json:"platform,omitempty"`
+	// VersionReasons maps a member ID to why it has its version under
+	// versioning.bump: auto ("minor: feat(api): add pagination, a1b2c3d");
+	// members with nothing to explain are left out.
+	VersionReasons map[string]string `json:"version_reasons,omitempty"`
 	// Runner is the suggested GitHub-hosted runner label for Platform
 	// (`runs-on: ${{ matrix.runner }}`); empty when there is no native
 	// GitHub-hosted runner for the platform.
@@ -311,6 +320,7 @@ func Plan(o Options) (*PlanResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	reportVersion(p)
 	// Fingerprint state feeds --only-changed, same as a release run.
 	state, err := fingerprint.Load(filepath.Join(o.Dir, p.Config.Dist, "fingerprints.json"))
 	if err != nil {
@@ -340,6 +350,12 @@ func newPlanResult(toBuild [][]imageEval, skipped []imageEval, splitPerPlatform 
 		pins := make([]string, 0, len(grp))
 		for _, m := range grp {
 			entry.Versions[m.plan.Image.ID] = m.plan.Version
+			if m.plan.VersionReason != "" {
+				if entry.VersionReasons == nil {
+					entry.VersionReasons = map[string]string{}
+				}
+				entry.VersionReasons[m.plan.Image.ID] = m.plan.VersionReason
+			}
 			pins = append(pins, fmt.Sprintf("--pin-version %s=%s", m.plan.Image.ID, m.plan.Version))
 			if entry.Reason == "" && m.changed {
 				entry.Reason = m.reason

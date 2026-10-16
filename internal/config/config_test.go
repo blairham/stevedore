@@ -286,6 +286,33 @@ func TestValidateVersioning(t *testing.T) {
 		{"initial not a version", Versioning{Strategy: "registry", Initial: "banana"}, true},
 		{"initial two parts", Versioning{Strategy: "registry", Initial: "1.0"}, true},
 		{"initial prerelease", Versioning{Strategy: "registry", Initial: "1.0.0-rc.1"}, true},
+		{"initial build metadata", Versioning{Strategy: "registry", Initial: "1.0.0+b"}, true},
+		{"initial leading zero", Versioning{Strategy: "registry", Initial: "01.0.0"}, true},
+		{"git bad bump", Versioning{Strategy: "git", Bump: "sideways"}, true},
+		{"git auto", Versioning{Strategy: "git", Bump: "auto"}, false},
+		{"default strategy auto", Versioning{Bump: "auto"}, false},
+		{"registry auto", Versioning{Strategy: "registry", Bump: "auto"}, false},
+		{"ecr auto", Versioning{Strategy: "ecr", Bump: "auto"}, false},
+		{"static auto", Versioning{Strategy: "static", Value: "1.0.0", Bump: "auto"}, true},
+		{"env auto", Versioning{Strategy: "env", Env: "V", Bump: "auto"}, true},
+		{"command auto", Versioning{Strategy: "command", Command: "x", Bump: "auto"}, true},
+		{"auto with require_tag", Versioning{Strategy: "git", Bump: "auto", RequireTag: true}, true},
+		{"require_tag without auto", Versioning{Strategy: "git", Bump: "patch", RequireTag: true}, false},
+		{
+			"bump_types ok",
+			Versioning{Bump: "auto", BumpTypes: BumpTypes{"revert": "patch", "fix": "none", "perf": "minor", "x": "major"}},
+			false,
+		},
+		{"bump_types bad level", Versioning{Bump: "auto", BumpTypes: BumpTypes{"revert": "auto"}}, true},
+		{
+			"bump_types without auto",
+			Versioning{Bump: "minor", Strategy: "registry", BumpTypes: BumpTypes{"revert": "patch"}},
+			true,
+		},
+		{"on_no_changes skip", Versioning{Bump: "auto", OnNoChanges: "skip"}, false},
+		{"on_no_changes patch", Versioning{Bump: "auto", OnNoChanges: "patch"}, false},
+		{"on_no_changes bad", Versioning{Bump: "auto", OnNoChanges: "minor"}, true},
+		{"on_no_changes without auto", Versioning{Strategy: "registry", OnNoChanges: "patch"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

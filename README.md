@@ -145,6 +145,7 @@ from the same commit (a full plan or dry run would need the registries they name
 | [`examples/single-image`](examples/single-image) | one service, signed and attested |
 | [`examples/monorepo`](examples/monorepo) | many services, change detection, per-image versions |
 | [`examples/split-multiarch`](examples/split-multiarch) | one native runner per platform, no QEMU |
+| [`examples/auto-version`](examples/auto-version) | the next version from Conventional Commits, no hand-pushed tag |
 
 ## Commands
 

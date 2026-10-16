@@ -11,12 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/blairham/stevedore/internal/semver"
 	"github.com/blairham/stevedore/internal/tmpl"
 )
 
@@ -289,8 +289,23 @@ type Versioning struct {
 	Strategy string `yaml:"strategy" enum:"git,registry,ecr,static,env,command"`
 
 	// Bump is how much to increment for the registry/ecr strategies:
-	// patch (default), minor, or major.
-	Bump string `yaml:"bump" enum:"patch,minor,major"`
+	// patch (default), minor, or major. auto derives it from the
+	// Conventional Commits since the last release (breaking → major, feat →
+	// minor, fix/perf → patch; see BumpTypes), and is also accepted by the
+	// git strategy, where an untagged HEAD then releases as the latest tag
+	// plus that bump instead of as a snapshot.
+	Bump string `yaml:"bump" enum:"patch,minor,major,auto"`
+
+	// BumpTypes overrides, under bump: auto, the level a commit type bumps,
+	// key by key over the default {feat: minor, fix: patch, perf: patch}:
+	// revert: patch adds a type, fix: none turns one off. A breaking commit
+	// is a major bump whatever its type.
+	BumpTypes BumpTypes `yaml:"bump_types"`
+
+	// OnNoChanges is what bump: auto does when no commit since the last
+	// release calls for a bump: skip (default) reports nothing to release
+	// and builds nothing; patch releases a patch bump anyway.
+	OnNoChanges string `yaml:"on_no_changes" enum:"skip,patch"`
 
 	// Repo is the repository queried by the registry strategy. Defaults to the
 	// first repository of the first image (per-image under multi-image configs).
@@ -323,6 +338,40 @@ type Versioning struct {
 	// `release` runs as a validate-only build (a snapshot, not pushed); with
 	// one, every image builds, whatever change detection would have skipped.
 	RequireTag bool `yaml:"require_tag"`
+}
+
+// BumpAuto is the versioning.bump value that derives the bump from the
+// commits being released.
+const BumpAuto = "auto"
+
+// The versioning.on_no_changes values.
+const (
+	OnNoChangesSkip  = "skip"
+	OnNoChangesPatch = "patch"
+)
+
+// BumpTypes maps a Conventional Commits type to the bump level it calls for
+// under versioning.bump: auto: one of BumpLevels.
+type BumpTypes map[string]string
+
+// BumpLevels are the levels a versioning.bump_types entry may name, lowest
+// first.
+var BumpLevels = []string{"none", "patch", "minor", "major"}
+
+// schemaType is JSON Schema's "type" keyword.
+const schemaType = "type"
+
+// JSONSchema lists the levels a type may map to, which a plain map's schema
+// cannot carry.
+func (BumpTypes) JSONSchema() map[string]any {
+	levels := make([]any, len(BumpLevels))
+	for i, l := range BumpLevels {
+		levels[i] = l
+	}
+	return map[string]any{
+		schemaType:             "object",
+		"additionalProperties": map[string]any{schemaType: "string", "enum": levels},
+	}
 }
 
 // Image describes one buildable image and where it should be published.
@@ -549,14 +598,14 @@ func (s *ScanIgnore) UnmarshalYAML(n *yaml.Node) error {
 
 // JSONSchema describes both accepted forms for editors.
 func (ScanIgnore) JSONSchema() map[string]any {
-	str := func() map[string]any { return map[string]any{"type": "string"} }
+	str := func() map[string]any { return map[string]any{schemaType: "string"} }
 	date := str()
 	date["pattern"] = `^\d{4}-\d{2}-\d{2}$`
 	return map[string]any{
 		"oneOf": []any{
 			str(),
 			map[string]any{
-				"type":                 "object",
+				schemaType:             "object",
 				"properties":           map[string]any{"id": str(), "reason": str(), "expires": date},
 				"required":             []any{"id"},
 				"additionalProperties": false,
@@ -987,14 +1036,12 @@ func (v Versioning) validate() error {
 	if v.Initial != "" && !isStableSemver(v.Initial) {
 		return fmt.Errorf("versioning.initial %q invalid (want MAJOR.MINOR.PATCH, optionally with a leading v)", v.Initial)
 	}
+	if err := v.validateBump(); err != nil {
+		return err
+	}
 	switch v.Strategy {
 	case "", "git":
 	case "registry", "ecr":
-		switch v.Bump {
-		case "", "patch", "minor", "major":
-		default:
-			return fmt.Errorf("versioning.bump %q invalid (want patch, minor, or major)", v.Bump)
-		}
 		if v.Strategy == "registry" && v.Lister != "" && v.Lister != "crane" {
 			return fmt.Errorf("versioning.lister %q unsupported (only crane)", v.Lister)
 		}
@@ -1016,20 +1063,59 @@ func (v Versioning) validate() error {
 	return nil
 }
 
-// isStableSemver reports whether s is an optional "v" followed by exactly three
-// dot-separated non-negative integers. It accepts what the versioner's
-// parseSemver does; config cannot import the versioner, which imports config.
-func isStableSemver(s string) bool {
-	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(s), "v"), ".")
-	if len(parts) != 3 {
-		return false
+// validateBump checks bump, bump_types and on_no_changes, and that bump: auto
+// is only asked of a strategy that bumps.
+func (v Versioning) validateBump() error {
+	switch v.Bump {
+	case "", "patch", "minor", "major", BumpAuto:
+	default:
+		return fmt.Errorf("versioning.bump %q invalid (want patch, minor, major, or auto)", v.Bump)
 	}
-	for _, p := range parts {
-		if n, err := strconv.Atoi(p); err != nil || n < 0 {
-			return false
+	for typ, level := range v.BumpTypes {
+		if !slices.Contains(BumpLevels, level) {
+			return fmt.Errorf("versioning.bump_types.%s %q invalid (want none, patch, minor, or major)", typ, level)
 		}
 	}
-	return true
+	switch v.OnNoChanges {
+	case "", OnNoChangesSkip, OnNoChangesPatch:
+	default:
+		return fmt.Errorf("versioning.on_no_changes %q invalid (want skip or patch)", v.OnNoChanges)
+	}
+	if v.Bump != BumpAuto {
+		if len(v.BumpTypes) > 0 {
+			return fmt.Errorf("versioning.bump_types needs versioning.bump: auto")
+		}
+		if v.OnNoChanges != "" {
+			return fmt.Errorf("versioning.on_no_changes needs versioning.bump: auto")
+		}
+		return nil
+	}
+	switch v.Strategy {
+	case "", "git", "registry", "ecr":
+	default:
+		return fmt.Errorf(
+			"versioning.bump: auto needs the git, registry, or ecr strategy (%s takes the version as given)",
+			v.Strategy,
+		)
+	}
+	// require_tag makes the tag on HEAD the release trigger, and auto makes an
+	// untagged HEAD a release: each one's untagged case is the other's
+	// opposite, so together one of them would be silently ignored.
+	if v.RequireTag {
+		return fmt.Errorf(
+			"versioning.bump: auto and versioning.require_tag are mutually exclusive: auto releases an untagged HEAD, require_tag only releases a tagged one",
+		)
+	}
+	return nil
+}
+
+// isStableSemver reports whether s is an optional "v" followed by a release
+// version (MAJOR.MINOR.PATCH, no prerelease or build metadata) — what the
+// versioner bumps from.
+func isStableSemver(s string) bool {
+	s = strings.TrimSpace(s)
+	v, ok := semver.Parse(s)
+	return ok && !v.IsPrerelease() && !strings.Contains(s, "+")
 }
 
 // Severities are the recognized vulnerability severities, ascending.

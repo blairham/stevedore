@@ -147,6 +147,14 @@ type ImagePlan struct {
 	// SourceDateEpoch is the SOURCE_DATE_EPOCH passed to the build, or "" for
 	// none (source_date_epoch: false, or a repository with no commits).
 	SourceDateEpoch string
+	// VersionReason explains Version under versioning.bump: auto — the bump
+	// and the commit that decided it — or is "" when there is nothing to
+	// explain (a pin, a tag on HEAD, a fixed bump).
+	VersionReason string
+	// NoRelease is why the image has nothing to release — under bump: auto
+	// with on_no_changes: skip, no commit since its last release calls for a
+	// bump — or "" when it does. Change detection skips it with this reason.
+	NoRelease string
 }
 
 // Prepared bundles the loaded config, git info, and resolved plans.
@@ -155,6 +163,8 @@ type Prepared struct {
 	Git    *gitinfo.Info
 	Ctx    *tmpl.Context
 	Plans  []ImagePlan
+	// Version is the release version and how it was decided.
+	Version versioner.Decision
 }
 
 // Prepare loads config, gathers git state, and resolves image plans.
@@ -174,19 +184,22 @@ func Prepare(o Options) (*Prepared, error) {
 
 	// Resolve the release version via the configured strategy (git, registry,
 	// static, env, or command) and let it drive the template context.
-	ver, err := resolveVersion(cfg, gi, o)
+	dec, err := resolveVersion(cfg, gi, o)
 	if err != nil {
 		return nil, err
 	}
-	gi.Version = ver
+	gi.Version = dec.Version
 
 	ctx := tmpl.NewContext(cfg.ProjectName, cfg.DefaultBranch, gi, o.Snapshot, now, envMap())
 
 	// Under the registry strategy each image is versioned from its own repo;
 	// versionFor is nil for other strategies (one version for all images).
-	var versionFor func(string) (string, error)
+	var (
+		versionFor func(string) (string, error)
+		decisions  map[string]versioner.Decision
+	)
 	if isRegistryStrategy(cfg.Versioning.Strategy) {
-		versionFor, err = imageVersionResolver(cfg, gi, o, ctx)
+		versionFor, decisions, err = imageVersionResolver(cfg, gi, o, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -195,6 +208,7 @@ func Prepare(o Options) (*Prepared, error) {
 	if err != nil {
 		return nil, err
 	}
+	applyDecisions(plans, dec, decisions, o.PinVersions)
 	// Resolve each image's dependency paths for change detection (per-image
 	// paths plus any project-graph expansion).
 	for i := range plans {
@@ -204,7 +218,74 @@ func Prepare(o Options) (*Prepared, error) {
 		}
 		plans[i].Paths = paths
 	}
-	return &Prepared{Config: cfg, Git: gi, Ctx: ctx, Plans: plans}, nil
+	return &Prepared{Config: cfg, Git: gi, Ctx: ctx, Plans: plans, Version: dec}, nil
+}
+
+// reportVersion prints the release version with why it is that version, when
+// versioning.bump: auto decided it. Under per-image registry versioning each
+// image is reported by change detection instead, with its own reason.
+func reportVersion(p *Prepared) {
+	if r := p.Version.Reason(); r != "" {
+		progress.Printf(progressOut, "==> version %s (%s)\n", p.Version.Version, r)
+	}
+}
+
+// applyDecisions records on each plan why it has its version and whether it
+// has anything to release: from its own repository's decision under per-image
+// registry versioning (decisions, keyed by the repository the version was
+// read from), otherwise from the release's. A pinned image was decided by
+// whoever pinned it — the plan run — so it is left as it is.
+func applyDecisions(
+	plans []ImagePlan,
+	release versioner.Decision,
+	decisions map[string]versioner.Decision,
+	pins map[string]string,
+) {
+	for i := range plans {
+		if _, pinned := pins[plans[i].Image.ID]; pinned {
+			continue
+		}
+		d := release
+		if len(plans[i].Repos) > 0 {
+			if own, ok := decisions[plans[i].Repos[0]]; ok {
+				d = own
+			}
+		}
+		plans[i].VersionReason = d.Reason()
+		if d.NothingToRelease {
+			plans[i].NoRelease = d.Reason()
+		}
+	}
+}
+
+// nothingToRelease reports whether every plan has nothing to release.
+func nothingToRelease(plans []ImagePlan) bool {
+	for _, p := range plans {
+		if p.NoRelease == "" {
+			return false
+		}
+	}
+	return len(plans) > 0
+}
+
+// commitLister lists the commits a bump: auto release after base carries:
+// those since the git tag of the release named base. Under the git strategy
+// that is the latest reachable tag. Under registry/ecr base comes from the
+// registry, and its tag is the one release.github created ("v"+base); with no
+// such tag the range falls back to the latest reachable version tag, and with
+// none of those to the whole history.
+//
+// The list is repository-wide: every commit counts for every image.
+func commitLister(o Options, gi *gitinfo.Info) func(string) ([]gitinfo.Commit, error) {
+	return func(base string) ([]gitinfo.Commit, error) {
+		since := gi.LatestTag
+		if strings.TrimPrefix(since, "v") != base {
+			if tag := gitinfo.VersionTag(o.context(), o.Dir, base); tag != "" {
+				since = tag
+			}
+		}
+		return gitinfo.CommitsSince(o.context(), o.Dir, since)
+	}
 }
 
 // loadConfig loads and validates the config, including the image IDs that
@@ -233,20 +314,22 @@ func imageVersionResolver(
 	gi *gitinfo.Info,
 	o Options,
 	ctx *tmpl.Context,
-) (func(string) (string, error), error) {
+) (func(string) (string, error), map[string]versioner.Decision, error) {
 	vcfg := cfg.Versioning
 	if vcfg.Repo != "" {
 		rendered, err := tmpl.Render(vcfg.Repo, ctx)
 		if err != nil {
-			return nil, fmt.Errorf("render versioning repo %q: %w", vcfg.Repo, err)
+			return nil, nil, fmt.Errorf("render versioning repo %q: %w", vcfg.Repo, err)
 		}
 		vcfg.Repo = rendered
 	}
 	r := run.New(o.context(), o.DryRun, o.Verbose)
 	list := tagLister(cfg, r)
+	commits := commitLister(o, gi)
+	decisions := map[string]versioner.Decision{}
 	warned := false
 	return func(repo string) (string, error) {
-		v, err := versioner.Resolve(versioner.Input{
+		d, err := versioner.Decide(versioner.Input{
 			Cfg:      vcfg,
 			Git:      gi,
 			Snapshot: o.Snapshot,
@@ -254,6 +337,7 @@ func imageVersionResolver(
 			Getenv:   os.Getenv,
 			ListTags: list,
 			RunCmd:   func(command string) (string, error) { return r.Capture("sh", "-c", command) },
+			Commits:  commits,
 		})
 		if err != nil && o.SoftVersion {
 			if !warned {
@@ -262,8 +346,11 @@ func imageVersionResolver(
 			}
 			return unresolvedVersion, nil
 		}
-		return v, err
-	}, nil
+		if err == nil {
+			decisions[repo] = d
+		}
+		return d.Version, err
+	}, decisions, nil
 }
 
 // resolveImagePaths returns the image's change-detection globs: its explicit
@@ -733,6 +820,7 @@ func Release(o Options) error {
 	if err != nil {
 		return err
 	}
+	reportVersion(p)
 	err = preflightRelease(o, p)
 	if err != nil {
 		return err
@@ -900,7 +988,13 @@ func Publish(o Options) error {
 	if err != nil {
 		return err
 	}
-	err = guardReleasable(p.Git, p.Config.Versioning.Strategy)
+	// The plan built nothing, so there is no release to name: publishing
+	// one would re-release the last version under bump: auto.
+	if nothingToRelease(p.Plans) {
+		progress.Printf(progressOut, "==> %s; no GitHub release or announcement\n", p.Plans[0].NoRelease)
+		return nil
+	}
+	err = guardReleasable(p.Git, p.Config.Versioning)
 	if err == nil {
 		err = guardDefaultBranch(o, p.Config.DefaultBranch)
 	}
@@ -1029,7 +1123,7 @@ func releaseOptions(o Options) (Options, error) {
 // run needs are installed.
 func preflightRelease(o Options, p *Prepared) error {
 	if !o.Snapshot {
-		if err := guardReleasable(p.Git, p.Config.Versioning.Strategy); err != nil {
+		if err := guardReleasable(p.Git, p.Config.Versioning); err != nil {
 			return err
 		}
 		// A split leg pushes only untagged digests; the merge run that
@@ -2068,7 +2162,7 @@ func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance)
 // resolveVersion derives the release version using the configured strategy. The
 // crane/command hooks are read-only queries, so they run even in dry-run mode to
 // give `check` and dry-runs an accurate preview.
-func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, error) {
+func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (versioner.Decision, error) {
 	r := run.New(o.context(), o.DryRun, o.Verbose)
 
 	// Anchor the release-level version on the first *selected* image so a
@@ -2086,7 +2180,7 @@ func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, er
 	// versioning.repo every image shares one version, so the pins agree.
 	if isRegistryStrategy(vcfg.Strategy) && first != nil {
 		if pin, ok := o.PinVersions[first.ID]; ok {
-			return pin, nil
+			return versioner.Decision{Version: pin}, nil
 		}
 	}
 
@@ -2108,13 +2202,13 @@ func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, er
 		}
 		rendered, err := tmpl.Render(repo, rctx)
 		if err != nil {
-			return "", fmt.Errorf("render versioning repo %q: %w", repo, err)
+			return versioner.Decision{}, fmt.Errorf("render versioning repo %q: %w", repo, err)
 		}
 		repo = rendered
 		vcfg.Repo = "" // resolved into Input.Repo below
 	}
 
-	ver, err := versioner.Resolve(versioner.Input{
+	d, err := versioner.Decide(versioner.Input{
 		Cfg:      vcfg,
 		Git:      gi,
 		Snapshot: o.Snapshot,
@@ -2124,12 +2218,13 @@ func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (string, er
 		RunCmd: func(command string) (string, error) {
 			return r.Capture("sh", "-c", command)
 		},
+		Commits: commitLister(o, gi),
 	})
 	if err != nil && o.SoftVersion {
 		fmt.Fprintf(os.Stderr, "warning: could not resolve version (%v); showing placeholder\n", err)
-		return unresolvedVersion, nil
+		return versioner.Decision{Version: unresolvedVersion}, nil
 	}
-	return ver, err
+	return d, err
 }
 
 // unresolvedVersion is the placeholder shown by `check` when a registry/ecr
@@ -2214,22 +2309,26 @@ func checkTools(ctx context.Context, cfg *config.Config, o preflight.Opts) error
 	return preflight.Verify(preflight.Check(ctx, preflight.Requirements(cfg, o)))
 }
 
-func guardReleasable(gi *gitinfo.Info, strategy string) error {
+func guardReleasable(gi *gitinfo.Info, v config.Versioning) error {
 	if gi.Dirty {
 		return fmt.Errorf("working tree is dirty; commit changes or use --snapshot")
 	}
 	// Only the git strategy needs a tag on HEAD to source the version; the other
-	// strategies derive it elsewhere (registry, static, env, command). A tag
-	// further back does not count: it names a release already cut from another
-	// commit, and reusing it would overwrite that release's image tags.
-	if (strategy == "git" || strategy == "") && gi.Tag == "" {
+	// strategies derive it elsewhere (registry, static, env, command), and so
+	// does bump: auto, which names an untagged HEAD's release after the latest
+	// tag plus its commits' bump. A tag further back does not count: it names a
+	// release already cut from another commit, and reusing it would overwrite
+	// that release's image tags.
+	if (v.Strategy == "git" || v.Strategy == "") && v.Bump != config.BumpAuto && gi.Tag == "" {
 		if gi.LatestTag != "" {
 			return fmt.Errorf(
-				"no git tag on HEAD (latest reachable tag %s is on an earlier commit); tag a release, switch versioning.strategy, or use --snapshot",
+				"no git tag on HEAD (latest reachable tag %s is on an earlier commit); tag a release, set versioning.bump: auto, switch versioning.strategy, or use --snapshot",
 				gi.LatestTag,
 			)
 		}
-		return fmt.Errorf("no git tag on HEAD; tag a release, switch versioning.strategy, or use --snapshot")
+		return fmt.Errorf(
+			"no git tag on HEAD; tag a release, set versioning.bump: auto, switch versioning.strategy, or use --snapshot",
+		)
 	}
 	return nil
 }

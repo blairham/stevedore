@@ -118,3 +118,20 @@ func TestEnumsReachTheSchema(t *testing.T) {
 		t.Errorf("scan.scanner enum = %v, want [grype trivy]", scanner["enum"])
 	}
 }
+
+// versioning.bump offers auto, and bump_types' values are the levels a type
+// may map to.
+func TestVersioningBumpSchema(t *testing.T) {
+	v := object(t, object(t, object(t, Generate(config.Config{}, "x"), "properties"), "versioning"), "properties")
+	enum, _ := object(t, v, "bump")["enum"].([]any)
+	if len(enum) != 4 || enum[3] != "auto" {
+		t.Errorf("versioning.bump enum = %v, want patch, minor, major, auto", enum)
+	}
+	levels, _ := object(t, object(t, v, "bump_types"), "additionalProperties")["enum"].([]any)
+	if len(levels) != 4 || levels[0] != "none" {
+		t.Errorf("versioning.bump_types levels = %v, want none, patch, minor, major", levels)
+	}
+	if enum, _ := object(t, v, "on_no_changes")["enum"].([]any); len(enum) != 2 {
+		t.Errorf("versioning.on_no_changes enum = %v, want skip, patch", enum)
+	}
+}

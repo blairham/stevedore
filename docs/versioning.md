@@ -59,8 +59,8 @@ default is `git`; the others let you avoid relying on git tags entirely.
 
 | Strategy | Where the version comes from |
 |----------|------------------------------|
-| `git` (default) | Git tags. Clean checkout with a version tag **on HEAD** → the tag with any leading `v` stripped (`v1.4.0` → `1.4.0`; the highest wins when HEAD has several). Only semver tags count, with or without the `v` (`v1.4.0`, `1.4.0`, `v2.0.0-rc.1`); others such as `deploy-prod` are ignored here and for the latest/previous tag. Otherwise — HEAD untagged, dirty tree, or `--snapshot` — a snapshot of the latest reachable tag like `1.4.0-SNAPSHOT-9f8e7d6` (`-dirty` if the tree is dirty; `0.0.0-SNAPSHOT-…` with no tags at all). |
-| `registry` | Lists the existing tags in a registry repo (via `crane`), takes the highest semver, and bumps it by `patch`/`minor`/`major`. Non-semver tags (`latest`, commit SHAs) are ignored. |
+| `git` (default) | Git tags. Clean checkout with a version tag **on HEAD** → the tag with any leading `v` stripped (`v1.4.0` → `1.4.0`; the highest wins when HEAD has several). Only semver tags count, with or without the `v` (`v1.4.0`, `1.4.0`, `v2.0.0-rc.1`); others such as `deploy-prod` are ignored here and for the latest/previous tag. Otherwise — HEAD untagged, dirty tree, or `--snapshot` — a snapshot of the latest reachable tag like `1.4.0-SNAPSHOT-9f8e7d6` (`-dirty` if the tree is dirty; `0.0.0-SNAPSHOT-…` with no tags at all). With [`bump: auto`](#versions-from-commits-bump-auto), an untagged HEAD is a release of the latest tag plus the bump its commits call for. |
+| `registry` | Lists the existing tags in a registry repo (via `crane`), takes the highest release (semver without a prerelease), and bumps it by `patch`/`minor`/`major`, or by what the commits call for under [`bump: auto`](#versions-from-commits-bump-auto). Non-semver tags (`latest`, commit SHAs) are ignored. |
 | `ecr` | Like `registry`, but lists tags via `aws ecr describe-images` using your AWS credentials directly — no `crane` or docker credential helper. Region is inferred from the ECR host (override with `region:`). |
 | `static` | An explicit `value:`. |
 | `env` | Read from an environment variable. |
@@ -76,7 +76,7 @@ unreachable registry — it warns and shows a placeholder so the rest of the con
 still validates offline.
 
 `stevedore release` refuses to run on a dirty tree unless you pass `--snapshot`. A
-git tag on HEAD is required **only** for the `git` strategy (a tag on an earlier
+git tag on HEAD is required **only** for the `git` strategy without `bump: auto` (a tag on an earlier
 commit does not count: releasing under it would overwrite that release's image
 tags from a different commit). The others source the version elsewhere, which is handy when your tags drift out of sync with what's
 actually published.
@@ -90,6 +90,70 @@ either way and is refused with a hint — check out with `fetch-depth: 0`.
 `--allow-non-default-branch` (on `release`, `merge` and `publish`) overrides it.
 `merge` is the step that tags a split release, so it is the one held to the
 branch; the legs only push untagged digests.
+
+## Versions from commits: `bump: auto`
+
+```yaml
+versioning:
+  bump: auto
+  # bump_types: {revert: patch}   # merged over the defaults below
+  # on_no_changes: skip           # skip (default) | patch
+```
+
+`bump: auto` reads the [Conventional Commits](https://www.conventionalcommits.org/)
+since the last release and bumps by the highest level any of them calls for:
+
+| Commit | Bump |
+|--------|------|
+| breaking — `feat!: …`, `fix(api)!: …`, or a `BREAKING CHANGE:` / `BREAKING-CHANGE:` footer in the body | major |
+| `feat` | minor |
+| `fix`, `perf` | patch |
+| anything else (`docs`, `chore`, `refactor`, a subject with no type) | none |
+
+Types are case-insensitive (`Feat:` is a feature). The footer is not: the spec
+spells it in capitals. A breaking commit is a major bump whatever its type, and
+that is the same rule the changelog uses to mark it **BREAKING**.
+
+`bump_types` changes the mapping key by key over those defaults: `revert: patch`
+adds a type, `perf: minor` changes one, `fix: none` turns one off. Levels are
+`none`, `patch`, `minor` and `major`. `changelog.exclude` only hides commits from
+the notes; it has no effect on the bump.
+
+**Where the range starts.** Under `git`, the commits since the latest reachable
+version tag. Under `registry`/`ecr` the version being bumped comes from the
+registry, so the range starts at its git tag (`v<version>`, which
+`release.github` creates, or `<version>`). With no such tag it falls back to the
+latest reachable version tag, and with none of those to the whole history. The
+range covers the whole repository: in a monorepo, every commit counts for every
+image.
+
+**What it does per strategy.**
+
+- `git`: a tag on HEAD still names the release. An **untagged HEAD** releases
+  as the latest tag plus the bump (`v1.4.2` + a `feat` → `1.5.0`), and the
+  release publishes, and `release.github` creates, the tag `v1.5.0`. With no
+  version tag at all the first release is `versioning.initial`.
+- `registry` / `ecr`: the bump replaces `patch`/`minor`/`major`; a repository
+  with no releases still starts at `versioning.initial`.
+
+**Nothing to bump.** When no commit since the last release calls for a bump,
+`on_no_changes: skip` (the default) means there is nothing to release: `plan`
+and `release` skip every image with `nothing to release: …`, and nothing is
+built, tagged or announced. `on_no_changes: patch` releases a patch bump
+anyway. A `--snapshot` always builds, as a snapshot of the version it would
+follow.
+
+**Why that version.** `stevedore check`, `plan` (on stderr, and as the plan
+entry's `version_reasons`) and `release` print the version with the commit that
+decided it:
+
+```
+version:  1.5.0 (minor: feat(api): add pagination, a1b2c3d)
+```
+
+`bump: auto` works with the `git`, `registry` and `ecr` strategies; the others
+take the version as given. It cannot be combined with `require_tag`, which
+makes an untagged HEAD validate-only where `auto` makes it a release.
 
 ## Tag-driven releases: `require_tag`
 
@@ -117,7 +181,7 @@ release job serves every push:
 ```yaml
 versioning:
   strategy: ecr
-  bump: minor            # patch (default) | minor | major
+  bump: minor            # patch (default) | minor | major | auto
   # region: us-east-1    # optional; inferred from the ECR host otherwise
   # repo: "..."          # optional; defaults to each image's own repository
 ```

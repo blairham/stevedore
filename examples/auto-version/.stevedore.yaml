@@ -1,0 +1,44 @@
+# Release on merge, with the version chosen by the commits: no hand-pushed tag.
+#
+#   stevedore check            # prints the next version and the commit that decided it
+#   stevedore release          # on main: tags and publishes v<that version>
+#
+# feat: → minor, fix:/perf: → patch, feat!: or a BREAKING CHANGE: footer →
+# major. A merge with nothing bump-worthy (docs:, chore:) releases nothing.
+version: 1
+
+project_name: myapp
+
+versioning:
+  strategy: git
+  bump: auto
+  # Reverts are worth a patch release here; everything else keeps the
+  # Conventional Commits default.
+  bump_types:
+    revert: patch
+  on_no_changes: skip   # or patch: release a patch even when nothing calls for one
+  initial: "0.1.0"      # the first release, when there is no version tag yet
+
+images:
+  - id: myapp
+    dockerfile: Dockerfile
+    context: .
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    repositories:
+      - ghcr.io/acme/myapp
+    tags:
+      - "{{ .Version }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - "{{ .Major }}"
+      - "latest"
+
+changelog:
+  enabled: true
+
+# Creating the GitHub release is what pushes the v<version> tag, so the next
+# run's range starts there.
+release:
+  github:
+    enabled: true
