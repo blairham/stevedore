@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package semver parses and orders semantic versions (semver.org 2.0.0). It is
-// the one parser behind both the git tag selection (internal/gitinfo) and the
+// the one parser behind the git tag selection (internal/gitinfo), the registry
+// version selection and bumps (internal/versioner), and the
 // .Major/.Minor/.Patch template fields (internal/tmpl), so a version that
 // names a release and a version a tag is derived from can never disagree.
 package semver
@@ -136,4 +137,45 @@ func (v Version) Compare(o Version) int {
 		}
 	}
 	return cmp.Compare(len(v.Pre), len(o.Pre))
+}
+
+// String renders v as MAJOR.MINOR.PATCH[-PRERELEASE], without a leading "v".
+// Build metadata is not kept by Parse, so it is not rendered either.
+func (v Version) String() string {
+	s := strconv.Itoa(v.Major) + "." + strconv.Itoa(v.Minor) + "." + strconv.Itoa(v.Patch)
+	if v.IsPrerelease() {
+		s += "-" + v.Prerelease()
+	}
+	return s
+}
+
+// Bump returns the next release after v at part ("major", "minor" or
+// "patch"; anything else is v unchanged). The result is always a release.
+//
+// For a release this increments part and zeroes what follows it. A
+// prerelease already sits below its own core version, so the bump is the
+// smallest release at or above that core which still moves part: 1.3.0-rc.1
+// patch- and minor-bumps to 1.3.0, but 1.3.1-rc.1 minor-bumps to
+// 1.4.0. That is the order semver precedence implies (and what npm's semver
+// does), so a bump never lands below the prerelease it started from.
+func (v Version) Bump(part string) Version {
+	pre := v.IsPrerelease()
+	next := Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
+	switch part {
+	case "major":
+		if !pre || v.Minor != 0 || v.Patch != 0 {
+			next = Version{Major: v.Major + 1}
+		}
+	case "minor":
+		if !pre || v.Patch != 0 {
+			next = Version{Major: v.Major, Minor: v.Minor + 1}
+		}
+	case "patch":
+		if !pre {
+			next.Patch++
+		}
+	default:
+		return v
+	}
+	return next
 }

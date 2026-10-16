@@ -12,6 +12,17 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ## [Unreleased]
 
+### Added
+
+- `versioning.bump: auto` derives the next version from the Conventional
+  Commits since the last release: a breaking change (`!` or a
+  `BREAKING CHANGE:` footer) is a major bump, `feat` a minor, `fix` and `perf`
+  a patch. Under the `git` strategy an untagged HEAD then releases as the
+  latest tag plus that bump instead of as a snapshot; under `registry`/`ecr`
+  it replaces the fixed bump. `bump_types` overrides the mapping,
+  `on_no_changes: skip|patch` says what a release with nothing bump-worthy
+  does, and `check`/`plan` print the commit that decided the version. (#156)
+
 ### Changed
 
 - The release binaries' `checksums.txt` is signed, and their provenance
@@ -26,6 +37,11 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 - `--output json` fails the run if the summary cannot be written to stdout,
   and a write to the GitHub step summary, the Actions outputs file or
   `.gitignore` that only fails at close is reported rather than lost.
+- The `registry`/`ecr` strategies read existing tags with the same semver
+  parser as the `git` strategy, so a tag with a leading zero (`01.2.3`) no
+  longer counts as a release, and one with build metadata (`1.2.3+b`) does.
+  `versioning.bump` is validated under every strategy, not only
+  `registry`/`ecr`.
 
 ## [1.1.0] - 2026-10-05
 

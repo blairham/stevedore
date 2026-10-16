@@ -128,12 +128,25 @@ func newCheckCmd() *cobra.Command {
 			}
 			fmt.Printf("config:   %s\n", o.ConfigPath)
 			fmt.Printf("project:  %s\n", p.Config.ProjectName)
-			fmt.Printf("version:  %s\n", p.Ctx.Version)
+			if r := p.Version.Reason(); r != "" {
+				fmt.Printf("version:  %s (%s)\n", p.Ctx.Version, r)
+			} else {
+				fmt.Printf("version:  %s\n", p.Ctx.Version)
+			}
 			fmt.Printf("branch:   %s (default=%v)\n", p.Ctx.Branch, p.Ctx.IsDefault)
 			fmt.Printf("commit:   %s\n", p.Ctx.ShortCommit)
 			fmt.Println("images:")
 			for _, plan := range p.Plans {
-				fmt.Printf("  %s:\n", plan.Image.ID)
+				// Under per-image registry versioning an image can be
+				// decided differently from the release; say how.
+				switch {
+				case plan.VersionReason == "" || plan.VersionReason == p.Version.Reason():
+					fmt.Printf("  %s:\n", plan.Image.ID)
+				case plan.NoRelease != "":
+					fmt.Printf("  %s: (%s)\n", plan.Image.ID, plan.NoRelease)
+				default:
+					fmt.Printf("  %s: %s (%s)\n", plan.Image.ID, plan.Version, plan.VersionReason)
+				}
 				for _, ref := range plan.Refs {
 					fmt.Printf("    - %s\n", ref)
 				}

@@ -171,10 +171,11 @@ func TestResolveVersion_OnlyPinnedAnchorSkipsRegistry(t *testing.T) {
 	// The release version anchors on the first --only image; with that image
 	// pinned there is nothing left to resolve, so no registry command runs
 	// (a real read would fail here — no credentials in the test env).
-	ver, err := resolveVersion(cfg, gi, Options{
+	d, err := resolveVersion(cfg, gi, Options{
 		Only:        []string{"b"},
 		PinVersions: map[string]string{"b": "2.0.0"},
 	})
+	ver := d.Version
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestLocalPlatform(t *testing.T) {
 // elsewhere and may release from it.
 func TestGuardReleasable_UntaggedHEAD(t *testing.T) {
 	untagged := &gitinfo.Info{LatestTag: "v1.4.0", ShortCommit: "abc1234"}
-	err := guardReleasable(untagged, "git")
+	err := guardReleasable(untagged, config.Versioning{Strategy: "git"})
 	if err == nil {
 		t.Fatal("git strategy on an untagged HEAD: want an error")
 	}
@@ -215,12 +216,24 @@ func TestGuardReleasable_UntaggedHEAD(t *testing.T) {
 		t.Errorf("error = %q, want it to name the missing tag and the stale one", err)
 	}
 	for _, s := range []string{"static", "registry", "ecr", "env", "command"} {
-		if err := guardReleasable(untagged, s); err != nil {
+		if err := guardReleasable(untagged, config.Versioning{Strategy: s}); err != nil {
 			t.Errorf("%s strategy on an untagged HEAD: %v", s, err)
 		}
 	}
-	if err := guardReleasable(&gitinfo.Info{Tag: "v1.4.0", LatestTag: "v1.4.0"}, "git"); err != nil {
+	if err := guardReleasable(
+		&gitinfo.Info{Tag: "v1.4.0", LatestTag: "v1.4.0"},
+		config.Versioning{Strategy: "git"},
+	); err != nil {
 		t.Errorf("git strategy on a tagged HEAD: %v", err)
+	}
+	// bump: auto names an untagged HEAD's release itself, so it may release
+	// one; a dirty tree is still refused.
+	auto := config.Versioning{Strategy: "git", Bump: config.BumpAuto}
+	if err := guardReleasable(untagged, auto); err != nil {
+		t.Errorf("git strategy with bump: auto on an untagged HEAD: %v", err)
+	}
+	if err := guardReleasable(&gitinfo.Info{Dirty: true}, auto); err == nil {
+		t.Error("bump: auto on a dirty tree: want an error")
 	}
 }
 
@@ -238,11 +251,11 @@ func TestResolveVersion_AnchorRepoUsesImageID(t *testing.T) {
 		Images:     []config.Image{{ID: "api", Repositories: []string{"reg/{{ .ID }}"}}},
 	}
 	gi := &gitinfo.Info{Commit: "deadbeefcafe", ShortCommit: "deadbee", Branch: "main"}
-	ver, err := resolveVersion(cfg, gi, Options{})
+	d, err := resolveVersion(cfg, gi, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ver != "1.4.1" {
+	if ver := d.Version; ver != "1.4.1" {
 		t.Errorf("version = %q, want 1.4.1 from reg/api", ver)
 	}
 }

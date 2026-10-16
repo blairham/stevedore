@@ -72,6 +72,8 @@ Standard Go layout: `main.go` → `cmd/` (cobra CLI) → `internal/` (the logic)
 | `internal/sbomdiff` | dependency diff between two SBOMs |
 | `internal/verifier` | verify a pushed image's signature/attestation/provenance |
 | `internal/promote` | `stevedore promote` — copy a released digest to other tags/repos (oras + crane), verified |
+| `internal/conventional` | Conventional Commits parsing + bump selection (shared by changelog and `bump: auto`) |
+| `internal/semver` | the one semver parser/orderer/bumper |
 | `internal/changelog` | conventional-commit changelog |
 | `internal/changed` | git-diff change detection + glob matching |
 | `internal/fingerprint` | content-hash change detection (`--only-changed`) |

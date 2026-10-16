@@ -72,3 +72,56 @@ func TestParseParts(t *testing.T) {
 		t.Errorf("build metadata is not a prerelease: %+v", r)
 	}
 }
+
+func TestVersionString(t *testing.T) {
+	for in, want := range map[string]string{
+		"v1.2.3":          "1.2.3",
+		"0.0.0":           "0.0.0",
+		"1.2.3-rc.1":      "1.2.3-rc.1",
+		"v1.2.3+build.5":  "1.2.3",
+		"1.2.3-rc.1+meta": "1.2.3-rc.1",
+	} {
+		v, ok := Parse(in)
+		if !ok {
+			t.Fatalf("Parse(%q) rejected", in)
+		}
+		if got := v.String(); got != want {
+			t.Errorf("Parse(%q).String() = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestVersionBump(t *testing.T) {
+	cases := []struct{ in, part, want string }{
+		{"1.4.9", "patch", "1.4.10"},
+		{"1.4.9", "minor", "1.5.0"},
+		{"1.4.9", "major", "2.0.0"},
+		{"0.0.0", "patch", "0.0.1"},
+		{"0.9.3", "major", "1.0.0"},
+		{"1.4.9", "none", "1.4.9"},
+		{"1.4.9", "", "1.4.9"},
+		// A prerelease bumps to the release it was heading for, when that
+		// release still moves the requested part.
+		{"1.3.0-rc.1", "patch", "1.3.0"},
+		{"1.3.0-rc.1", "minor", "1.3.0"},
+		{"1.3.0-rc.1", "major", "2.0.0"},
+		{"2.0.0-rc.1", "major", "2.0.0"},
+		{"2.0.0-rc.1", "minor", "2.0.0"},
+		{"1.3.1-rc.1", "patch", "1.3.1"},
+		{"1.3.1-rc.1", "minor", "1.4.0"},
+		{"1.3.1-rc.1", "major", "2.0.0"},
+	}
+	for _, tc := range cases {
+		v, ok := Parse(tc.in)
+		if !ok {
+			t.Fatalf("Parse(%q) rejected", tc.in)
+		}
+		got := v.Bump(tc.part)
+		if got.String() != tc.want {
+			t.Errorf("Bump(%s, %q) = %s, want %s", tc.in, tc.part, got, tc.want)
+		}
+		if tc.part != "none" && tc.part != "" && got.Compare(v) <= 0 {
+			t.Errorf("Bump(%s, %q) = %s, not above %s", tc.in, tc.part, got, tc.in)
+		}
+	}
+}

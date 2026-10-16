@@ -330,6 +330,19 @@ func (i *Info) ReleaseTag(version string) string {
 	return "v" + version
 }
 
+// VersionTag returns the tag that names version in the repository at dir —
+// "v"+version, or version itself — or "" when neither tag exists. A
+// non-git versioning strategy uses it to find where the release it bumps
+// from was cut, since `release.github` tags each release "v"+version.
+func VersionTag(ctx context.Context, dir, version string) string {
+	for _, tag := range []string{"v" + version, version} {
+		if _, err := run(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag+"^{commit}"); err == nil {
+			return tag
+		}
+	}
+	return ""
+}
+
 // CommitsSince returns commit subjects (and bodies) reachable from HEAD but not
 // from ref. If ref is empty, all commits are returned. Newest first.
 func CommitsSince(ctx context.Context, dir, ref string) ([]Commit, error) {

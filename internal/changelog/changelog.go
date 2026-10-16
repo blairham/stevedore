@@ -8,10 +8,12 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/blairham/stevedore/internal/config"
+	"github.com/blairham/stevedore/internal/conventional"
 	"github.com/blairham/stevedore/internal/gitinfo"
 )
 
@@ -32,13 +34,6 @@ var groups = []group{
 	{"Documentation", []string{"docs"}},
 	{otherGroup, nil}, // catch-all
 }
-
-var conventional = regexp.MustCompile(`^(\w+)(\([^)]*\))?(!)?:\s*(.+)$`)
-
-// breakingFooter is the Conventional Commits footer that marks a breaking
-// change from the body, as `!` does from the subject. The spec requires the
-// token in capitals, and accepts BREAKING-CHANGE as a synonym.
-var breakingFooter = regexp.MustCompile(`(?m)^BREAKING[ -]CHANGE:`)
 
 // Generate renders a Markdown changelog for commits since the previous tag.
 func Generate(ctx context.Context, cfg config.Changelog, gi *gitinfo.Info, dir string) (string, error) {
@@ -106,35 +101,25 @@ func Generate(ctx context.Context, cfg config.Changelog, gi *gitinfo.Info, dir s
 }
 
 // classify returns the changelog group title and formatted line for a commit.
+// What a commit's type is and whether it is breaking is internal/conventional's
+// call, the same one versioning.bump: auto makes.
 func classify(c gitinfo.Commit) (string, string) {
-	m := conventional.FindStringSubmatch(c.Subject)
+	msg := conventional.Parse(c.Subject, c.Body)
 	short := c.SHA
 	if len(short) > 7 {
 		short = short[:7]
 	}
-	breaking := breakingFooter.MatchString(c.Body)
-	if m == nil {
-		line := c.Subject
-		if breaking {
-			line = "**BREAKING** " + line
-		}
-		return otherGroup, fmt.Sprintf("%s (%s)", line, short)
+	line := msg.Description
+	if msg.Scope != "" {
+		line = msg.Scope + ": " + line
 	}
-	// Types are case-insensitive in Conventional Commits: "Feat:" is a feature.
-	typ, scope, bang, desc := strings.ToLower(m[1]), m[2], m[3], m[4]
-	line := desc
-	if scope != "" {
-		line = strings.Trim(scope, "()") + ": " + desc
-	}
-	if bang != "" || breaking {
+	if msg.Breaking {
 		line = "**BREAKING** " + line
 	}
 	line = fmt.Sprintf("%s (%s)", line, short)
 	for _, g := range groups {
-		for _, t := range g.types {
-			if t == typ {
-				return g.title, line
-			}
+		if slices.Contains(g.types, msg.Type) {
+			return g.title, line
 		}
 	}
 	return otherGroup, line
