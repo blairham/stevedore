@@ -138,9 +138,12 @@ func newCheckCmd() *cobra.Command {
 			fmt.Println("images:")
 			for _, plan := range p.Plans {
 				// Under per-image registry versioning an image can be
-				// decided differently from the release; say how.
+				// decided differently from the release — under bump: auto
+				// by its own commits — so say how. The same reason over a
+				// different base is still a different version.
 				switch {
-				case plan.VersionReason == "" || plan.VersionReason == p.Version.Reason():
+				case plan.VersionReason == "" ||
+					(plan.VersionReason == p.Version.Reason() && plan.Version == p.Ctx.Version):
 					fmt.Printf("  %s:\n", plan.Image.ID)
 				case plan.NoRelease != "":
 					fmt.Printf("  %s: (%s)\n", plan.Image.ID, plan.NoRelease)

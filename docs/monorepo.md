@@ -144,6 +144,29 @@ writes it: `--no-push`, snapshot builds (including `stevedore build`) and
 `--split` legs read the file but leave it as it was, so validating a change never
 makes the next real release skip it. The `merge` run records it for a split release.
 
+## Versions from each image's own commits
+
+With per-image registry versioning (`strategy: registry` or `ecr`, no
+`versioning.repo`) and `bump: auto`, each image's next version is decided by the
+Conventional Commits that touched **its** scope — the same `paths`, `.csproj`
+graph, build-context-minus-dockerignore fallback and `shared_paths` that change
+detection uses above — since **its** last release (its release marker under
+`marker_refs`, else its version's git tag):
+
+```text
+feat(api): add pagination      api/page.go        → api     1.4.0 → 1.5.0
+fix(worker): retry on 503      worker/retry.go    → worker  0.3.2 → 0.3.3
+feat: go 1.27                  go.mod (shared)    → both minor
+docs: readme                   README.md          → neither
+```
+
+An image with no bump-worthy commit follows `on_no_changes` by itself (`skip`:
+nothing to release, so `plan` skips it; `patch`: a patch release), and
+`check`/`plan` show each image's version with the commit that decided it. Set
+`versioning.repo` for one unified version instead: that one version reflects
+every change, so its commit range stays repository-wide. See
+[versioning](versioning.md#versions-from-commits-bump-auto).
+
 ## Build once, tag many
 
 Images whose build spec is identical (same Dockerfile, context, target, platforms,

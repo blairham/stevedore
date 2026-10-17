@@ -44,6 +44,41 @@ func FilesSince(ctx context.Context, dir, ref string) ([]string, error) {
 	return files, nil
 }
 
+// FilesByCommit returns, for each non-merge commit reachable from HEAD but not
+// from ref (every commit when ref is ""), the repo-relative paths it touched,
+// keyed by full SHA. A commit that touched nothing (--allow-empty) maps to no
+// files. Paths are reported as FilesSince reports them: renames split into a
+// deletion and an addition, names verbatim and NUL-separated.
+func FilesByCommit(ctx context.Context, dir, ref string) (map[string][]string, error) {
+	args := []string{
+		"-c", "core.quotePath=false",
+		"log", "--no-merges", "--no-renames", "--name-only", "-z", "--pretty=format:%x1e%H",
+	}
+	if ref != "" {
+		args = append(args, ref+"..HEAD")
+	}
+	out, err := git(ctx, dir, append(args, "--")...)
+	if err != nil {
+		return nil, fmt.Errorf("git log since %s: %w", ref, err)
+	}
+	files := map[string][]string{}
+	for rec := range strings.SplitSeq(out, "\x1e") {
+		sha, names, _ := strings.Cut(rec, "\n")
+		sha = strings.Trim(sha, "\x00\n ")
+		if sha == "" {
+			continue
+		}
+		var touched []string
+		for name := range strings.SplitSeq(names, "\x00") {
+			if name = strings.TrimPrefix(name, "\n"); name != "" {
+				touched = append(touched, name)
+			}
+		}
+		files[sha] = touched
+	}
+	return files, nil
+}
+
 // MarkerRef returns the marker ref name for an image id.
 func MarkerRef(prefix, id string) string {
 	return prefix + id

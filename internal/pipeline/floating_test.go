@@ -142,7 +142,7 @@ func TestResolvePlans_PrereleaseIsPerImage(t *testing.T) {
 		{ID: "a", Repositories: []string{"reg/a"}, Tags: []string{"{{ .Version }}", "latest"}},
 		{ID: "b", Repositories: []string{"reg/b"}, Tags: []string{"{{ .Version }}", "latest"}},
 	}}
-	versionFor := func(repo string) (string, error) {
+	versionFor := func(_ config.Image, repo string) (string, error) {
 		return map[string]string{"reg/a": "2.0.0-beta.1", "reg/b": "1.4.0"}[repo], nil
 	}
 	plans, err := resolvePlans(cfg, newCtx("main", false), false, versionFor, nil, nil)

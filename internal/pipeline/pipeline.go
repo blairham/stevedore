@@ -184,7 +184,8 @@ func Prepare(o Options) (*Prepared, error) {
 
 	// Resolve the release version via the configured strategy (git, registry,
 	// static, env, or command) and let it drive the template context.
-	dec, err := resolveVersion(cfg, gi, o)
+	commits := newCommitSource(o, cfg, gi)
+	dec, err := resolveVersion(cfg, gi, o, commits)
 	if err != nil {
 		return nil, err
 	}
@@ -195,11 +196,11 @@ func Prepare(o Options) (*Prepared, error) {
 	// Under the registry strategy each image is versioned from its own repo;
 	// versionFor is nil for other strategies (one version for all images).
 	var (
-		versionFor func(string) (string, error)
+		versionFor versionResolver
 		decisions  map[string]versioner.Decision
 	)
 	if isRegistryStrategy(cfg.Versioning.Strategy) {
-		versionFor, decisions, err = imageVersionResolver(cfg, gi, o, ctx)
+		versionFor, decisions, err = imageVersionResolver(cfg, gi, o, ctx, commits)
 		if err != nil {
 			return nil, err
 		}
@@ -231,9 +232,8 @@ func reportVersion(p *Prepared) {
 }
 
 // applyDecisions records on each plan why it has its version and whether it
-// has anything to release: from its own repository's decision under per-image
-// registry versioning (decisions, keyed by the repository the version was
-// read from), otherwise from the release's. A pinned image was decided by
+// has anything to release: from its own decision under per-image registry
+// versioning (decisions, keyed by image ID), otherwise from the release's. A pinned image was decided by
 // whoever pinned it — the plan run — so it is left as it is.
 func applyDecisions(
 	plans []ImagePlan,
@@ -246,10 +246,8 @@ func applyDecisions(
 			continue
 		}
 		d := release
-		if len(plans[i].Repos) > 0 {
-			if own, ok := decisions[plans[i].Repos[0]]; ok {
-				d = own
-			}
+		if own, ok := decisions[plans[i].Image.ID]; ok {
+			d = own
 		}
 		plans[i].VersionReason = d.Reason()
 		if d.NothingToRelease {
@@ -266,26 +264,6 @@ func nothingToRelease(plans []ImagePlan) bool {
 		}
 	}
 	return len(plans) > 0
-}
-
-// commitLister lists the commits a bump: auto release after base carries:
-// those since the git tag of the release named base. Under the git strategy
-// that is the latest reachable tag. Under registry/ecr base comes from the
-// registry, and its tag is the one release.github created ("v"+base); with no
-// such tag the range falls back to the latest reachable version tag, and with
-// none of those to the whole history.
-//
-// The list is repository-wide: every commit counts for every image.
-func commitLister(o Options, gi *gitinfo.Info) func(string) ([]gitinfo.Commit, error) {
-	return func(base string) ([]gitinfo.Commit, error) {
-		since := gi.LatestTag
-		if strings.TrimPrefix(since, "v") != base {
-			if tag := gitinfo.VersionTag(o.context(), o.Dir, base); tag != "" {
-				since = tag
-			}
-		}
-		return gitinfo.CommitsSince(o.context(), o.Dir, since)
-	}
 }
 
 // loadConfig loads and validates the config, including the image IDs that
@@ -309,12 +287,17 @@ func loadConfig(o Options) (*config.Config, error) {
 // bump). The other strategies apply one version to every image and need none,
 // so Prepare only calls this under the registry strategy. When versioning.repo
 // is pinned, all images resolve from that one repo (i.e. a unified version).
+//
+// Under bump: auto each image's bump is decided by the commits that touched
+// what it is built from (see commitSource.forImage); the decisions are
+// returned keyed by image ID.
 func imageVersionResolver(
 	cfg *config.Config,
 	gi *gitinfo.Info,
 	o Options,
 	ctx *tmpl.Context,
-) (func(string) (string, error), map[string]versioner.Decision, error) {
+	commits *commitSource,
+) (versionResolver, map[string]versioner.Decision, error) {
 	vcfg := cfg.Versioning
 	if vcfg.Repo != "" {
 		rendered, err := tmpl.Render(vcfg.Repo, ctx)
@@ -325,20 +308,24 @@ func imageVersionResolver(
 	}
 	r := run.New(o.context(), o.DryRun, o.Verbose)
 	list := tagLister(cfg, r)
-	commits := commitLister(o, gi)
 	decisions := map[string]versioner.Decision{}
 	warned := false
-	return func(repo string) (string, error) {
-		d, err := versioner.Decide(versioner.Input{
-			Cfg:      vcfg,
-			Git:      gi,
-			Snapshot: o.Snapshot,
-			Repo:     repo, // ignored when vcfg.Repo is pinned
-			Getenv:   os.Getenv,
-			ListTags: list,
-			RunCmd:   func(command string) (string, error) { return r.Capture("sh", "-c", command) },
-			Commits:  commits,
-		})
+	return func(img config.Image, repo string) (string, error) {
+		since, scope, err := commits.forImage(img)
+		var d versioner.Decision
+		if err == nil {
+			d, err = versioner.Decide(versioner.Input{
+				Cfg:      vcfg,
+				Git:      gi,
+				Snapshot: o.Snapshot,
+				Repo:     repo, // ignored when vcfg.Repo is pinned
+				Getenv:   os.Getenv,
+				ListTags: list,
+				RunCmd:   func(command string) (string, error) { return r.Capture("sh", "-c", command) },
+				Commits:  since,
+				Scope:    scope,
+			})
+		}
 		if err != nil && o.SoftVersion {
 			if !warned {
 				fmt.Fprintf(os.Stderr, "warning: could not resolve image versions (%v); showing placeholder\n", err)
@@ -347,7 +334,7 @@ func imageVersionResolver(
 			return unresolvedVersion, nil
 		}
 		if err == nil {
-			decisions[repo] = d
+			decisions[img.ID] = d
 		}
 		return d.Version, err
 	}, decisions, nil
@@ -443,7 +430,7 @@ func resolvePlans(
 	cfg *config.Config,
 	ctx *tmpl.Context,
 	snapshot bool,
-	versionFor func(string) (string, error),
+	versionFor versionResolver,
 	pins map[string]string,
 	only []string,
 ) ([]ImagePlan, error) {
@@ -589,7 +576,7 @@ func resolvePlan(
 	img config.Image,
 	ctx *tmpl.Context,
 	fp floatingPolicy,
-	versionFor func(string) (string, error),
+	versionFor versionResolver,
 	pins map[string]string,
 	withheld *withheldTags,
 ) (ImagePlan, error) {
@@ -600,7 +587,7 @@ func resolvePlan(
 	if err != nil {
 		return ImagePlan{}, fmt.Errorf("image %s repositories: %w", img.ID, err)
 	}
-	imgVersion, imgCtx, err := imageVersion(img.ID, repos, ctx, versionFor, pins)
+	imgVersion, imgCtx, err := imageVersion(img, repos, ctx, versionFor, pins)
 	if err != nil {
 		return ImagePlan{}, err
 	}
@@ -656,19 +643,19 @@ func resolvePlan(
 // versioning it comes from the image's own repo; otherwise it's the release
 // version.
 func imageVersion(
-	id string,
+	img config.Image,
 	repos []string,
 	ctx *tmpl.Context,
-	versionFor func(string) (string, error),
+	versionFor versionResolver,
 	pins map[string]string,
 ) (string, *tmpl.Context, error) {
-	if pin, ok := pins[id]; ok {
+	if pin, ok := pins[img.ID]; ok {
 		return pin, ctx.WithVersion(pin), nil
 	}
 	if versionFor != nil && len(repos) > 0 {
-		v, err := versionFor(repos[0])
+		v, err := versionFor(img, repos[0])
 		if err != nil {
-			return "", nil, fmt.Errorf("image %s version: %w", id, err)
+			return "", nil, fmt.Errorf("image %s version: %w", img.ID, err)
 		}
 		return v, ctx.WithVersion(v), nil
 	}
@@ -2162,17 +2149,21 @@ func toSpec(plan ImagePlan, dir string, push, load bool, prov config.Provenance)
 // resolveVersion derives the release version using the configured strategy. The
 // crane/command hooks are read-only queries, so they run even in dry-run mode to
 // give `check` and dry-runs an accurate preview.
-func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (versioner.Decision, error) {
+//
+// Under per-image bump: auto (see perImageBump) the release version is the
+// anchor image's, so its commits are scoped to that image as its plan's are.
+func resolveVersion(
+	cfg *config.Config,
+	gi *gitinfo.Info,
+	o Options,
+	commits *commitSource,
+) (versioner.Decision, error) {
 	r := run.New(o.context(), o.DryRun, o.Verbose)
 
 	// Anchor the release-level version on the first *selected* image so a
 	// matrix job (`release --only ...`) never queries a repository outside its
 	// slice of the config.
 	first := firstSelectedImage(cfg, o.Only)
-	var defaultRepo string
-	if first != nil && len(first.Repositories) > 0 {
-		defaultRepo = first.Repositories[0]
-	}
 
 	vcfg := cfg.Versioning
 	// Registry versioning with the anchor image pinned: the pin is the
@@ -2184,47 +2175,64 @@ func resolveVersion(cfg *config.Config, gi *gitinfo.Info, o Options) (versioner.
 		}
 	}
 
-	repo := vcfg.Repo
-	if repo == "" {
-		repo = defaultRepo
+	repo, err := releaseVersionRepo(cfg, gi, o, first)
+	if err != nil {
+		return versioner.Decision{}, err
 	}
-	// The registry/ecr strategies query a repo by name, so render any templating
-	// (e.g. {{ .Env.REGISTRY }}) to a concrete reference before it is queried.
-	if isRegistryStrategy(vcfg.Strategy) && repo != "" {
-		now := o.Now
-		if now.IsZero() {
-			now = time.Now()
-		}
-		rctx := tmpl.NewContext(cfg.ProjectName, cfg.DefaultBranch, gi, o.Snapshot, now, envMap())
-		if vcfg.Repo == "" && first != nil {
-			// The anchor image's own repository, which may spell its id.
-			rctx = rctx.WithImage(first.ID)
-		}
-		rendered, err := tmpl.Render(repo, rctx)
-		if err != nil {
-			return versioner.Decision{}, fmt.Errorf("render versioning repo %q: %w", repo, err)
-		}
-		repo = rendered
+	if isRegistryStrategy(vcfg.Strategy) {
 		vcfg.Repo = "" // resolved into Input.Repo below
 	}
 
-	d, err := versioner.Decide(versioner.Input{
-		Cfg:      vcfg,
-		Git:      gi,
-		Snapshot: o.Snapshot,
-		Repo:     repo,
-		Getenv:   os.Getenv,
-		ListTags: tagLister(cfg, r),
-		RunCmd: func(command string) (string, error) {
-			return r.Capture("sh", "-c", command)
-		},
-		Commits: commitLister(o, gi),
-	})
+	since, scope, err := commits.release(first)
+	var d versioner.Decision
+	if err == nil {
+		d, err = versioner.Decide(versioner.Input{
+			Cfg:      vcfg,
+			Git:      gi,
+			Snapshot: o.Snapshot,
+			Repo:     repo,
+			Getenv:   os.Getenv,
+			ListTags: tagLister(cfg, r),
+			RunCmd: func(command string) (string, error) {
+				return r.Capture("sh", "-c", command)
+			},
+			Commits: since,
+			Scope:   scope,
+		})
+	}
 	if err != nil && o.SoftVersion {
 		fmt.Fprintf(os.Stderr, "warning: could not resolve version (%v); showing placeholder\n", err)
 		return versioner.Decision{Version: unresolvedVersion}, nil
 	}
 	return d, err
+}
+
+// releaseVersionRepo is the repository the release-level version is read
+// from: versioning.repo, else the anchor image's (first) first repository.
+// The registry/ecr strategies query it by name, so any templating (e.g.
+// {{ .Env.REGISTRY }}) is rendered to a concrete reference first.
+func releaseVersionRepo(cfg *config.Config, gi *gitinfo.Info, o Options, first *config.Image) (string, error) {
+	repo := cfg.Versioning.Repo
+	if repo == "" && first != nil && len(first.Repositories) > 0 {
+		repo = first.Repositories[0]
+	}
+	if !isRegistryStrategy(cfg.Versioning.Strategy) || repo == "" {
+		return repo, nil
+	}
+	now := o.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	rctx := tmpl.NewContext(cfg.ProjectName, cfg.DefaultBranch, gi, o.Snapshot, now, envMap())
+	if cfg.Versioning.Repo == "" && first != nil {
+		// The anchor image's own repository, which may spell its id.
+		rctx = rctx.WithImage(first.ID)
+	}
+	rendered, err := tmpl.Render(repo, rctx)
+	if err != nil {
+		return "", fmt.Errorf("render versioning repo %q: %w", repo, err)
+	}
+	return rendered, nil
 }
 
 // unresolvedVersion is the placeholder shown by `check` when a registry/ecr

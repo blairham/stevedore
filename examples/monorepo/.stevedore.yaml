@@ -59,9 +59,14 @@ change_detection:
 
 # Each image versions from its own registry repository, so api can be at 1.9.0
 # while worker is at 0.3.2. Set `repo:` to pin one repo for a unified version.
+#
+# bump: auto picks each image's bump from the Conventional Commits that touched
+# ITS paths (and shared_paths) since ITS release marker: a feat in
+# services/api/** makes api a minor release and leaves worker alone. An image
+# with nothing bump-worthy has nothing to release and is skipped.
 versioning:
   strategy: registry
-  bump: patch
+  bump: auto
   initial: "0.1.0"
 
 scan:
