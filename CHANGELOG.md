@@ -22,6 +22,15 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
   it replaces the fixed bump. `bump_types` overrides the mapping,
   `on_no_changes: skip|patch` says what a release with nothing bump-worthy
   does, and `check`/`plan` print the commit that decided the version. (#156)
+- In a monorepo versioned per image (`registry`/`ecr` without
+  `versioning.repo`), `bump: auto` decides each image's bump from only the
+  commits that touched what it is built from — change detection's scope:
+  `paths`, the `.csproj` graph, or the build context minus its dockerignore,
+  plus `shared_paths` — since its own last release (its release marker under
+  `marker_refs`). A `feat` in `api/` no longer bumps `worker`;
+  `on_no_changes` applies per image, and `check`/`plan` show each image's
+  version and deciding commit. A unified `versioning.repo` keeps the
+  repository-wide range. (#157)
 
 ### Changed
 

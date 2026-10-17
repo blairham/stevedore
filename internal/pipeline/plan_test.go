@@ -102,7 +102,7 @@ func TestResolvePlans_OnlySkipsExcludedImages(t *testing.T) {
 	}
 	// Excluded images must never reach version resolution — a matrix job's
 	// credentials may only have registry access to its own repositories.
-	versionFor := func(repo string) (string, error) {
+	versionFor := func(_ config.Image, repo string) (string, error) {
 		if repo == "reg/b" {
 			t.Errorf("versionFor called for excluded image repo %s", repo)
 		}
@@ -118,7 +118,7 @@ func TestResolvePlans_OnlySkipsExcludedImages(t *testing.T) {
 	if got[0].Version != "1.0.1" || got[1].Version != "3.0.3" {
 		t.Errorf("versions = %s/%s, want 1.0.1/3.0.3", got[0].Version, got[1].Version)
 	}
-	anyVersion := func(string) (string, error) { return "0.0.1", nil }
+	anyVersion := func(config.Image, string) (string, error) { return "0.0.1", nil }
 	if all, _ := resolvePlans(cfg, ctx, false, anyVersion, nil, nil); len(all) != 3 {
 		t.Errorf("empty filter should pass everything through, got %d", len(all))
 	}

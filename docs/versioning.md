@@ -123,9 +123,29 @@ the notes; it has no effect on the bump.
 version tag. Under `registry`/`ecr` the version being bumped comes from the
 registry, so the range starts at its git tag (`v<version>`, which
 `release.github` creates, or `<version>`). With no such tag it falls back to the
-latest reachable version tag, and with none of those to the whole history. The
-range covers the whole repository: in a monorepo, every commit counts for every
-image.
+latest reachable version tag, and with none of those to the whole history.
+
+**In a monorepo, each image bumps by its own commits.** Under `registry`/`ecr`
+every image is versioned from its own repository, and with `bump: auto` its
+bump is decided only by the commits that touched what it is built from — the
+same scope change detection uses: its `paths` (or the `.csproj` graph), else
+its build context minus its dockerignore, plus `change_detection.shared_paths`.
+A `feat` under `api/` makes `api` a minor release and leaves `worker` alone; a
+`fix` under `worker/` in the same push makes `worker` a patch; a commit to a
+file both are built from (a shared `go.mod`) bumps both. An image with a remote
+build context cannot be narrowed and sees every commit.
+
+- An image's range starts at **its own last release**: its release marker
+  (`refs/releases/image/<id>`) when `change_detection.marker_refs` is on and the
+  marker exists, otherwise the git tag of the version it bumps from, as above.
+  Per-image versions rarely each get a git tag, so `marker_refs` is what makes
+  the range exact.
+- `on_no_changes` applies to each image by itself: with `skip`, an image none
+  of whose commits calls for a bump has nothing to release and is skipped while
+  the others release; with `patch`, it is released as a patch.
+- A pinned `versioning.repo` is one **unified** version for every image, and it
+  has to reflect every change, so its range stays repository-wide. So does the
+  `git` strategy, which has one tag for the whole release.
 
 **What it does per strategy.**
 
@@ -149,7 +169,17 @@ decided it:
 
 ```
 version:  1.5.0 (minor: feat(api): add pagination, a1b2c3d)
+images:
+  api:
+    - ghcr.io/acme/api:1.5.0
+  worker: 0.3.3 (patch: fix(worker): retry on 503, e4f5a6b)
+    - ghcr.io/acme/worker:0.3.3
 ```
+
+The release line is the first image's; under per-image versioning `check` adds
+the version and deciding commit of every image that differs from it, and an
+image with nothing to release says so, naming the scope it was narrowed to
+(`nothing to release: no commit since 0.3.2 touching services/worker/**, …`).
 
 `bump: auto` works with the `git`, `registry` and `ecr` strategies; the others
 take the version as given. It cannot be combined with `require_tag`, which

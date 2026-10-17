@@ -19,7 +19,7 @@ stevedore release            # marker_refs: each image vs its own last release
 `marker_refs` is the one to reach for in CI. The baseline lives in git as
 `refs/releases/image/<id>`, so a fresh checkout knows it, and an image that has
 not changed since *its own* last release does not rebuild just because a
-neighbour released.
+neighbor released.
 
 ## Scoping is the whole game
 
@@ -32,6 +32,15 @@ loose direction and you rebuild everything, which is where you started.
 For .NET, `change_detection.resolver: dotnet` derives `paths` from the `.csproj`
 `<ProjectReference>` graph transitively, so shared libraries are handled without
 hand-maintaining the lists. See [`docs/monorepo.md`](../../docs/monorepo.md).
+
+## Versions from each service's own commits
+
+`versioning.bump: auto` reads the Conventional Commits since each image's own
+release marker, keeping only those that touched that image's `paths` or the
+`shared_paths`. A `feat:` in `services/api/` makes `api` a minor release and
+leaves `worker` where it is; a `fix:` to `libs/shared/` patches every service
+that lists it; a push with nothing bump-worthy for an image skips it. `stevedore
+check` prints each image's version with the commit that decided it.
 
 ## Build-once grouping
 

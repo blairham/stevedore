@@ -233,6 +233,59 @@ func TestFilesSinceRenamesAndNonASCII(t *testing.T) {
 	}
 }
 
+// FilesByCommit attributes each path to the commit that touched it: a rename
+// as both sides, a non-ASCII name verbatim, an empty commit as no files.
+func TestFilesByCommit(t *testing.T) {
+	clone, _, git := markerRepos(t)
+	git(clone, "config", "user.email", "t@t.co")
+	git(clone, "config", "user.name", "t")
+	for _, d := range []string{"svc-a", "shared", "svc-b"} {
+		if err := os.MkdirAll(filepath.Join(clone, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitFile(t, git, clone, "svc-a/util.go")
+	base := git(clone, "rev-parse", "HEAD")
+	git(clone, "mv", "svc-a/util.go", "shared/util.go")
+	git(clone, "commit", "-q", "-m", "move util")
+	moved := git(clone, "rev-parse", "HEAD")
+	commitFile(t, git, clone, "svc-b/café.txt")
+	added := git(clone, "rev-parse", "HEAD")
+	git(clone, "commit", "-q", "--allow-empty", "-m", "empty")
+	empty := git(clone, "rev-parse", "HEAD")
+
+	got, err := FilesByCommit(t.Context(), clone, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		moved: "shared/util.go svc-a/util.go",
+		added: "svc-b/café.txt",
+		empty: "",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("FilesByCommit = %q, want %d commits since base", got, len(want))
+	}
+	for sha, files := range want {
+		names, ok := got[sha]
+		if !ok {
+			t.Errorf("commit %.7s missing from %q", sha, got)
+			continue
+		}
+		if g := strings.Join(names, " "); g != files {
+			t.Errorf("commit %.7s files = %q, want %q", sha, g, files)
+		}
+	}
+
+	all, err := FilesByCommit(t.Context(), clone, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := all[base]; !ok || len(all) != len(want)+2 {
+		t.Errorf("FilesByCommit(\"\") = %q, want every commit (base and the root too)", all)
+	}
+}
+
 func TestMatch(t *testing.T) {
 	patterns := []string{"Acme.Reports/**", "Directory.*", "*.sln"}
 	cases := map[string]bool{

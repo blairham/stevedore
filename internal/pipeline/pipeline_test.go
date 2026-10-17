@@ -96,7 +96,7 @@ func TestResolvePlans_PerImageVersion(t *testing.T) {
 		},
 	}
 	// Each repo resolves to its own version.
-	versionFor := func(repo string) (string, error) {
+	versionFor := func(_ config.Image, repo string) (string, error) {
 		return map[string]string{"reg/checkout": "0.0.336", "reg/billing": "0.0.285"}[repo], nil
 	}
 	plans, err := resolvePlans(cfg, ctx, false, versionFor, nil, nil)
@@ -141,7 +141,7 @@ func TestResolvePlans_PinnedVersionWins(t *testing.T) {
 		},
 	}
 	// The resolver must not be consulted for a pinned image.
-	versionFor := func(repo string) (string, error) {
+	versionFor := func(_ config.Image, repo string) (string, error) {
 		if repo == "reg/checkout" {
 			t.Errorf("versionFor called for pinned image repo %s", repo)
 		}
@@ -171,10 +171,11 @@ func TestResolveVersion_OnlyPinnedAnchorSkipsRegistry(t *testing.T) {
 	// The release version anchors on the first --only image; with that image
 	// pinned there is nothing left to resolve, so no registry command runs
 	// (a real read would fail here — no credentials in the test env).
-	d, err := resolveVersion(cfg, gi, Options{
+	o := Options{
 		Only:        []string{"b"},
 		PinVersions: map[string]string{"b": "2.0.0"},
-	})
+	}
+	d, err := resolveVersion(cfg, gi, o, newCommitSource(o, cfg, gi))
 	ver := d.Version
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +252,7 @@ func TestResolveVersion_AnchorRepoUsesImageID(t *testing.T) {
 		Images:     []config.Image{{ID: "api", Repositories: []string{"reg/{{ .ID }}"}}},
 	}
 	gi := &gitinfo.Info{Commit: "deadbeefcafe", ShortCommit: "deadbee", Branch: "main"}
-	d, err := resolveVersion(cfg, gi, Options{})
+	d, err := resolveVersion(cfg, gi, Options{}, newCommitSource(Options{}, cfg, gi))
 	if err != nil {
 		t.Fatal(err)
 	}

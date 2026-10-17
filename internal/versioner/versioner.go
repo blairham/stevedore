@@ -40,6 +40,10 @@ type Input struct {
 	// filtering to what one image is built from — is the caller's decision;
 	// the resolver only classifies them.
 	Commits func(base string) ([]gitinfo.Commit, error)
+	// Scope names what Commits was narrowed to — one image's paths or
+	// build context in a monorepo — for Reason; "" when it lists every
+	// commit in the repository.
+	Scope string
 }
 
 // Decision is a resolved version and, under bump: auto, why it is that
@@ -66,6 +70,9 @@ type Decision struct {
 	// and a real release has nothing to publish. Version is then Base. A
 	// snapshot is never nothing to release.
 	NothingToRelease bool
+	// Scope is Input.Scope: what the commits were narrowed to, or "" for
+	// the whole repository.
+	Scope string
 }
 
 // Reason explains the decision for check and plan output: the bump and the
@@ -78,15 +85,27 @@ func (d Decision) Reason() string {
 	case !d.Auto:
 		return ""
 	case d.NothingToRelease:
-		return fmt.Sprintf("nothing to release: no commit since %s calls for a version bump", d.Base)
+		return fmt.Sprintf("nothing to release: no commit since %s%s calls for a version bump", d.Base, d.touching())
 	case d.Bump.Level == conventional.None:
-		return fmt.Sprintf("%s: no commit since %s calls for a bump (versioning.on_no_changes: patch)", d.Level, d.Base)
+		return fmt.Sprintf(
+			"%s: no commit since %s%s calls for a bump (versioning.on_no_changes: patch)",
+			d.Level, d.Base, d.touching(),
+		)
 	}
 	short := d.Bump.Commit.SHA
 	if len(short) > 7 {
 		short = short[:7]
 	}
 	return fmt.Sprintf("%s: %s, %s", d.Level, d.Bump.Commit.Subject, short)
+}
+
+// touching qualifies "no commit since X" with the scope the commits were
+// narrowed to, if any.
+func (d Decision) touching() string {
+	if d.Scope == "" {
+		return ""
+	}
+	return " touching " + d.Scope
 }
 
 // ErrNoCommits is returned under bump: auto when Input has no Commits hook.
@@ -204,6 +223,7 @@ func auto(base semver.Version, in Input) (Decision, error) {
 		return Decision{}, err
 	}
 	d := Next(base, conventional.Select(commits, rules), in.Cfg.OnNoChanges)
+	d.Scope = in.Scope
 	if d.NothingToRelease && in.Snapshot {
 		// A snapshot has no release to skip: it builds the code as it is,
 		// under the version it would follow.
