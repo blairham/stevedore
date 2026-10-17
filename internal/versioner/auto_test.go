@@ -281,7 +281,10 @@ func TestNext(t *testing.T) {
 		{conventional.None, "patch", "0.9.5", false},
 	}
 	for _, tc := range cases {
-		d := Next(base, conventional.Decision{Level: tc.level}, tc.onNo)
+		d, err := Next(base, nil, conventional.Decision{Level: tc.level}, Policy{OnNoChanges: tc.onNo})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if d.Version != tc.want || d.NothingToRelease != tc.nothing {
 			t.Errorf("Next(0.9.4, %s, %q) = %s (nothing=%v), want %s (nothing=%v)",
 				tc.level, tc.onNo, d.Version, d.NothingToRelease, tc.want, tc.nothing)

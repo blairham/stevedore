@@ -110,8 +110,28 @@ func baseOptions(ctx context.Context) (pipeline.Options, error) {
 	}, nil
 }
 
+// prereleaseUsage is --prerelease's help, shared by every command that
+// resolves a version.
+const prereleaseUsage = "cut a prerelease of this series (rc: 1.5.0-rc.1, then rc.2), overriding " +
+	"versioning.prerelease; empty cuts a release, promoting the series. Same value on every command of one release"
+
+// prereleaseFlag registers --prerelease on cmd and returns the function that
+// copies it into the options. Only a flag that was given overrides the
+// config, so --prerelease= is how a run promotes when the config sets one.
+func prereleaseFlag(cmd *cobra.Command) func(*pipeline.Options) {
+	var value string
+	cmd.Flags().StringVar(&value, "prerelease", "", prereleaseUsage)
+	return func(o *pipeline.Options) {
+		if cmd.Flags().Changed("prerelease") {
+			v := value
+			o.Prerelease = &v
+		}
+	}
+}
+
 func newCheckCmd() *cobra.Command {
-	return &cobra.Command{
+	var applyPrerelease func(*pipeline.Options)
+	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Validate the config and print the resolved release plan",
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -122,6 +142,7 @@ func newCheckCmd() *cobra.Command {
 			// check validates the config; it should not hard-fail just because a
 			// registry version can't be resolved (offline / unauthenticated).
 			o.SoftVersion = true
+			applyPrerelease(&o)
 			p, err := pipeline.Prepare(o)
 			if err != nil {
 				return err
@@ -158,4 +179,6 @@ func newCheckCmd() *cobra.Command {
 			return nil
 		},
 	}
+	applyPrerelease = prereleaseFlag(cmd)
+	return cmd
 }

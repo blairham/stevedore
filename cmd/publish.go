@@ -14,6 +14,7 @@ func newPublishCmd() *cobra.Command {
 		only            []string
 		pinVersions     []string
 		allowNonDefault bool
+		applyPrerelease func(*pipeline.Options)
 	)
 	cmd := &cobra.Command{
 		Use:   "publish",
@@ -37,6 +38,7 @@ func newPublishCmd() *cobra.Command {
 			}
 			o.PinVersions = pins
 			o.AllowNonDefaultBranch = allowNonDefault
+			applyPrerelease(&o)
 			return pipeline.Publish(o)
 		},
 	}
@@ -46,5 +48,6 @@ func newPublishCmd() *cobra.Command {
 		StringArrayVar(&pinVersions, "pin-version", nil, "pin an image's version as id=version (repeatable; the plan entries' pins), so the release is named after what was pushed")
 	cmd.Flags().
 		BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
+	applyPrerelease = prereleaseFlag(cmd)
 	return cmd
 }

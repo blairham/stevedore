@@ -307,6 +307,21 @@ type Versioning struct {
 	// and builds nothing; patch releases a patch bump anyway.
 	OnNoChanges string `yaml:"on_no_changes" enum:"skip,patch"`
 
+	// Prerelease cuts a prerelease series instead of a release: "rc" turns
+	// the next version 1.5.0 into 1.5.0-rc.1, and the run after that into
+	// 1.5.0-rc.2 while the target stays 1.5.0. A higher bump mid-series
+	// restarts it at the new target (2.0.0-rc.1); a run without prerelease
+	// promotes the series (1.5.0). One semver identifier: letters, digits
+	// and "-", not all digits. The --prerelease flag overrides it. Needs
+	// bump: auto, or a fixed bump under the registry/ecr strategy.
+	Prerelease string `yaml:"prerelease"`
+
+	// PreMajor is what a breaking change does under bump: auto while the
+	// version is 0.x: major (default; strict semver, 0.4.2 → 1.0.0) or
+	// minor (0.4.2 → 0.5.0, and a feat is then a patch). Under minor a
+	// project leaves 0.x by releasing 1.0.0 explicitly.
+	PreMajor string `yaml:"pre_major" enum:"major,minor"`
+
 	// Repo is the repository queried by the registry strategy. Defaults to the
 	// first repository of the first image (per-image under multi-image configs).
 	Repo string `yaml:"repo"`
@@ -348,6 +363,12 @@ const BumpAuto = "auto"
 const (
 	OnNoChangesSkip  = "skip"
 	OnNoChangesPatch = "patch"
+)
+
+// The versioning.pre_major values.
+const (
+	PreMajorMajor = "major"
+	PreMajorMinor = "minor"
 )
 
 // BumpTypes maps a Conventional Commits type to the bump level it calls for
@@ -1081,12 +1102,25 @@ func (v Versioning) validateBump() error {
 	default:
 		return fmt.Errorf("versioning.on_no_changes %q invalid (want skip or patch)", v.OnNoChanges)
 	}
+	switch v.PreMajor {
+	case "", PreMajorMajor, PreMajorMinor:
+	default:
+		return fmt.Errorf("versioning.pre_major %q invalid (want major or minor)", v.PreMajor)
+	}
+	if err := v.validatePrerelease(); err != nil {
+		return err
+	}
 	if v.Bump != BumpAuto {
 		if len(v.BumpTypes) > 0 {
 			return fmt.Errorf("versioning.bump_types needs versioning.bump: auto")
 		}
 		if v.OnNoChanges != "" {
 			return fmt.Errorf("versioning.on_no_changes needs versioning.bump: auto")
+		}
+		// pre_major remaps a level the commits chose; a fixed bump is a
+		// level the config chose, and quietly overruling it would be a lie.
+		if v.PreMajor != "" {
+			return fmt.Errorf("versioning.pre_major needs versioning.bump: auto")
 		}
 		return nil
 	}
@@ -1107,6 +1141,57 @@ func (v Versioning) validateBump() error {
 		)
 	}
 	return nil
+}
+
+// validatePrerelease checks versioning.prerelease (or --prerelease, which is
+// applied over it before validation): one identifier, and a strategy that
+// computes the version. Under git without bump: auto the tag on HEAD is the
+// version, prerelease or not, and static/env/command take theirs as given, so
+// there is no next version to make a candidate of.
+func (v Versioning) validatePrerelease() error {
+	if v.Prerelease == "" {
+		return nil
+	}
+	if !ValidPrereleaseID(v.Prerelease) {
+		return fmt.Errorf(
+			"versioning.prerelease %q invalid (want one identifier of letters, digits and \"-\", not all digits, e.g. rc)",
+			v.Prerelease,
+		)
+	}
+	switch {
+	case v.Strategy == "registry" || v.Strategy == "ecr":
+	case (v.Strategy == "" || v.Strategy == "git") && v.Bump == BumpAuto:
+	case v.Strategy == "" || v.Strategy == "git":
+		return fmt.Errorf(
+			"versioning.prerelease needs versioning.bump: auto under the git strategy (otherwise the tag on HEAD is the version)",
+		)
+	default:
+		return fmt.Errorf(
+			"versioning.prerelease needs the git, registry, or ecr strategy (%s takes the version as given)",
+			v.Strategy,
+		)
+	}
+	return nil
+}
+
+// ValidPrereleaseID reports whether s can name a prerelease series: a single
+// semver identifier (no "."), and not numeric, so the series number after it
+// is the only number in the prerelease ("rc.2", never "1.2").
+func ValidPrereleaseID(s string) bool {
+	if s == "" || strings.Contains(s, ".") {
+		return false
+	}
+	numeric := true
+	for _, c := range s {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '-':
+			numeric = false
+		default:
+			return false
+		}
+	}
+	return !numeric
 }
 
 // isStableSemver reports whether s is an optional "v" followed by a release

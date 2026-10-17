@@ -313,6 +313,21 @@ func TestValidateVersioning(t *testing.T) {
 		{"on_no_changes patch", Versioning{Bump: "auto", OnNoChanges: "patch"}, false},
 		{"on_no_changes bad", Versioning{Bump: "auto", OnNoChanges: "minor"}, true},
 		{"on_no_changes without auto", Versioning{Strategy: "registry", OnNoChanges: "patch"}, true},
+		{"pre_major minor", Versioning{Bump: "auto", PreMajor: "minor"}, false},
+		{"pre_major major", Versioning{Strategy: "registry", Bump: "auto", PreMajor: "major"}, false},
+		{"pre_major bad", Versioning{Bump: "auto", PreMajor: "patch"}, true},
+		{"pre_major without auto", Versioning{Strategy: "registry", Bump: "major", PreMajor: "minor"}, true},
+		{"prerelease git auto", Versioning{Bump: "auto", Prerelease: "rc"}, false},
+		{"prerelease registry auto", Versioning{Strategy: "registry", Bump: "auto", Prerelease: "beta"}, false},
+		{"prerelease registry fixed bump", Versioning{Strategy: "registry", Bump: "minor", Prerelease: "rc"}, false},
+		{"prerelease ecr default bump", Versioning{Strategy: "ecr", Prerelease: "rc"}, false},
+		{"prerelease git fixed bump", Versioning{Strategy: "git", Bump: "patch", Prerelease: "rc"}, true},
+		{"prerelease static", Versioning{Strategy: "static", Value: "1.0.0", Prerelease: "rc"}, true},
+		{"prerelease command", Versioning{Strategy: "command", Command: "x", Prerelease: "rc"}, true},
+		{"prerelease with hyphen", Versioning{Bump: "auto", Prerelease: "pre-release"}, false},
+		{"prerelease dotted", Versioning{Bump: "auto", Prerelease: "rc.1"}, true},
+		{"prerelease numeric", Versioning{Bump: "auto", Prerelease: "1"}, true},
+		{"prerelease bad character", Versioning{Bump: "auto", Prerelease: "rc_1"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

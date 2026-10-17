@@ -103,7 +103,11 @@ type Options struct {
 	// AllowNonDefaultBranch lets a real (non-snapshot) release publish from a
 	// commit that is not on the default branch.
 	AllowNonDefaultBranch bool
-	Now                   time.Time
+	// Prerelease overrides versioning.prerelease when non-nil (--prerelease):
+	// the identifier of the prerelease series to cut, or "" to cut a release
+	// (and so promote a series in flight) whatever the config says.
+	Prerelease *string
+	Now        time.Time
 }
 
 // context returns the invocation's context. It carries a Runner with the
@@ -272,6 +276,11 @@ func loadConfig(o Options) (*config.Config, error) {
 	cfg, err := config.Load(o.ConfigPath)
 	if err != nil {
 		return nil, err
+	}
+	// Before validation, so --prerelease is held to the same rules as the
+	// config field it overrides.
+	if o.Prerelease != nil {
+		cfg.Versioning.Prerelease = *o.Prerelease
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err

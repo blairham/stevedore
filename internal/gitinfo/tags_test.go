@@ -145,3 +145,30 @@ func TestGatherSourceURL(t *testing.T) {
 		t.Errorf("SourceURL = %q", got)
 	}
 }
+
+// During a prerelease series LatestTag is the newest candidate and
+// LatestRelease the release the series bumps from, however many candidates
+// lie between them and whatever shares their commits.
+func TestGatherLatestReleaseSkipsPrereleases(t *testing.T) {
+	r := newRepo(t, t.TempDir(), "-b", "main")
+	r.commit("a")
+	r.git("tag", "v1.4.0")
+	r.git("tag", "v1.5.0-rc.0") // a candidate on the release's own commit
+	for i, c := range []string{"b", "c", "d"} {
+		r.commit(c)
+		r.git("tag", "v1.5.0-rc."+string(rune('1'+i)))
+	}
+	r.commit("e")
+
+	info := gather(t, r.dir)
+	if info.LatestTag != "v1.5.0-rc.3" || info.LatestRelease != "v1.4.0" {
+		t.Errorf("LatestTag, LatestRelease = %q, %q; want v1.5.0-rc.3, v1.4.0", info.LatestTag, info.LatestRelease)
+	}
+
+	// Outside a series the two agree.
+	r.git("tag", "v1.5.0")
+	info = gather(t, r.dir)
+	if info.LatestTag != "v1.5.0" || info.LatestRelease != "v1.5.0" {
+		t.Errorf("LatestTag, LatestRelease = %q, %q; want v1.5.0 for both", info.LatestTag, info.LatestRelease)
+	}
+}

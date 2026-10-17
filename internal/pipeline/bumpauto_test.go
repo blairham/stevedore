@@ -130,3 +130,93 @@ func TestBumpAutoPublishNothingToRelease(t *testing.T) {
 		t.Error("a plan with something to release, or no plans: want false")
 	}
 }
+
+// A prerelease run tags the candidate and nothing that floats: latest, 1 and
+// 1.5 stay on the last release. The same run without --prerelease publishes
+// them, so the test can tell "withheld" from "never rendered".
+func TestBumpAutoPrereleaseWithholdsFloatingTags(t *testing.T) {
+	o := bumpAutoRepo(t, "feat: x")
+	cfg := filepath.Join(t.TempDir(), "stevedore.yaml")
+	body := bumpAutoConfig[:strings.Index(bumpAutoConfig, "versioning:")] +
+		`    tags: ["{{ .Version }}", "latest", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}"]
+versioning:
+  bump: auto
+  prerelease: rc
+`
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.ConfigPath = cfg
+
+	refs := func(o Options) []string {
+		t.Helper()
+		p, err := Prepare(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.Plans[0].Refs
+	}
+	if got := refs(o); strings.Join(got, " ") != "ghcr.io/x/app:1.5.0-rc.1" {
+		t.Errorf("rc refs = %v, want only ghcr.io/x/app:1.5.0-rc.1", got)
+	}
+
+	// --prerelease= overrides the config: a release, floating tags and all.
+	release := ""
+	o.Prerelease = &release
+	want := "ghcr.io/x/app:1.5.0 ghcr.io/x/app:latest ghcr.io/x/app:1 ghcr.io/x/app:1.5"
+	if got := refs(o); strings.Join(got, " ") != want {
+		t.Errorf("release refs = %v, want %s", got, want)
+	}
+
+	// And --prerelease is held to the config field's rules.
+	bad := "rc.1"
+	o.Prerelease = &bad
+	if _, err := Prepare(o); err == nil || !strings.Contains(err.Error(), "versioning.prerelease") {
+		t.Errorf("--prerelease rc.1: err = %v, want it rejected", err)
+	}
+}
+
+// The rc sequence against a real history: each candidate is tagged as a
+// release would tag it, and the next run reads the series back from git.
+func TestBumpAutoPrereleaseSequence(t *testing.T) {
+	o := bumpAutoRepo(t, "feat: x")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = o.Dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	rc, release := "rc", ""
+	next := func(pre *string) string {
+		t.Helper()
+		o.Prerelease = pre
+		p, err := Prepare(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.Ctx.Version
+	}
+	steps := []struct {
+		name   string
+		commit string // committed before the run; "" for none
+		pre    *string
+		want   string
+	}{
+		{"start", "", &rc, "1.5.0-rc.1"},
+		{"increment", "fix: y", &rc, "1.5.0-rc.2"},
+		{"restart on a higher bump", "feat!: z", &rc, "2.0.0-rc.1"},
+		{"promote the tagged candidate", "", &release, "2.0.0"},
+	}
+	for _, s := range steps {
+		if s.commit != "" {
+			git("commit", "-q", "--allow-empty", "-m", s.commit)
+		}
+		got := next(s.pre)
+		if got != s.want {
+			t.Fatalf("%s: version = %q, want %q", s.name, got, s.want)
+		}
+		git("tag", "v"+got)
+	}
+}

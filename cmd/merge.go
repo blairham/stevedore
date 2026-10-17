@@ -23,6 +23,7 @@ func newMergeCmd() *cobra.Command {
 		pinVersions     []string
 		keepGoing       bool
 		allowNonDefault bool
+		applyPrerelease func(*pipeline.Options)
 	)
 	cmd := &cobra.Command{
 		Use:   "merge",
@@ -59,6 +60,7 @@ func newMergeCmd() *cobra.Command {
 			}
 			o.KeepGoing = keepGoing
 			o.AllowNonDefaultBranch = allowNonDefault
+			applyPrerelease(&o)
 			return pipeline.Merge(o)
 		},
 	}
@@ -80,5 +82,6 @@ func newMergeCmd() *cobra.Command {
 		StringVar(&output, "output", "text", "output format: text or json (json emits a release summary to stdout)")
 	cmd.Flags().
 		BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
+	applyPrerelease = prereleaseFlag(cmd)
 	return cmd
 }
