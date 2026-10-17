@@ -2,6 +2,8 @@
 #
 #   stevedore check            # prints the next version and the commit that decided it
 #   stevedore release          # on main: tags and publishes v<that version>
+#   stevedore release --prerelease rc   # a candidate instead: v1.5.0-rc.1, then rc.2;
+#                                       # the next run without it releases v1.5.0
 #
 # feat: → minor, fix:/perf: → patch, feat!: or a BREAKING CHANGE: footer →
 # major. A merge with nothing bump-worthy (docs:, chore:) releases nothing.
@@ -18,6 +20,10 @@ versioning:
     revert: patch
   on_no_changes: skip   # or patch: release a patch even when nothing calls for one
   initial: "0.1.0"      # the first release, when there is no version tag yet
+  # While on 0.x, a breaking change is a minor bump and a feat a patch, instead
+  # of a breaking change releasing 1.0.0. Release 1.0.0 deliberately.
+  pre_major: minor
+  # prerelease: rc      # make every run a candidate (--prerelease= promotes)
 
 images:
   - id: myapp

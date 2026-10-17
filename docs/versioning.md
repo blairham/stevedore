@@ -98,6 +98,8 @@ versioning:
   bump: auto
   # bump_types: {revert: patch}   # merged over the defaults below
   # on_no_changes: skip           # skip (default) | patch
+  # prerelease: rc                # cut 1.5.0-rc.1, rc.2, … instead of 1.5.0
+  # pre_major: major              # major (default) | minor: breaking on 0.x is a minor
 ```
 
 `bump: auto` reads the [Conventional Commits](https://www.conventionalcommits.org/)
@@ -120,7 +122,8 @@ adds a type, `perf: minor` changes one, `fix: none` turns one off. Levels are
 the notes; it has no effect on the bump.
 
 **Where the range starts.** Under `git`, the commits since the latest reachable
-version tag. Under `registry`/`ecr` the version being bumped comes from the
+release tag (a prerelease tag does not count: see [prerelease
+series](#prerelease-series-prerelease)). Under `registry`/`ecr` the version being bumped comes from the
 registry, so the range starts at its git tag (`v<version>`, which
 `release.github` creates, or `<version>`). With no such tag it falls back to the
 latest reachable version tag, and with none of those to the whole history.
@@ -149,8 +152,9 @@ build context cannot be narrowed and sees every commit.
 
 **What it does per strategy.**
 
-- `git`: a tag on HEAD still names the release. An **untagged HEAD** releases
-  as the latest tag plus the bump (`v1.4.2` + a `feat` → `1.5.0`), and the
+- `git`: a tag on HEAD still names the release (except a candidate that a
+  release run promotes, below). An **untagged HEAD** releases
+  as the latest release tag plus the bump (`v1.4.2` + a `feat` → `1.5.0`), and the
   release publishes, and `release.github` creates, the tag `v1.5.0`. With no
   version tag at all the first release is `versioning.initial`.
 - `registry` / `ecr`: the bump replaces `patch`/`minor`/`major`; a repository
@@ -184,6 +188,86 @@ image with nothing to release says so, naming the scope it was narrowed to
 `bump: auto` works with the `git`, `registry` and `ecr` strategies; the others
 take the version as given. It cannot be combined with `require_tag`, which
 makes an untagged HEAD validate-only where `auto` makes it a release.
+
+### Prerelease series: `prerelease`
+
+```yaml
+versioning:
+  bump: auto
+  prerelease: rc      # or --prerelease rc on plan/release/merge/publish/check
+```
+
+With a prerelease identifier, a run cuts a **candidate** of the version
+`bump: auto` computes instead of the version itself. Run by run, from the
+release `1.4.0`:
+
+| Run | Commits since `1.4.0` | Version |
+|-----|-----------------------|---------|
+| `--prerelease rc` | a `feat` | `1.5.0-rc.1` — the series starts |
+| `--prerelease rc` | + a `fix` | `1.5.0-rc.2` — same target, next number |
+| `--prerelease rc` | + a `feat!` | `2.0.0-rc.1` — a higher bump restarts the series at the new target |
+| no prerelease | (same) | `2.0.0` — the series is promoted |
+
+The target is always computed from the last **release**, never from a
+candidate, so the commits of the whole series decide it, and a series only
+moves up: a lower bump mid-series (a `fix` during `1.5.0-rc.N`) is the next
+candidate of the same target, and promotion releases the series' own target
+even when nothing since the release would call for that much. With a series in
+flight there is always something to release, so `on_no_changes` does not apply.
+
+- **Promoting the candidate's own commit.** Under `git`, a run without a
+  prerelease on a commit tagged `v1.5.0-rc.2` releases `1.5.0` from that
+  commit — the exact code that was tested. A run *with* `--prerelease rc` there
+  keeps the tag, as any tag on HEAD does.
+- **Promoting when the config sets `prerelease`.** Pass an empty flag,
+  `--prerelease=`. Only a flag that is given overrides the config.
+- **What counts as a series** is a prerelease shaped like the ones a run cuts,
+  `<identifier>.<number>` (`1.5.0-rc.2`, `1.5.0-beta.3`), above the last
+  release. Under `git` that is the latest reachable tag; under `registry`/`ecr`
+  the highest such tag in the repository. Other prerelease tags
+  (`1.6.0-alpine`, `2.0.0-beta`) are not a series and are left alone.
+- **Switching identifiers.** `beta` → `rc` starts `1.5.0-rc.1` after
+  `1.5.0-beta.3`. Switching to one that sorts *lower* (`alpha` after `beta`)
+  would publish a version below one already out, and is an error.
+- **The identifier** is one semver identifier — letters, digits and `-`, not
+  all digits, no `.`: `rc`, `beta`, `pre-release`.
+- **Tags and releases.** Nothing else changes: the floating-tag rule already
+  keeps a prerelease off `latest`, `1` and `1.5` (unless
+  `prerelease_floating_tags`), and `release.github.prerelease` already marks the
+  GitHub release a prerelease when the version is one.
+- **Matrix and split releases** resolve the version in every job, so pass the
+  same `--prerelease` to `plan`, each `release` leg, `merge` and `publish` —
+  as with `--snapshot`.
+- **Changelog range.** The notes still cover the commits since the previous
+  version tag, candidate or not: `1.5.0`'s notes start at `1.5.0-rc.2`.
+
+`prerelease` also works with a fixed `bump` under `registry`/`ecr`: the target
+is the fixed bump of the highest release, and the series rules are the same.
+(Without `prerelease`, a fixed bump ignores prerelease tags as it always has.)
+Under `git` without `bump: auto` it is an error — the tag on HEAD is the
+version, and tagging `v1.5.0-rc.1` yourself is how that strategy cuts one —
+and `static`/`env`/`command` take the version as given.
+
+### Before 1.0: `pre_major`
+
+```yaml
+versioning:
+  bump: auto
+  pre_major: minor    # default: major
+```
+
+Semver gives `0.x` no stability promise, and many projects number it as if the
+minor were the major. With `pre_major: minor`, while the last release's major
+is `0` every level is one step lower: a breaking change bumps the **minor**
+(`0.4.2` → `0.5.0`) and a `feat` bumps the **patch** (`0.4.2` → `0.4.3`); a
+`fix` is still a patch. `check` says so: `version: 0.5.0 (minor: feat!: …,
+a1b2c3d (major on 0.x: versioning.pre_major: minor))`. The default, `major`, is
+strict semver: a breaking change on `0.x` releases `1.0.0`.
+
+Under `pre_major: minor` nothing ever leaves `0.x` on its own: release `1.0.0`
+deliberately — tag `v1.0.0` (git), or drop `pre_major` for the release that
+should be `1.0.0`. It needs `bump: auto`; a fixed `bump: major` is already the
+level you chose. It composes with `prerelease` (`0.5.0-rc.1`).
 
 ## Tag-driven releases: `require_tag`
 
