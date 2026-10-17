@@ -64,6 +64,7 @@ func newReleaseCmd() *cobra.Command {
 		split           []string
 		keepGoing       bool
 		allowNonDefault bool
+		applyPrerelease func(*pipeline.Options)
 	)
 	cmd := &cobra.Command{
 		Use:   "release",
@@ -100,6 +101,7 @@ func newReleaseCmd() *cobra.Command {
 			o.SplitPlatforms = split
 			o.KeepGoing = keepGoing
 			o.AllowNonDefaultBranch = allowNonDefault
+			applyPrerelease(&o)
 			return pipeline.Release(o)
 		},
 	}
@@ -130,5 +132,6 @@ func newReleaseCmd() *cobra.Command {
 		StringSliceVar(&split, "split", nil, "platform(s) to build natively on this runner, pushed untagged by digest for a later stevedore merge (native multi-arch CI: one matrix leg per arch)")
 	cmd.Flags().
 		BoolVar(&allowNonDefault, "allow-non-default-branch", false, "publish a real release from a commit that is not on default_branch")
+	applyPrerelease = prereleaseFlag(cmd)
 	return cmd
 }

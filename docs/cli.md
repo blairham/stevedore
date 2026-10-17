@@ -216,6 +216,7 @@ completion <shell>` prints a shell completion script (bash, zsh, fish, powershel
 | `--output <string>` | output format: text or json (json emits a release summary to stdout) (default "text") |
 | `--parallel <int>` | build up to N images concurrently (default 1) |
 | `--pin-version <stringArray>` | pin an image's version as id=version (repeatable; from the plan's pins) |
+| `--prerelease <string>` | cut a prerelease of this series (rc: 1.5.0-rc.1, then rc.2), overriding versioning.prerelease; empty cuts a release, promoting the series. Same value on every command of one release |
 | `--skip-changelog` | skip changelog generation |
 | `--skip-publish` | skip the GitHub/GitLab release, announcements, and notify webhooks |
 | `--skip-sbom` | skip SBOM generation |
@@ -234,6 +235,7 @@ completion <shell>` prints a shell completion script (bash, zsh, fish, powershel
 | `--only <strings>` | image id(s) to merge (matrix mode: match the split legs' --only); 'all' selects every image |
 | `--output <string>` | output format: text or json (json emits a release summary to stdout) (default "text") |
 | `--pin-version <stringArray>` | pin an image's version as id=version (repeatable; match the split legs' pins) |
+| `--prerelease <string>` | cut a prerelease of this series (rc: 1.5.0-rc.1, then rc.2), overriding versioning.prerelease; empty cuts a release, promoting the series. Same value on every command of one release |
 | `--skip-changelog` | skip changelog generation |
 | `--skip-publish` | skip the GitHub/GitLab release, announcements, and notify webhooks |
 | `--skip-sbom` | skip SBOM generation |
@@ -249,6 +251,7 @@ completion <shell>` prints a shell completion script (bash, zsh, fish, powershel
 | `--allow-non-default-branch` | publish a real release from a commit that is not on default_branch |
 | `--only <strings>` | image id(s) the matrix built (the plan step's flat only output); default every image, as does 'all' |
 | `--pin-version <stringArray>` | pin an image's version as id=version (repeatable; the plan entries' pins), so the release is named after what was pushed |
+| `--prerelease <string>` | cut a prerelease of this series (rc: 1.5.0-rc.1, then rc.2), overriding versioning.prerelease; empty cuts a release, promoting the series. Same value on every command of one release |
 
 ### `stevedore plan`
 
@@ -256,6 +259,7 @@ completion <shell>` prints a shell completion script (bash, zsh, fish, powershel
 |------|---------|
 | `--changed-since <string>` | git ref: plan only images whose paths changed since this ref (under marker_refs, since the older of this and the image's marker) |
 | `--only-changed` | skip images whose build inputs are unchanged since the last release (fingerprint state) |
+| `--prerelease <string>` | cut a prerelease of this series (rc: 1.5.0-rc.1, then rc.2), overriding versioning.prerelease; empty cuts a release, promoting the series. Same value on every command of one release |
 | `--snapshot` | plan a snapshot release (affects floating tags and versioning) |
 | `--split-platforms` | emit one matrix entry per build group per platform, with native runner hints (pair with release --split and merge) |
 
@@ -267,7 +271,9 @@ completion <shell>` prints a shell completion script (bash, zsh, fish, powershel
 
 ### `stevedore check`
 
-No flags of its own.
+| Flag | Meaning |
+|------|---------|
+| `--prerelease <string>` | cut a prerelease of this series (rc: 1.5.0-rc.1, then rc.2), overriding versioning.prerelease; empty cuts a release, promoting the series. Same value on every command of one release |
 
 ### `stevedore verify`
 

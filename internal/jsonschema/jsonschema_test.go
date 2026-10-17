@@ -134,4 +134,10 @@ func TestVersioningBumpSchema(t *testing.T) {
 	if enum, _ := object(t, v, "on_no_changes")["enum"].([]any); len(enum) != 2 {
 		t.Errorf("versioning.on_no_changes enum = %v, want skip, patch", enum)
 	}
+	if enum, _ := object(t, v, "pre_major")["enum"].([]any); len(enum) != 2 || enum[0] != "major" {
+		t.Errorf("versioning.pre_major enum = %v, want major, minor", enum)
+	}
+	if typ := object(t, v, "prerelease")["type"]; typ != "string" {
+		t.Errorf("versioning.prerelease type = %v, want string", typ)
+	}
 }

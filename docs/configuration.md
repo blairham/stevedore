@@ -131,6 +131,10 @@ versioning:
   # bump: auto only (see versioning.md):
   # bump_types: {revert: patch}   # over the default feat: minor, fix/perf: patch
   # on_no_changes: skip   # skip (default): nothing to release | patch
+  # pre_major: major      # major (default) | minor: on 0.x, breaking → minor, feat → patch
+  # prerelease: rc        # cut candidates: 1.5.0-rc.1, rc.2, …; a run without it
+                          # (or --prerelease=) promotes. Also registry/ecr with a
+                          # fixed bump. Overridden by --prerelease
   # registry/ecr strategies:
   # repo: ghcr.io/acme/myapp   # defaults to each image's own repository
   # region: us-east-1     # ecr only; inferred from the ECR host otherwise

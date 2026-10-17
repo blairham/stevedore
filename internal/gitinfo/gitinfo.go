@@ -32,6 +32,11 @@ type Info struct {
 	// tagged, otherwise the last release before it (may be empty). It seeds
 	// snapshot versions and the changelog range, never a release name.
 	LatestTag string
+	// LatestRelease is the most recent release tag (a version tag without a
+	// prerelease) reachable from HEAD, or "". It is LatestTag except during
+	// a prerelease series, where LatestTag is the newest candidate and this
+	// is the release the series bumps from.
+	LatestRelease string
 	// Commit is the full HEAD SHA.
 	Commit string
 	// ShortCommit is the abbreviated HEAD SHA.
@@ -90,12 +95,16 @@ func Gather(ctx context.Context, dir string) (*Info, error) {
 	// lightweight "deploy-prod" marker), and git's own choice among several
 	// tags on one commit is alphabetical, which made such a marker the
 	// release version.
-	info.Tag = highestVersionTagAt(ctx, dir, "HEAD")
-	info.LatestTag = nearestVersionTag(ctx, dir, "HEAD")
+	info.Tag = highestVersionTagAt(ctx, dir, "HEAD", false)
+	info.LatestTag = nearestVersionTag(ctx, dir, "HEAD", false)
+	info.LatestRelease = info.LatestTag
+	if v, ok := semver.Parse(info.LatestTag); ok && v.IsPrerelease() {
+		info.LatestRelease = nearestVersionTag(ctx, dir, "HEAD", true)
+	}
 
 	switch {
 	case info.Tag != "":
-		info.PreviousTag = nearestVersionTag(ctx, dir, "HEAD^")
+		info.PreviousTag = nearestVersionTag(ctx, dir, "HEAD^", false)
 	default:
 		info.PreviousTag = info.LatestTag
 	}
@@ -105,8 +114,8 @@ func Gather(ctx context.Context, dir string) (*Info, error) {
 }
 
 // highestVersionTagAt returns the highest-precedence version tag pointing at
-// rev, or "" when rev carries none.
-func highestVersionTagAt(ctx context.Context, dir, rev string) string {
+// rev, or "" when rev carries none. releasesOnly skips prereleases.
+func highestVersionTagAt(ctx context.Context, dir, rev string, releasesOnly bool) string {
 	out, err := run(ctx, dir, "tag", "--points-at", rev)
 	if err != nil {
 		return ""
@@ -115,7 +124,7 @@ func highestVersionTagAt(ctx context.Context, dir, rev string) string {
 	var bestV semver.Version
 	for _, tag := range strings.Split(out, "\n") {
 		v, ok := semver.Parse(tag)
-		if !ok {
+		if !ok || (releasesOnly && v.IsPrerelease()) {
 			continue
 		}
 		// Equal precedence (v1.0.0 vs 1.0.0, or differing build metadata)
@@ -129,19 +138,26 @@ func highestVersionTagAt(ctx context.Context, dir, rev string) string {
 
 // nearestVersionTag returns the version tag on the nearest commit reachable
 // from rev that carries one (the highest, when it carries several), or "".
+// releasesOnly skips prereleases, so a series of release candidates does not
+// hide the release it started from.
 //
 // The --match globs narrow describe to tags that start like a version; a tag
 // that passes them but is not one ("v2-legacy") is excluded and describe asked
 // again, so it cannot hide an older real version behind it.
-func nearestVersionTag(ctx context.Context, dir, rev string) string {
+func nearestVersionTag(ctx context.Context, dir, rev string, releasesOnly bool) string {
 	args := []string{"describe", "--tags", "--abbrev=0", "--match", "v[0-9]*", "--match", "[0-9]*"}
+	if releasesOnly {
+		// Every prerelease has a "-"; excluding them up front keeps a long rc
+		// series from using up the retries below.
+		args = append(args, "--exclude", "*-*")
+	}
 	for range maxDescribeRetries {
 		tag, err := run(ctx, dir, append(args, rev)...)
 		if err != nil {
 			return ""
 		}
-		if _, ok := semver.Parse(tag); ok {
-			if best := highestVersionTagAt(ctx, dir, tag+"^{commit}"); best != "" {
+		if v, ok := semver.Parse(tag); ok && (!releasesOnly || !v.IsPrerelease()) {
+			if best := highestVersionTagAt(ctx, dir, tag+"^{commit}", releasesOnly); best != "" {
 				return best
 			}
 			return tag

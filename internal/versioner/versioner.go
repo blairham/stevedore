@@ -9,6 +9,7 @@ package versioner
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/blairham/stevedore/internal/config"
@@ -73,30 +74,66 @@ type Decision struct {
 	// Scope is Input.Scope: what the commits were narrowed to, or "" for
 	// the whole repository.
 	Scope string
+	// PreMajor reports that versioning.pre_major: minor lowered Level by
+	// one because Base is 0.x.
+	PreMajor bool
+	// Series is the prerelease series in flight that this version follows,
+	// restarts above, or promotes ("1.5.0-rc.2"); "" when there was none.
+	Series string
+	// SeriesStep is what the version does to Series: one of the Series*
+	// constants, or "" with no Series.
+	SeriesStep string
 }
+
+// What a version does to the prerelease series in flight.
+const (
+	// SeriesNext is the next candidate of the same target: 1.5.0-rc.3
+	// after 1.5.0-rc.2.
+	SeriesNext = "follows"
+	// SeriesRestart is a candidate of a higher target: 2.0.0-rc.1 after
+	// 1.5.0-rc.2.
+	SeriesRestart = "restarts above"
+	// SeriesPromote is the release the series was a candidate for: 1.5.0
+	// after 1.5.0-rc.2.
+	SeriesPromote = "promotes"
+	// SeriesSupersede is a release above the series' target: 2.0.0 after
+	// 1.5.0-rc.2.
+	SeriesSupersede = "supersedes"
+)
 
 // Reason explains the decision for check and plan output: the bump and the
 // commit that decided it ("minor: feat(api): add pagination, a1b2c3d"), why
 // there is nothing to release, or "" when there is nothing to explain.
 func (d Decision) Reason() string {
+	var r string
 	switch {
 	case d.Initial:
-		return "first release: versioning.initial"
+		r = "first release: versioning.initial"
 	case !d.Auto:
 		return ""
 	case d.NothingToRelease:
 		return fmt.Sprintf("nothing to release: no commit since %s%s calls for a version bump", d.Base, d.touching())
+	case d.Bump.Level == conventional.None && d.Series != "":
+		r = fmt.Sprintf("no commit since %s%s calls for more than the series in flight", d.Base, d.touching())
 	case d.Bump.Level == conventional.None:
-		return fmt.Sprintf(
+		r = fmt.Sprintf(
 			"%s: no commit since %s%s calls for a bump (versioning.on_no_changes: patch)",
 			d.Level, d.Base, d.touching(),
 		)
+	default:
+		short := d.Bump.Commit.SHA
+		if len(short) > 7 {
+			short = short[:7]
+		}
+		r = fmt.Sprintf("%s: %s, %s", d.Level, d.Bump.Commit.Subject, short)
 	}
-	short := d.Bump.Commit.SHA
-	if len(short) > 7 {
-		short = short[:7]
+	if d.PreMajor {
+		r += fmt.Sprintf(" (%s on 0.x: versioning.pre_major: minor)", d.Level+1)
 	}
-	return fmt.Sprintf("%s: %s, %s", d.Level, d.Bump.Commit.Subject, short)
+	if d.Series != "" {
+		r += fmt.Sprintf("; %s %s", d.SeriesStep, d.Series)
+	}
+	return r
 }
 
 // touching qualifies "no commit since X" with the scope the commits were
@@ -153,10 +190,11 @@ func Decide(in Input) (Decision, error) {
 func plain(v string) Decision { return Decision{Version: v} }
 
 // resolveGit is the git strategy: the tag on HEAD names the release. Under
-// bump: auto an untagged HEAD releases as the latest reachable tag plus the
-// bump its commits call for (versioning.initial with no tag at all).
+// bump: auto an untagged HEAD releases as the latest reachable release tag
+// plus the bump its commits call for (versioning.initial with no tag at all),
+// continuing or promoting a prerelease series that followed that release.
 func resolveGit(in Input) (Decision, error) {
-	if in.Cfg.Bump != config.BumpAuto || in.Git.Tag != "" {
+	if in.Cfg.Bump != config.BumpAuto || keepsTag(in) {
 		// A snapshot is a snapshot even on a tagged commit: --snapshot must
 		// never publish under the clean release version.
 		if in.Snapshot {
@@ -164,14 +202,58 @@ func resolveGit(in Input) (Decision, error) {
 		}
 		return plain(in.Git.Version), nil
 	}
-	if in.Git.LatestTag == "" {
-		return initial(in), nil
+	release := in.Git.LatestRelease
+	if release == "" {
+		// An Info that predates LatestRelease (or was built by hand) has only
+		// LatestTag; that is the release unless it is a prerelease.
+		if v, ok := semver.Parse(in.Git.LatestTag); ok && !v.IsPrerelease() {
+			release = in.Git.LatestTag
+		}
 	}
-	base, ok := semver.Parse(in.Git.LatestTag)
+	var base *semver.Version
+	if release != "" {
+		v, ok := semver.Parse(release)
+		if !ok {
+			return Decision{}, fmt.Errorf("versioning: latest tag %q is not a semantic version", release)
+		}
+		base = &v
+	}
+	series := gitSeries(in.Git.LatestTag, base)
+	if base == nil {
+		return initial(in, series)
+	}
+	return auto(*base, series, in)
+}
+
+// keepsTag reports whether, under bump: auto, the tag on HEAD names the
+// release. It does unless it is a candidate of a series this run does not
+// continue: a run without a prerelease promotes the candidate on HEAD (its
+// commit becomes 1.5.0 too), and a run for another identifier starts that
+// series there.
+func keepsTag(in Input) bool {
+	if in.Git.Tag == "" {
+		return false
+	}
+	v, ok := semver.Parse(in.Git.Tag)
 	if !ok {
-		return Decision{}, fmt.Errorf("versioning: latest tag %q is not a semantic version", in.Git.LatestTag)
+		return true
 	}
-	return auto(base, in)
+	id, _, isSeries := seriesOf(v)
+	return !isSeries || id == in.Cfg.Prerelease
+}
+
+// gitSeries is the prerelease series in flight under the git strategy: the
+// latest reachable tag, when it is a series candidate (see seriesOf) above
+// the release it follows.
+func gitSeries(latest string, release *semver.Version) *semver.Version {
+	v, ok := semver.Parse(latest)
+	if !ok {
+		return nil
+	}
+	if _, _, isSeries := seriesOf(v); !isSeries || (release != nil && v.Compare(*release) <= 0) {
+		return nil
+	}
+	return &v
 }
 
 // resolveRegistry lists the repository's tags, finds the highest semver, and
@@ -193,24 +275,48 @@ func resolveRegistry(in Input) (Decision, error) {
 		return Decision{}, fmt.Errorf("versioning: list tags for %s: %w", repo, err)
 	}
 	highest, found := highestRelease(tags)
+	// A fixed bump without a prerelease keeps ignoring prereleases, as it
+	// always has: its target never depends on them.
+	var series *semver.Version
+	if in.Cfg.Bump == config.BumpAuto || in.Cfg.Prerelease != "" {
+		series = highestSeries(tags, highest, found)
+	}
 	switch {
 	case !found:
-		return initial(in), nil
+		return initial(in, series)
 	case in.Cfg.Bump == config.BumpAuto:
-		return auto(highest, in)
+		return auto(highest, series, in)
 	default:
-		return plain(snapshotize(highest.Bump(in.Cfg.Bump).String(), in)), nil
+		d := Decision{}
+		v, err := d.toward(highest.Bump(in.Cfg.Bump), series, in.Cfg.Prerelease)
+		if err != nil {
+			return Decision{}, err
+		}
+		d.Version = snapshotize(v.String(), in)
+		return d, nil
 	}
 }
 
 // initial is the first release: versioning.initial, as there is nothing to
-// bump.
-func initial(in Input) Decision {
-	return Decision{Version: snapshotize(strings.TrimPrefix(in.Cfg.Initial, "v"), in), Initial: true}
+// bump — or its prerelease, or the series already in flight toward it.
+func initial(in Input, series *semver.Version) (Decision, error) {
+	d := Decision{Initial: true}
+	first, ok := semver.Parse(strings.TrimSpace(in.Cfg.Initial))
+	if !ok || first.IsPrerelease() {
+		// Unvalidated config: keep the value as given, as before.
+		d.Version = snapshotize(strings.TrimPrefix(in.Cfg.Initial, "v"), in)
+		return d, nil
+	}
+	v, err := d.toward(first, series, in.Cfg.Prerelease)
+	if err != nil {
+		return Decision{}, err
+	}
+	d.Version = snapshotize(v.String(), in)
+	return d, nil
 }
 
 // auto applies bump: auto to base: the commits since it pick the level.
-func auto(base semver.Version, in Input) (Decision, error) {
+func auto(base semver.Version, series *semver.Version, in Input) (Decision, error) {
 	if in.Commits == nil {
 		return Decision{}, ErrNoCommits
 	}
@@ -222,7 +328,10 @@ func auto(base semver.Version, in Input) (Decision, error) {
 	if err != nil {
 		return Decision{}, err
 	}
-	d := Next(base, conventional.Select(commits, rules), in.Cfg.OnNoChanges)
+	d, err := Next(base, series, conventional.Select(commits, rules), PolicyOf(in.Cfg))
+	if err != nil {
+		return Decision{}, err
+	}
 	d.Scope = in.Scope
 	if d.NothingToRelease && in.Snapshot {
 		// A snapshot has no release to skip: it builds the code as it is,
@@ -233,22 +342,137 @@ func auto(base semver.Version, in Input) (Decision, error) {
 	return d, nil
 }
 
-// Next is bump selection: the version after base given the bump the commits
-// called for, and what on_no_changes ("" is skip) does when they called for
-// none. It is pure, so a rule about which level applies (a 0.x series
-// treating breaking changes as minor, a prerelease series) is a change here
-// rather than in how the commits are found.
-func Next(base semver.Version, sel conventional.Decision, onNoChanges string) Decision {
+// Policy is the part of versioning: that turns a bump level into a version.
+type Policy struct {
+	// OnNoChanges is what happens when no commit calls for a bump: skip
+	// ("" too) or patch.
+	OnNoChanges string
+	// PreMajor is major ("" too) or minor: whether a 0.x base takes every
+	// level one step lower.
+	PreMajor string
+	// Prerelease is the series identifier ("rc") to cut a candidate of, or
+	// "" to cut a release.
+	Prerelease string
+}
+
+// PolicyOf reads a Policy from the versioning config.
+func PolicyOf(cfg config.Versioning) Policy {
+	return Policy{OnNoChanges: cfg.OnNoChanges, PreMajor: cfg.PreMajor, Prerelease: cfg.Prerelease}
+}
+
+// Next is bump selection: the version after base (the latest release) given
+// the bump the commits since it called for, the prerelease series in flight
+// after base (nil when there is none), and the policy. It is pure, so a rule
+// about which level applies or how a series moves is a change here rather
+// than in how the commits or the series are found.
+//
+// The level is the commits' (on_no_changes: patch when they call for none;
+// with neither, nothing to release — unless a series is in flight, which is
+// then itself what there is to release). On a 0.x base, pre_major: minor
+// takes it one step lower. The target is base bumped by that level, but never
+// below a series in flight: the series' commits are among those since base,
+// so a lower target only means the rules changed, and going back would reuse
+// or undercut its versions. With a prerelease the version is the next
+// candidate of the target (see Decision.toward); without one, the target.
+func Next(base semver.Version, series *semver.Version, sel conventional.Decision, p Policy) (Decision, error) {
 	d := Decision{Auto: true, Base: base.String(), Level: sel.Level, Bump: sel}
-	if d.Level == conventional.None {
-		if onNoChanges != config.OnNoChangesPatch {
+	if d.Level == conventional.None && series == nil {
+		if p.OnNoChanges != config.OnNoChangesPatch {
 			d.Version, d.NothingToRelease = d.Base, true
-			return d
+			return d, nil
 		}
 		d.Level = conventional.Patch
 	}
-	d.Version = base.Bump(d.Level.String()).String()
-	return d
+	if base.Major == 0 && p.PreMajor == config.PreMajorMinor && d.Level > conventional.Patch {
+		d.Level--
+		d.PreMajor = true
+	}
+	target := base
+	if d.Level != conventional.None {
+		target = base.Bump(d.Level.String())
+	}
+	v, err := d.toward(target, series, p.Prerelease)
+	if err != nil {
+		return Decision{}, err
+	}
+	d.Version = v.String()
+	return d, nil
+}
+
+// toward is the version a run cuts for target given the series in flight
+// (nil for none) and the prerelease identifier ("" for a release), and
+// records on d what it does to the series.
+//
+//   - The target is raised to the series' own target when that is higher.
+//   - A release is the target: it promotes the series, or supersedes it.
+//   - A candidate of the same target and identifier as the series is its
+//     next number (1.5.0-rc.2 → 1.5.0-rc.3); any other is number 1 of the
+//     target (2.0.0-rc.1 restarts above 1.5.0-rc.2).
+//
+// A candidate that would not sort above the series — the identifier changed
+// to one that sorts lower, "alpha" after "beta" — is an error rather than a
+// version that goes backwards.
+func (d *Decision) toward(target semver.Version, series *semver.Version, id string) (semver.Version, error) {
+	if series == nil {
+		if id == "" {
+			return target, nil
+		}
+		return candidateOf(target, id, 1), nil
+	}
+	d.Series = series.String()
+	if c := core(*series); c.Compare(target) > 0 {
+		target = c
+	}
+	same := core(*series).Compare(target) == 0
+	if id == "" {
+		d.SeriesStep = SeriesSupersede
+		if same {
+			d.SeriesStep = SeriesPromote
+		}
+		return target, nil
+	}
+	n := 1
+	d.SeriesStep = SeriesRestart
+	if sid, sn, _ := seriesOf(*series); same && sid == id {
+		n = sn + 1
+		d.SeriesStep = SeriesNext
+	}
+	v := candidateOf(target, id, n)
+	if v.Compare(*series) <= 0 {
+		return semver.Version{}, fmt.Errorf(
+			"versioning: prerelease %s would not sort above %s, the prerelease already in flight "+
+				"(use an identifier that sorts after %q, or release %s first)",
+			v, series, series.Pre[0], core(*series),
+		)
+	}
+	return v, nil
+}
+
+// candidateOf is target's prerelease number n of series id: 1.5.0-rc.2.
+func candidateOf(target semver.Version, id string, n int) semver.Version {
+	target.Pre = []string{id, strconv.Itoa(n)}
+	return target
+}
+
+// core is v without its prerelease: the release it is a candidate for.
+func core(v semver.Version) semver.Version {
+	return semver.Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch}
+}
+
+// seriesOf reads v as a series candidate — a prerelease of exactly
+// "<identifier>.<number>", the shape a prerelease run cuts (1.5.0-rc.2) — and
+// returns its identifier and number. Any other prerelease ("1.5.0-beta",
+// "1.5.0-alpine", "2.0.0-rc.1.amd64") is not a series stevedore can continue
+// or promote, and is left alone.
+func seriesOf(v semver.Version) (id string, n int, ok bool) {
+	if len(v.Pre) != 2 || !config.ValidPrereleaseID(v.Pre[0]) {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(v.Pre[1])
+	if err != nil || n < 0 || strings.TrimLeft(v.Pre[1], "0123456789") != "" {
+		return "", 0, false
+	}
+	return v.Pre[0], n, true
 }
 
 // Rules is the type → level mapping bump: auto applies: the Conventional
@@ -299,6 +523,25 @@ func parseRelease(s string) (semver.Version, bool) {
 		return semver.Version{}, false
 	}
 	return v, true
+}
+
+// highestSeries returns the greatest series candidate (see seriesOf) among
+// tags that sorts above release (any, when found is false), or nil.
+func highestSeries(tags []string, release semver.Version, found bool) *semver.Version {
+	var best *semver.Version
+	for _, t := range tags {
+		v, ok := semver.Parse(strings.TrimSpace(t))
+		if !ok {
+			continue
+		}
+		if _, _, isSeries := seriesOf(v); !isSeries || (found && v.Compare(release) <= 0) {
+			continue
+		}
+		if best == nil || v.Compare(*best) > 0 {
+			best = &v
+		}
+	}
+	return best
 }
 
 // highestRelease returns the greatest release version among tags.

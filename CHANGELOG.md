@@ -31,6 +31,17 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
   `on_no_changes` applies per image, and `check`/`plan` show each image's
   version and deciding commit. A unified `versioning.repo` keeps the
   repository-wide range. (#157)
+- `versioning.prerelease: rc`, or `--prerelease rc` on `release`, `plan`,
+  `check`, `merge` and `publish`, cuts release candidates under `bump: auto`:
+  `1.5.0-rc.1`, then `1.5.0-rc.2` while the target holds, restarting at
+  `2.0.0-rc.1` if a breaking change arrives mid-series; a run without it
+  (`--prerelease=` when the config sets one) promotes the series to `1.5.0`,
+  from the candidate's own commit when HEAD carries its tag. The `registry` and
+  `ecr` strategies accept it with a fixed bump too. Candidates stay off
+  floating tags, as every prerelease does. (#158)
+- `versioning.pre_major: minor` keeps a `0.x` project on `0.x` under
+  `bump: auto`: a breaking change bumps the minor and a `feat` the patch.
+  The default, `major`, is strict semver. (#158)
 
 ### Changed
 

@@ -14,10 +14,11 @@ import (
 
 func newPlanCmd() *cobra.Command {
 	var (
-		onlyChanged    bool
-		changedSince   string
-		snapshot       bool
-		splitPlatforms bool
+		onlyChanged     bool
+		changedSince    string
+		snapshot        bool
+		splitPlatforms  bool
+		applyPrerelease func(*pipeline.Options)
 	)
 	cmd := &cobra.Command{
 		Use:   "plan",
@@ -39,6 +40,7 @@ func newPlanCmd() *cobra.Command {
 			o.ChangedSince = changedSince
 			o.Snapshot = snapshot
 			o.SplitPerPlatform = splitPlatforms
+			applyPrerelease(&o)
 			result, err := pipeline.Plan(o)
 			if err != nil {
 				return err
@@ -65,5 +67,6 @@ func newPlanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&snapshot, "snapshot", false, "plan a snapshot release (affects floating tags and versioning)")
 	cmd.Flags().
 		BoolVar(&splitPlatforms, "split-platforms", false, "emit one matrix entry per build group per platform, with native runner hints (pair with release --split and merge)")
+	applyPrerelease = prereleaseFlag(cmd)
 	return cmd
 }
