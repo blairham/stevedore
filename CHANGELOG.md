@@ -12,6 +12,8 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-01
+
 ### Added
 
 - `versioning.bump: auto` derives the next version from the Conventional
