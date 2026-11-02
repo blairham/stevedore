@@ -12,6 +12,13 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ## [Unreleased]
 
+### Fixed
+
+- `merge` no longer refuses to start when an image's env-backed build secret
+  is unset. It builds nothing, and each split leg already checked its own
+  secrets, so since v1.1.0 a split release whose merge job does not carry the
+  build's secrets failed at the merge after both legs had built and pushed.
+
 ## [1.2.0] - 2026-11-01
 
 ### Added

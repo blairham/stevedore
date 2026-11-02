@@ -1137,7 +1137,9 @@ func preflightRelease(o Options, p *Prepared) error {
 	if o.DryRun {
 		return nil
 	}
-	if !o.Snapshot {
+	// A merge builds nothing (each split leg checked its own build secrets),
+	// so a build secret its job never sets is not a reason to refuse it.
+	if !o.Snapshot && !o.FromDigests {
 		if err := checkSecrets(p.Plans); err != nil {
 			return err
 		}

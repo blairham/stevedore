@@ -57,8 +57,8 @@ images:
       - id: github_token  # whose variable is unset or empty is SKIPPED in a
         env: GITHUB_TOKEN # --snapshot build, so local builds work without it;
         # optional: true  # a real release REFUSES to start without it, unless
-      # - id: npmrc        # the secret is marked optional.
-      #   file: ./.npmrc
+      # - id: npmrc        # the secret is marked optional. A split build's
+      #   file: ./.npmrc   # merge builds nothing and does not check it.
     cache_from:           # buildx --cache-from sources, instead of the top-level
       # cache for this image; empty-rendering entries are skipped, so an
       # env-templated value enables caching only where the environment
