@@ -144,6 +144,13 @@ func TestReleasePreflightRefusesBeforePushing(t *testing.T) {
 		t.Errorf("the docker fake never ran, so the no-build check above proves nothing:\n%s", calls)
 	}
 
+	// A merge builds nothing, so its job never sets a build secret: it gets
+	// past the secret check and stops at the next one, gh auth.
+	t.Setenv("PREFLIGHT_NPM_TOKEN", "")
+	if err := Merge(o); err == nil || !strings.Contains(err.Error(), "gh is not authenticated") {
+		t.Fatalf("merge with an unset build secret: err = %v, want the gh auth refusal", err)
+	}
+
 	// A snapshot never publishes and may build without the secret.
 	t.Setenv("PREFLIGHT_NPM_TOKEN", "")
 	o.Snapshot, o.DryRun = true, true
