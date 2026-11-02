@@ -107,7 +107,7 @@ jobs:
           "$GRYPE_CMD" version
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -170,7 +170,7 @@ jobs:
       # sign with the workflow's OIDC identity — see `signs` in .goreleaser.yaml.
       id-token: write
       attestations: write # store the provenance in the repository's attestations
-    uses: blairham/.github/.github/workflows/go-release.yml@9711060ad4860f35860bcbf90d90f103617082d2 # v0.0.1
+    uses: blairham/.github/.github/workflows/go-release.yml@2a975269ebbb74aa0b4ec96f45773d7d68cc7bcc # v0.0.3
     with:
       tag: ${{ inputs.tag }}
       snapshot: ${{ inputs.dry-run == true }}
