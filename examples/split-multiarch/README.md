@@ -36,7 +36,7 @@ Cross-compiling inside the Dockerfile removes QEMU from the hot path with zero
 workflow changes and no fan-out:
 
 ```dockerfile
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/app .
 ```
