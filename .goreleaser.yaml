@@ -1,5 +1,5 @@
 # GoReleaser builds and publishes the stevedore CLI binary and its Homebrew
-# cask. (stevedore itself releases the container image — see .stevedore.yaml.)
+# formula. (stevedore itself releases the container image — see .stevedore.yaml.)
 version: 2
 
 project_name: stevedore
@@ -54,32 +54,37 @@ signs:
       - "--yes"
     artifacts: checksum
 
-# A formula, not a cask. stevedore is a CLI binary with no bundle, no installer
-# and no service; `brew test` is worth keeping, and formulae work on Homebrew
-# for Linux exactly as they do on macOS.
+# A formula, not a cask: stevedore is a CLI binary with no bundle, no
+# installer and no service; `brew test` is worth keeping, and formulae work on
+# Homebrew for Linux exactly as they do on macOS.
 #
-# GoReleaser marks `brews` deprecated in favor of `homebrew_casks`, on the
-# grounds that formulae installing pre-compiled binaries are "hackyish" and
-# were only needed because Linuxbrew could not handle casks. There is no
-# announced removal date, and the Linuxbrew limitation is not our reason for
-# using them.
+# The formula builds from the source archive below (`brew install -s`) and
+# pours bottles made from the release's darwin and linux stevedore binaries,
+# the way homebrew-core ships a CLI, rather than a formula that only downloads
+# a prebuilt archive (the "hackyish" shape GoReleaser deprecated `brews` over).
+# homebrew_bottles comes from blairham/goreleaser
+# (goreleaser/goreleaser#7342), which release.yml selects with goreleaser-ref;
+# official GoReleaser rejects this key.
 #
 # Note there is no quarantine hook here: casks flag their downloads with
 # com.apple.quarantine and need it stripped, formulae do not.
-brews:
+homebrew_bottles:
   - name: stevedore
+    ids:
+      - stevedore
     repository:
       owner: blairham
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
     homepage: "https://github.com/blairham/stevedore"
     description: "Release Docker/OCI images the way goreleaser releases binaries"
     license: "Apache-2.0"
-    install: |
-      bin.install "stevedore"
     test: |
       system "#{bin}/stevedore", "--version"
+
+# The tarball the formula's `url` points at, for building from source.
+source:
+  enabled: true
 
 notarize:
   macos:

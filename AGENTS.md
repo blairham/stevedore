@@ -140,7 +140,10 @@ drives the fan-out.
 Two tools, one per artifact kind: **stevedore** releases its own container image
 (dogfooding, `.stevedore.yaml`), and **GoReleaser** (`.goreleaser.yaml`)
 publishes the CLI binary + Homebrew formula + GitHub release. See
-`.github/workflows/release.yml`.
+`.github/workflows/release.yml`. The formula is a source build plus bottles
+of the release binaries (`homebrew_bottles`, from blairham/goreleaser, which
+`release.yml` selects with `goreleaser-ref`; official GoReleaser rejects that
+key).
 
 The GitHub release's notes are the tag's section of `CHANGELOG.md`, passed to
 GoReleaser as `--release-notes` by blairham/.github's shared `go-release.yml`,
