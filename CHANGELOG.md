@@ -12,6 +12,13 @@ Releases up to and including v1.0.6 predate this file; their notes are on the
 
 ## [Unreleased]
 
+### Changed
+
+- The Homebrew formula in blairham/homebrew-tap is now a source build with
+  bottles: `brew install blairham/tap/stevedore` still pours a prebuilt
+  binary, and `brew install --build-from-source` really builds stevedore from
+  the release's source archive.
+
 ## [1.2.1] - 2026-11-02
 
 ### Fixed
